@@ -15,11 +15,25 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    const vk_dep = b.dependency("vulkan_zig", .{
+        .registry = @as([]const u8, b.pathFromRoot("vendor/vk.xml")),
+    });
+    const glfw_dep = b.dependency("mach_glfw", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const vk_bindings = vk_dep.module("vulkan-zig");
+    const glfw_module = glfw_dep.module("mach-glfw");
+
     const yume = b.addModule("yume", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
+
+    yume.addImport("vulkan", vk_bindings);
+    yume.addImport("glfw", glfw_module);
 
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when
