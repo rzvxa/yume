@@ -3,7 +3,9 @@ const yume = @import("yume");
 const GameApp = yume.GameApp;
 
 pub fn main() !void {
-    var app = try GameApp.new();
+    var app = try GameApp.create();
+    defer app.destroy();
+
     try app.run();
-    std.debug.print("Ok", .{});
+    std.debug.print("Bye!", .{});
 }
