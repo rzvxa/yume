@@ -5,10 +5,12 @@ const glfw = @import("glfw");
 const ecs = @import("ecs.zig");
 
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 
 pub const GameApp = @This();
 
 // fields
+arena: ArenaAllocator,
 window: glfw.Window = undefined,
 registry: ecs.Registry = undefined,
 // end of fields
@@ -31,11 +33,12 @@ pub inline fn create() StartupError!GameApp {
         return StartupError.WindowCreation;
     };
 
-    var registry = ecs.Registry.init() catch return StartupError.RegistryInit;
+    var arena = ArenaAllocator.init(std.heap.page_allocator);
+    var registry = ecs.Registry.init(arena.allocator()) catch return StartupError.RegistryInit;
     const entity = registry.newEntity();
     registry.addComponent(entity, .{ .x = 123, .y = 456 }) catch unreachable;
 
-    return .{ .window = window, .registry = registry };
+    return .{ .arena = arena, .window = window, .registry = registry };
 }
 
 pub inline fn destroy(self: GameApp) void {

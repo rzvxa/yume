@@ -4,8 +4,9 @@
 /// Thanks to both of you guys!
 ///
 ///
-typeid: usize,
+raw: usize,
 
+const std = @import("std");
 const TypeId = @This();
 
 pub fn new(comptime T: type) TypeId {
@@ -13,5 +14,13 @@ pub fn new(comptime T: type) TypeId {
     const H = struct {
         var byte: u8 = 0;
     };
-    return .{ .typeid = @intFromPtr(&H.byte) };
+    return .{ .raw = @intFromPtr(&H.byte) };
+}
+
+pub fn sort(_: void, a: TypeId, b: TypeId) bool {
+    return a.raw < b.raw;
+}
+
+pub fn eql(self: TypeId, other: TypeId) bool {
+    return self.raw == other.raw;
 }
