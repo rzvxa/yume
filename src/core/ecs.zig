@@ -2,6 +2,7 @@ const std = @import("std");
 const ArenaAllocator = std.heap.ArenaAllocator;
 const Allocator = std.mem.Allocator;
 
+const TypeId = @import("TypeId.zig");
 const collections = @import("../root.zig").collections;
 const IndexMap = collections.IndexMap;
 const List = collections.List;
@@ -11,12 +12,12 @@ const Groups = IndexMap(GroupId, Group);
 
 const Shapes = std.HashMap(Shape, GroupId, ShapeHashContext, std.hash_map.default_max_load_percentage);
 
-// Don't initialize or modify it manually.
+/// Don't initialize or modify it manually.
 pub const Entity = struct {
     index: u32,
     group: GroupId,
 
-    // Does this entity have any components?
+    /// Does this entity have any components?
     pub inline fn isEmpty(self: Entity) bool {
         return self.group.index == 0;
     }
@@ -27,17 +28,22 @@ pub const Entity = struct {
     }
 };
 
-// Don't initialize or modify it manually.
+/// Don't initialize or modify it manually.
 pub const GroupId = struct {
     index: u32,
 };
 
-// Don't initialize or modify it manually.
+/// Don't initialize or modify it manually.
 pub const Group = struct {
     shape: Shape,
+    columns: []*anyopaque,
+
+    fn create(alloc: Allocator, shape: Shape) EcsError!Group {
+        return .{ .shape = shape, .columns = alloc.alloc(*anyopaque, 0) catch return EcsError.OutOfMemory };
+    }
 };
 
-// Don't initialize these manually, Only use the static methods to construct one otherwise you might endup with unsound code.
+/// Don't initialize these manually, Only use the static methods to construct one otherwise you might endup with unsound code.
 const Shape = struct {
     components: [][:0]const u8,
 
@@ -123,7 +129,7 @@ pub const Registry = struct {
         slice[comp_ix] = comp_id;
         shape.components = slice;
         const group = try self.getGroup(shape);
-        _ = group;
+        std.debug.print("{}", .{group});
     }
 
     fn getGroup(self: *Registry, shape: Shape) EcsError!*Group {
@@ -131,7 +137,7 @@ pub const Registry = struct {
             return &self.groups.items[group.index];
         } else {
             const index = @as(u32, @truncate(self.groups.items.len));
-            self.groups.append(.{ .shape = shape }) catch return EcsError.OutOfMemory;
+            self.groups.append(try Group.create(self.alloc.allocator(), shape)) catch return EcsError.OutOfMemory;
             const group_id = GroupId{ .index = index };
             try self.shapes.put(shape, group_id);
             return self.getGroup(shape);
