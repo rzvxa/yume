@@ -23,7 +23,7 @@ pub const StartupError = error{
 
 pub const RunError = error{};
 
-pub inline fn create() StartupError!GameApp {
+pub inline fn init() StartupError!GameApp {
     if (!glfw.init(.{})) {
         std.log.err("failed to initialize GLFW: {?s}", .{glfw.getErrorString()});
         return StartupError.GLFWInit;
@@ -36,12 +36,12 @@ pub inline fn create() StartupError!GameApp {
     var arena = ArenaAllocator.init(std.heap.page_allocator);
     var registry = ecs.Registry.init(arena.allocator()) catch return StartupError.RegistryInit;
     const entity = registry.newEntity();
-    registry.addComponent(entity, .{ .x = 123, .y = 456 }) catch unreachable;
+    registry.addComponent(entity, struct { x: f32, y: f32 }, .{ .x = 123, .y = 456 }) catch unreachable;
 
     return .{ .arena = arena, .window = window, .registry = registry };
 }
 
-pub inline fn destroy(self: GameApp) void {
+pub inline fn deinit(self: GameApp) void {
     self.window.destroy();
     self.registry.deinit();
 }
