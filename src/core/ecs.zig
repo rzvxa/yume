@@ -44,6 +44,7 @@ pub const Column = struct {
     vtable: struct {
         deinit: *const fn (self: *Column) void,
         cloneEmpty: *const fn (self: *const Column) EcsError!Column,
+        move: *const fn (from: *Column, to: *Column, row: RowIndex) EcsError!void,
     },
 
     fn init(allocator: Allocator, comptime T: type) EcsError!Column {
@@ -65,6 +66,15 @@ pub const Column = struct {
                         return Column.init(self.allocator, T);
                     }
                 }).cloneEmpty,
+                .move = &(struct {
+                    fn move(from: *Column, to: *Column, row: RowIndex) EcsError!void {
+                        const from_list = try from.asList(T);
+                        const to_list = try to.asList(T);
+                        const field = from_list.items[row];
+                        to_list.append(field) catch return EcsError.OutOfMemory;
+                        from_list.items[row] = undefined;
+                    }
+                }).move,
             },
         };
     }
@@ -75,6 +85,10 @@ pub const Column = struct {
 
     inline fn cloneEmpty(self: *const Column) EcsError!Column {
         return self.vtable.cloneEmpty(self);
+    }
+
+    inline fn move(from: *Column, to: *Column, row: RowIndex) EcsError!void {
+        return from.vtable.move(from, to, row);
     }
 
     fn asList(self: *Column, comptime T: type) EcsError!*List(T) {
@@ -99,57 +113,88 @@ pub const Table = struct {
         };
     }
 
-    fn cloneTableShapeWithExtraColumn(self: *Table, comptime T: type) EcsError!Table {
+    fn cloneTableShapeWithExtraColumn(self: *const Table, comptime T: type) EcsError!struct {
+        table: Table,
+        match_indexed: []?u32,
+    } {
         const type_id = TypeId.new(T);
 
         var shape = try self.shape.clone();
         shape.components.append(type_id) catch return EcsError.OutOfMemory;
         std.mem.sort(TypeId, shape.components.items, {}, TypeId.sort);
-        // TODO: sort columns
-        const columns = self.allocator.alloc(Column, self.columns.len + 1) catch return EcsError.OutOfMemory;
-        for (self.columns, 0..) |col, i| {
-            columns[i] = try col.cloneEmpty();
+        const match_indexed = try self.matchIndexed(&shape);
+
+        const columns = self.allocator.alloc(Column, shape.components.items.len) catch return EcsError.OutOfMemory;
+        for (match_indexed, 0..) |match, col| {
+            if (match) |other| {
+                columns[col] = try self.columns[other].cloneEmpty();
+            } else {
+                columns[col] = try Column.init(self.allocator, T);
+            }
         }
-        columns[self.columns.len] = try Column.init(self.allocator, T);
 
         return .{
-            .allocator = self.allocator,
-            .shape = shape,
-            .columns = columns,
-            .unused_rows = List(RowIndex).init(self.allocator),
+            .table = .{
+                .allocator = self.allocator,
+                .shape = shape,
+                .columns = columns,
+                .unused_rows = List(RowIndex).init(self.allocator),
+            },
+            .match_indexed = match_indexed,
         };
     }
 
-    fn deinit(self: Table, allocator: Allocator) void {
+    fn deinit(self: Table) void {
         for (self.columns) |col| {
             col.deinit();
         }
-        allocator.free(self.columns);
+        self.allocator.free(self.columns);
         self.unused_rows.deinit();
     }
 
-    fn addRow(self: *Table, fields: []anyopaque) EcsError!RowIndex {
-        if (self.columns.items.len != fields.len) {
-            return EcsError.InvalidShape;
+    /// allocates an slice using the allocator of this table
+    /// caller is the owner of slice
+    fn matchIndexed(self: *const Table, shape: *const Shape) EcsError![]?u32 {
+        var result = self.allocator.alloc(?u32, shape.components.items.len) catch return EcsError.OutOfMemory;
+        for (shape.components.items, 0..) |needle, i| {
+            result[i] = null;
+            for (self.shape.components.items, 0..) |it, column_ix| {
+                if (it.eql(needle)) {
+                    result[i] = @as(u32, @truncate(column_ix));
+                    break;
+                }
+            }
         }
-        if (self.columns.items.len == 0) {
-            return 0;
-        }
-        for (self.columns.items, fields) |column, field| {
-            column.append(field);
-        }
-        return @as(u32, @truncate(self.columns[0].items.len));
+        return result;
     }
 
-    fn removeRow(self: *Table, row: RowIndex) ?[]anyopaque {
-        if (self.columns.items.len == 0) {
-            return null;
-        }
+    // fn addRow(self: *Table, fields: []anyopaque) EcsError!RowIndex {
+    //     if (self.columns.items.len != fields.len) {
+    //         return EcsError.InvalidShape;
+    //     }
+    //     if (self.columns.items.len == 0) {
+    //         return 0;
+    //     }
+    //     for (self.columns.items, fields) |column, field| {
+    //         column.append(field);
+    //     }
+    //     return @as(u32, @truncate(self.columns[0].items.len));
+    // }
 
-        _ = row;
-        // TODO
-        return null;
-        // if (self.columns[0].init)
+    // Moves fields at the `row` from the `from` table to the `to` leaving behind `undefined` in their place.
+    fn moveRow(from: *Table, to: *Table, row: RowIndex, skip_unpresent_columns: bool, match_indexed: ?[]?u32) EcsError!void {
+        const ensured_match_indexed = match_indexed orelse try from.matchIndexed(&to.shape);
+        defer if (match_indexed) |_| {
+            from.allocator.free(ensured_match_indexed);
+        };
+
+        for (ensured_match_indexed, 0..) |match, col| {
+            if (match) |mapping| {
+                try from.columns[mapping].move(&to.columns[col], row);
+            } else if (!skip_unpresent_columns) {
+                return EcsError.InvalidShape;
+            }
+        }
     }
 };
 
@@ -200,7 +245,6 @@ const ShapeHashContext = struct {
 pub const Registry = struct {
     allocator: Allocator,
     entities: Entities,
-    // TODO: don't allow it to use the `maxInt(u32)` index.
     tables: Tables,
     shapes: Shapes,
 
@@ -226,8 +270,7 @@ pub const Registry = struct {
         return .{ .index = 0, .table = .{ .index = 0 } };
     }
 
-    pub fn addComponent(self: *Registry, entity: Entity, comptime TComponent: type, component: TComponent) EcsError!void {
-        _ = component;
+    pub fn addComponent(self: *Registry, entity: *Entity, comptime TComponent: type, component: TComponent) EcsError!void {
         const comp_id = TypeId.new(TComponent);
 
         const old_shape = entity.shape(self);
@@ -238,27 +281,45 @@ pub const Registry = struct {
         }
 
         var new_shape = try old_shape.clone();
+        defer new_shape.deinit();
         new_shape.components.append(comp_id) catch return EcsError.OutOfMemory;
-        const old_table = &self.tables.items[entity.table.index];
-        const new_table = self.getTable(new_shape) orelse try self.newTable(old_table, TComponent);
-        std.debug.print("old_len: {}; new_len: {}", .{ old_table.shape.components.items.len, new_table.shape.components.items.len });
-    }
+        var new_table_id: TableId = undefined;
+        var maybe_match_indexed: ?[]?u32 = null;
 
-    fn getTable(self: *Registry, shape: Shape) ?*Table {
-        if (self.shapes.get(shape)) |table| {
-            // if table already exists we don't need our input shape anymore.
-            shape.deinit();
-            return &self.tables.items[table.index];
+        if (self.shapes.get(new_shape)) |id| {
+            new_table_id = id;
         } else {
-            return null;
+            const result = try self.newTable(entity.table, TComponent);
+            new_table_id = result.id;
+            maybe_match_indexed = result.match_indexed;
+        }
+        const new_table = self.getTable(new_table_id);
+        const old_table = self.getTable(entity.table);
+        const match_indexed = maybe_match_indexed orelse try old_table.matchIndexed(&new_table.shape);
+        defer self.allocator.free(match_indexed);
+        try Table.moveRow(old_table, new_table, entity.index, true, match_indexed);
+        for (match_indexed, 0..) |match, col| {
+            if (match == null) {
+                (try new_table.columns[col].asList(TComponent)).append(component) catch return EcsError.OutOfMemory;
+            }
         }
     }
 
+    pub fn view(self: *Registry, comptime query: anytype) View(query) {
+        return View(query){
+            .registry = self,
+        };
+    }
+
+    fn getTable(self: *Registry, table_id: TableId) *Table {
+        return &self.tables.items[table_id.index];
+    }
+
     /// Create and append a new table based on the `base` table's shape, With the addition of `new_column`
-    fn newTable(self: *Registry, base: *Table, comptime new_column: type) EcsError!*Table {
-        const table = try base.cloneTableShapeWithExtraColumn(new_column);
-        const index = (try self.addTable(table)).index;
-        return &self.tables.items[index];
+    fn newTable(self: *Registry, base: TableId, comptime new_column: type) EcsError!struct { id: TableId, match_indexed: []?u32 } {
+        const result = try self.getTable(base).cloneTableShapeWithExtraColumn(new_column);
+        const table_id = try self.addTable(result.table);
+        return .{ .id = table_id, .match_indexed = result.match_indexed };
     }
 
     fn addTable(self: *Registry, table: Table) EcsError!TableId {
@@ -275,4 +336,27 @@ pub const Registry = struct {
     }
 };
 
-pub const EcsError = error{ DuplicateComponent, InvalidShape, InvalidComponent, OutOfMemory };
+fn View(comptime query: anytype) type {
+    _ = query;
+    const fields: [1]std.builtin.Type.StructField = .{.{
+        .name = "registry",
+        .type = *Registry,
+        .default_value = null,
+        .is_comptime = false,
+        .alignment = @alignOf(*Registry),
+    }};
+    return @Type(.{ .Struct = .{
+        .layout = .auto,
+        .fields = &fields,
+        .decls = &.{},
+        .is_tuple = false,
+    } });
+}
+
+pub const EcsError = error{
+    DuplicateComponent,
+    InvalidShape,
+    InvalidEntity,
+    InvalidComponent,
+    OutOfMemory,
+};

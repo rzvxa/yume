@@ -35,8 +35,13 @@ pub inline fn init() StartupError!GameApp {
 
     var arena = ArenaAllocator.init(std.heap.page_allocator);
     var registry = ecs.Registry.init(arena.allocator()) catch return StartupError.RegistryInit;
-    const entity = registry.newEntity();
-    registry.addComponent(entity, struct { x: f32, y: f32 }, .{ .x = 123, .y = 456 }) catch unreachable;
+    var entity = registry.newEntity();
+    const Position = struct { x: f32, y: f32 };
+    const Velocity = struct { x: f32, y: f32 };
+    registry.addComponent(&entity, Position, .{ .x = 123, .y = 456 }) catch unreachable;
+    registry.addComponent(&entity, Velocity, .{ .x = 1, .y = 1 }) catch unreachable;
+    const view: struct { pos: Position, vec: Velocity } = registry.view(.{ .pos = Position, .vel = Velocity }).next();
+    std.debug.print("{}\n", view);
 
     return .{ .arena = arena, .window = window, .registry = registry };
 }
