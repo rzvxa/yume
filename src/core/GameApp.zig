@@ -2,7 +2,7 @@ const std = @import("std");
 const vk = @import("vulkan");
 const glfw = @import("glfw");
 
-const ecs = @import("ecs.zig");
+const ecs = @import("zig-ecs");
 
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
@@ -34,24 +34,17 @@ pub inline fn init() StartupError!GameApp {
     };
 
     var arena = ArenaAllocator.init(std.heap.page_allocator);
-    var registry = ecs.Registry.init(arena.allocator()) catch return StartupError.RegistryInit;
-    var entity = registry.newEntity();
-    const Position = struct { x: f32, y: f32 };
-    const Velocity = struct { x: f32, y: f32 };
-    registry.addComponent(&entity, Position, .{ .x = 123, .y = 456 }) catch unreachable;
-    registry.addComponent(&entity, Velocity, .{ .x = 1, .y = 1 }) catch unreachable;
-    const view: struct { pos: Position, vec: Velocity } = registry.view(.{ .pos = Position, .vel = Velocity }).next();
-    std.debug.print("{}\n", view);
+    const registry = ecs.Registry.init(arena.allocator());
 
     return .{ .arena = arena, .window = window, .registry = registry };
 }
 
-pub inline fn deinit(self: GameApp) void {
+pub inline fn deinit(self: *GameApp) void {
     self.window.destroy();
     self.registry.deinit();
 }
 
-pub inline fn run(self: GameApp) RunError!void {
+pub inline fn run(self: *GameApp) RunError!void {
     var now = std.time.milliTimestamp();
     while (!self.window.shouldClose()) {
         glfw.pollEvents();
@@ -61,6 +54,7 @@ pub inline fn run(self: GameApp) RunError!void {
             now = new_time;
             break :dt delta;
         };
+
         _ = delta_time;
     }
 }
