@@ -32,7 +32,7 @@ pub fn build(b: *std.Build) void {
     const glfw_module = glfw_dep.module("mach-glfw");
 
     const yume = b.addModule("yume", .{
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("engine/root.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -45,6 +45,16 @@ pub fn build(b: *std.Build) void {
     // location when the user invokes the "install" step (the default step when
     // running `zig build`).
     // b.installArtifact(lib);
+
+    const editor = b.addExecutable(.{
+        .name = "editor",
+        .root_source_file = b.path("editor/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    editor.root_module.addImport("yume", yume);
+
+    b.installArtifact(editor);
 
     const sandbox = b.addExecutable(.{
         .name = "sandbox",
@@ -62,16 +72,27 @@ pub fn build(b: *std.Build) void {
     // This *creates* a Run step in the build graph, to be executed when another
     // step is evaluated that depends on it. The next line below will establish
     // such a dependency.
+    const editor_cmd = b.addRunArtifact(editor);
     const sandbox_cmd = b.addRunArtifact(sandbox);
 
     // By making the run step depend on the install step, it will be run from the
     // installation directory rather than directly from within the cache directory.
     // This is not necessary, however, if the application depends on other installed
     // files, this ensures they will be present and in the expected location.
+    editor_cmd.step.dependOn(b.getInstallStep());
     sandbox_cmd.step.dependOn(b.getInstallStep());
 
     // This allows the user to pass arguments to the application in the build
     // command itself, like this: `zig build run -- arg1 arg2 etc`
+    if (b.args) |args| {
+        for (args) |arg| {
+            if (std.mem.eql(u8, arg, "--debug")) {
+                editor_cmd.setEnvironmentVariable("VK_INSTANCE_LAYERS", "VK_LAYER_LUNARG_monitor:VK_LAYER_KHRONOS_validation");
+            }
+            editor_cmd.addArg(arg);
+        }
+    }
+
     if (b.args) |args| {
         sandbox_cmd.addArgs(args);
     }
@@ -79,13 +100,16 @@ pub fn build(b: *std.Build) void {
     // This creates a build step. It will be visible in the `zig build --help` menu,
     // and can be selected like this: `zig build run`
     // This will evaluate the `run` step rather than the default, which is "install".
+    const editor_step = b.step("editor", "run editor");
+    editor_step.dependOn(&editor_cmd.step);
+
     const sandbox_step = b.step("sandbox", "run sandbox example");
     sandbox_step.dependOn(&sandbox_cmd.step);
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("engine/root.zig"),
         .target = target,
         .optimize = optimize,
     });

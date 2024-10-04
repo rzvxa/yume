@@ -52,8 +52,8 @@
         //    .lazy = false,
         //},
         .vulkan_zig = .{
-            .url = "https://github.com/Snektron/vulkan-zig/archive/06dae6c9201863837a92064e2e7814aa71064067.tar.gz",
-            .hash = "1220edeb3fc7dfc40e6fde705a108edce0a3cc76d165a7c9919d1fb037eccec43372",
+            .url = "https://github.com/Snektron/vulkan-zig/archive/66b7b773bb61e2102025f2d5ff0ae8c5f53e19cc.tar.gz",
+            .hash = "12208958f173b8b81bfac797955f0416ab38b21d1f69d4ebf6c7ca460a828a41cd45",
         },
         .zig_ecs = .{
             .url = "https://github.com/prime31/zig-ecs/archive/d3ae70ef6185b2e0269d62a57608bfce2567c102.tar.gz",
