@@ -22,6 +22,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const ziglm_dep = b.dependency("ziglm", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const glfw_dep = b.dependency("mach_glfw", .{
         .target = target,
         .optimize = optimize,
@@ -29,6 +33,7 @@ pub fn build(b: *std.Build) void {
 
     const vk_bindings = vk_dep.module("vulkan-zig");
     const zig_ecs_module = zig_ecs_dep.module("zig-ecs");
+    const ziglm_module = ziglm_dep.module("ziglm");
     const glfw_module = glfw_dep.module("mach-glfw");
 
     const yume = b.addModule("yume", .{
@@ -39,6 +44,7 @@ pub fn build(b: *std.Build) void {
 
     yume.addImport("vulkan", vk_bindings);
     yume.addImport("zig-ecs", zig_ecs_module);
+    yume.addImport("ziglm", ziglm_module);
     yume.addImport("glfw", glfw_module);
 
     // This declares intent for the library to be installed into the standard

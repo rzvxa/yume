@@ -1,6 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const frame = @import("frame.zig");
+pub const GlobalUbo = frame.GlobalUbo;
+
 pub const RenderBackendApi = enum { vulkan };
 pub const RenderBackend = struct {
     api: RenderBackendApi,
@@ -23,6 +26,14 @@ pub fn DescriptorPool(comptime backend: RenderBackend) type {
     }
 }
 
+pub fn GraphicBuffer(comptime backend: RenderBackend) type {
+    switch (backend.api) {
+        .vulkan => {
+            return @import("vulkan/VulkanBuffer.zig");
+        },
+    }
+}
+
 pub fn initDefaultDescriptorPool(comptime backend: RenderBackend, device: *Device(backend), allocator: Allocator) !DescriptorPool(backend) {
     return switch (backend.api) {
         .vulkan => {
@@ -37,3 +48,10 @@ pub fn initDefaultDescriptorPool(comptime backend: RenderBackend, device: *Devic
         },
     };
 }
+
+pub const DSize = u64;
+
+// TODO: abstract these
+const vk = @import("vulkan");
+pub const MemoryPropertyFlags = vk.MemoryPropertyFlags;
+pub const BufferUsageFlags = vk.BufferUsageFlags;

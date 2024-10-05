@@ -13,7 +13,8 @@ const backend = .{ .api = .vulkan, .max_frames_in_flight = 2 };
 const Window = @import("../window/window.zig").Window(backend);
 const RenderDevice = rendering.Device(backend);
 const DescriptorPool = rendering.DescriptorPool(backend);
-const VulkanSwapChain = @import("../rendering/vulkan/VulkanSwapChain.zig");
+const GraphicBuffer = rendering.GraphicBuffer(backend);
+const GlobalUbo = rendering.GlobalUbo;
 
 pub const GameApp = @This();
 
@@ -36,7 +37,9 @@ pub const StartupError = error{
     DescriptorPoolCreation,
 };
 
-pub const RunError = error{};
+pub const RunError = error{
+    FailedToInitializeGlobalUbos,
+};
 
 pub inline fn init(title: [*:0]const u8) StartupError!GameApp {
     var arena = ArenaAllocator.init(std.heap.page_allocator);
@@ -69,7 +72,23 @@ pub inline fn deinit(self: *GameApp) void {
 }
 
 pub inline fn run(self: *GameApp) RunError!void {
-    // const ubo_buffers: [] =
+    var ubo_buffers: [backend.max_frames_in_flight]GraphicBuffer = undefined;
+    defer {
+        for (0..ubo_buffers.len) |i| {
+            ubo_buffers[i].deinit();
+        }
+    }
+    for (0..ubo_buffers.len) |i| {
+        ubo_buffers[i] = GraphicBuffer.init(
+            &self.device,
+            @sizeOf(GlobalUbo),
+            1,
+            .{ .uniform_buffer_bit = true },
+            .{ .host_visible_bit = true },
+            1,
+        ) catch return error.FailedToInitializeGlobalUbos;
+        ubo_buffers[i].map(.{}) catch return error.FailedToInitializeGlobalUbos;
+    }
     var now = std.time.milliTimestamp();
     while (!self.window.shouldClose()) {
         glfw.pollEvents();

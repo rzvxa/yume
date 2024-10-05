@@ -1,6 +1,11 @@
 const std = @import("std");
 const vk = @import("vulkan");
 
+const rendering = @import("../mod.zig");
+const DSize = rendering.DSize;
+const BufferUsageFlags = rendering.BufferUsageFlags;
+const MemoryPropertyFlags = rendering.MemoryPropertyFlags;
+
 const debugAssert = @import("../../assert.zig").debugAssert;
 const VulkanDevice = @import("VulkanDevice.zig");
 
@@ -10,20 +15,20 @@ mapped: ?*anyopaque = null,
 buffer: vk.Buffer,
 memory: vk.DeviceMemory,
 
-buffer_size: vk.DeviceSize,
+buffer_size: DSize,
 instance_count: u32,
-instance_size: vk.DeviceSize,
-alignment_size: vk.DeviceSize,
-usage_flags: vk.BufferUsageFlags,
-memory_property_flags: vk.MemoryPropertyFlags,
+instance_size: DSize,
+alignment_size: DSize,
+usage_flags: BufferUsageFlags,
+memory_property_flags: MemoryPropertyFlags,
 
 pub fn init(
-    device: VulkanDevice,
-    instance_size: vk.DeviceSize,
+    device: *VulkanDevice,
+    instance_size: DSize,
     instance_count: u32,
-    usage_flags: vk.BufferUsageFlags,
-    memory_property_flags: vk.MemoryPropertyFlags,
-    min_offset_alignment: vk.DeviceSize,
+    usage_flags: BufferUsageFlags,
+    memory_property_flags: MemoryPropertyFlags,
+    min_offset_alignment: DSize,
 ) !Self {
     const alignment_size = getAlignment(instance_size, min_offset_alignment);
     const buffer_size = alignment_size * instance_count;
@@ -44,18 +49,18 @@ pub fn init(
 
 pub fn deinit(self: *Self) void {
     self.unmap();
-    self.device.destroyBuffer(self.buffer, null);
-    self.device.freeMemory(self.memory, null);
+    self.device.device.destroyBuffer(self.buffer, null);
+    self.device.device.freeMemory(self.memory, null);
 }
 
 /// Map a m_memory range of this buffer. If successful, m_mapped points to the specified buffer range.
 ///
-/// @param[in] size Size of the m_memory range to map. Pass VK_WHOLE_SIZE to map the complete
+/// @param[in] options.size (Optional) Size of the m_memory range to map. Pass VK_WHOLE_SIZE to map the complete
 /// buffer range.
-/// @param[in] offset Byte offset from beginning
-pub fn map(self: *Self, size: vk.DeviceSize, offset: vk.DeviceSize) !void {
-    debugAssert(self.buffer != null and self.memory != null, "Called map on buffer before initialization.");
-    self.mapped = try self.device.mapMemory(self.memory, offset, size, 0);
+/// @param[in] options.offset (Optional) Byte offset from beginning
+pub fn map(self: *Self, options: MapOptions) !void {
+    debugAssert(self.buffer != .null_handle and self.memory != .null_handle, "Called map on buffer before initialization.", .{});
+    self.mapped = try self.device.device.mapMemory(self.memory, options.offset, options.size, .{});
 }
 
 /// Unmap a m_mapped m_memory range
@@ -63,7 +68,7 @@ pub fn map(self: *Self, size: vk.DeviceSize, offset: vk.DeviceSize) !void {
 /// @note Does not return a result as vkUnmapMemory can't fail
 pub fn unmap(self: *Self) void {
     if (self.mapped != null) {
-        self.device.unmapMemory(self.memory);
+        self.device.device.unmapMemory(self.memory);
         self.mapped = null;
     }
 }
@@ -75,9 +80,14 @@ pub fn unmap(self: *Self) void {
 /// minUniformBufferOffsetAlignment)
 ///
 /// @return VkResult of the buffer mapping call
-pub fn getAlignment(instance_size: vk.DeviceSize, min_offset_alignment: vk.DeviceSize) vk.DeviceSize {
+pub fn getAlignment(instance_size: DSize, min_offset_alignment: DSize) DSize {
     if (min_offset_alignment > 0) {
         return (instance_size + min_offset_alignment - 1) & ~(min_offset_alignment - 1);
     }
     return instance_size;
 }
+
+const MapOptions = struct {
+    size: DSize = vk.WHOLE_SIZE,
+    offset: DSize = 0,
+};

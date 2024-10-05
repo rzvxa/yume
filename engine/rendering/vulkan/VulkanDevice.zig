@@ -134,20 +134,25 @@ pub fn createBuffer(
         .sharing_mode = .exclusive,
     };
 
-    const buffer = try self.device.createBuffer(buffer_info, null);
+    const buffer = try self.device.createBuffer(&buffer_info, null);
 
     const memory_requirements = self.device.getBufferMemoryRequirements(buffer);
-    const alloc_info = vk.MemoryAllocateInfo{ .allocation_size = memory_requirements.size, .memory_type_index = self.findMemoryType(memory_requirements.memory_type_bits, properties) };
+    const alloc_info = vk.MemoryAllocateInfo{
+        .allocation_size = memory_requirements.size,
+        .memory_type_index = try self.findMemoryType(memory_requirements.memory_type_bits, properties),
+    };
 
     const buffer_memory = try self.device.allocateMemory(&alloc_info, null);
-    self.device.bindBufferMemory(buffer, buffer_memory, 0);
+    try self.device.bindBufferMemory(buffer, buffer_memory, 0);
     return .{ .buf = buffer, .mem = buffer_memory };
 }
 
 fn findMemoryType(self: *Self, type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
-    const memory_properties = try self.instance.getPhysicalDeviceMemoryProperties(self.physical_device);
+    const memory_properties = self.instance.getPhysicalDeviceMemoryProperties(self.physical_device);
     for (0..memory_properties.memory_type_count) |i| {
-        if ((type_filter & (1 << i)) and (memory_properties.memory_types[i].property_flags & properties)) {
+        if ((type_filter & (@as(u32, 1) << @intCast(i))) != 0 and
+            (memory_properties.memory_types[i].property_flags.intersect(properties).toInt() != 0))
+        {
             return @as(u32, @truncate(i));
         }
     }

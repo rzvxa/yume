@@ -59,6 +59,10 @@
             .url = "https://github.com/prime31/zig-ecs/archive/d3ae70ef6185b2e0269d62a57608bfce2567c102.tar.gz",
             .hash = "1220949709178b133c4d7f6ddf87fa575a9f2e9afe545a39aafdc8c89e6abbe83412",
         },
+        .ziglm = .{
+            .url = "https://github.com/karlobratko/ziglm/archive/24e3bf3c508861bd8122ffc794bbf2ddbf17d841.tar.gz",
+            .hash = "1220d855461f71a116ee05650706fcc46c43d506b1b65afd0bbc8387778dfb8b74bb",
+        },
         .mach_glfw = .{
             .path = "vendor/mach-glfw",
         },
