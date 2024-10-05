@@ -107,6 +107,54 @@ pub fn init(allocator: Allocator, window: *VulkanWindow, comptime options: Vulka
     };
 }
 
+pub fn deinit(self: *Self) void {
+    self.device.destroyCommandPool(self.command_pool, null);
+    self.device.destroyDevice(null);
+
+    if (self.options.enable_validation_layers) {
+        // TODO: destroy debug utils messenger ext
+    }
+
+    self.instance.destroySurfaceKHR(self.surface, null);
+    self.instance.destroyInstance(null);
+}
+
+pub fn createBuffer(
+    self: *Self,
+    size: vk.DeviceSize,
+    usage: vk.BufferUsageFlags,
+    properties: vk.MemoryPropertyFlags,
+) !struct {
+    buf: vk.Buffer,
+    mem: vk.DeviceMemory,
+} {
+    const buffer_info = vk.BufferCreateInfo{
+        .size = size,
+        .usage = usage,
+        .sharing_mode = .exclusive,
+    };
+
+    const buffer = try self.device.createBuffer(buffer_info, null);
+
+    const memory_requirements = self.device.getBufferMemoryRequirements(buffer);
+    const alloc_info = vk.MemoryAllocateInfo{ .allocation_size = memory_requirements.size, .memory_type_index = self.findMemoryType(memory_requirements.memory_type_bits, properties) };
+
+    const buffer_memory = try self.device.allocateMemory(&alloc_info, null);
+    self.device.bindBufferMemory(buffer, buffer_memory, 0);
+    return .{ .buf = buffer, .mem = buffer_memory };
+}
+
+fn findMemoryType(self: *Self, type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
+    const memory_properties = try self.instance.getPhysicalDeviceMemoryProperties(self.physical_device);
+    for (0..memory_properties.memory_type_count) |i| {
+        if ((type_filter & (1 << i)) and (memory_properties.memory_types[i].property_flags & properties)) {
+            return @as(u32, @truncate(i));
+        }
+    }
+
+    return error.UnableToFindSuitableMemoryType;
+}
+
 fn createInstance(allocator: Allocator, vkb: *BaseDispatch, comptime options: VulkanDeviceOptions) !Instance {
     if (options.enable_validation_layers and !try checkValidationLayerSupport(allocator, vkb)) {
         return error.ValidationLayerUnsupported;
@@ -206,7 +254,7 @@ fn ensureGlfwRequiredInstanceExtentions(allocator: Allocator, vkb: *BaseDispatch
     for (extensions) |extension| {
         const p = std.mem.span(@as([*:0]const u8, @ptrCast(&extension.extension_name)));
         const copy = try allocator.dupe(u8, p);
-        std.debug.print("\t {s}\n", .{extension.extension_name});
+        std.debug.print("\t {s}\n", .{copy});
         try available.put(copy, {});
     }
 

@@ -6,8 +6,14 @@ const ecs = @import("zig-ecs");
 
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
-const Window = @import("../window/window.zig").Window(.Vulkan);
-const RenderDevice = @import("../rendering/device.zig").Device(.Vulkan);
+const rendering = @import("../rendering/mod.zig");
+
+const backend = .{ .api = .vulkan, .max_frames_in_flight = 2 };
+
+const Window = @import("../window/window.zig").Window(backend);
+const RenderDevice = rendering.Device(backend);
+const DescriptorPool = rendering.DescriptorPool(backend);
+const VulkanSwapChain = @import("../rendering/vulkan/VulkanSwapChain.zig");
 
 pub const GameApp = @This();
 
@@ -15,6 +21,9 @@ pub const GameApp = @This();
 arena: ArenaAllocator,
 window: Window,
 device: RenderDevice,
+
+global_pool: DescriptorPool,
+
 registry: ecs.Registry = undefined,
 // end of fields
 
@@ -24,6 +33,7 @@ pub const StartupError = error{
     WindowCreation,
     RenderDeviceInit,
     UnsupportedPlatform,
+    DescriptorPoolCreation,
 };
 
 pub const RunError = error{};
@@ -37,22 +47,29 @@ pub inline fn init(title: [*:0]const u8) StartupError!GameApp {
         error.WindowCreation => return error.WindowCreation,
         error.UnsupportedPlatform => return error.UnsupportedPlatform,
     };
-    const device = RenderDevice.init(allocator, &window, .{ .enable_validation_layers = false }) catch return error.RenderDeviceInit;
+    var device = RenderDevice.init(allocator, &window, .{ .enable_validation_layers = false }) catch return error.RenderDeviceInit;
+
+    const global_pool = rendering.initDefaultDescriptorPool(backend, &device, allocator) catch return error.DescriptorPoolCreation;
 
     return .{
         .arena = arena,
         .window = window,
         .device = device,
+
+        .global_pool = global_pool,
+
         .registry = registry,
     };
 }
 
 pub inline fn deinit(self: *GameApp) void {
     self.window.deinit();
+    self.device.deinit();
     self.registry.deinit();
 }
 
 pub inline fn run(self: *GameApp) RunError!void {
+    // const ubo_buffers: [] =
     var now = std.time.milliTimestamp();
     while (!self.window.shouldClose()) {
         glfw.pollEvents();
