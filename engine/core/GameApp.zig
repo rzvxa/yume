@@ -13,6 +13,7 @@ const backend = .{ .api = .vulkan, .max_frames_in_flight = 2 };
 const Window = @import("../window/window.zig").Window(backend);
 const RenderDevice = rendering.Device(backend);
 const DescriptorPool = rendering.DescriptorPool(backend);
+const DescriptorSetLayout = rendering.DescriptorSetLayout(backend);
 const GraphicBuffer = rendering.GraphicBuffer(backend);
 const GlobalUbo = rendering.GlobalUbo;
 
@@ -39,6 +40,8 @@ pub const StartupError = error{
 
 pub const RunError = error{
     FailedToInitializeGlobalUbos,
+    FailedToInitializeDescriptorSetLayout,
+    OutOfMemory,
 };
 
 pub inline fn init(title: [*:0]const u8) StartupError!GameApp {
@@ -67,11 +70,13 @@ pub inline fn init(title: [*:0]const u8) StartupError!GameApp {
 
 pub inline fn deinit(self: *GameApp) void {
     self.window.deinit();
+    self.global_pool.deinit();
     self.device.deinit();
     self.registry.deinit();
 }
 
 pub inline fn run(self: *GameApp) RunError!void {
+    const allocator = self.arena.allocator();
     var ubo_buffers: [backend.max_frames_in_flight]GraphicBuffer = undefined;
     defer {
         for (0..ubo_buffers.len) |i| {
@@ -89,6 +94,17 @@ pub inline fn run(self: *GameApp) RunError!void {
         ) catch return error.FailedToInitializeGlobalUbos;
         ubo_buffers[i].map(.{}) catch return error.FailedToInitializeGlobalUbos;
     }
+
+    var bindings = allocator.alloc(DescriptorSetLayout.BindingOptions, 1) catch return error.OutOfMemory;
+    bindings[0] = .{
+        .binding = 0,
+        .type = .uniform_buffer,
+        .stage_flags = .{ .vertex_bit = true, .fragment_bit = true },
+    };
+    defer allocator.free(bindings);
+    var global_set_layout = DescriptorSetLayout.init(&self.device, bindings, allocator) catch return error.FailedToInitializeDescriptorSetLayout;
+    defer global_set_layout.deinit();
+
     var now = std.time.milliTimestamp();
     while (!self.window.shouldClose()) {
         glfw.pollEvents();

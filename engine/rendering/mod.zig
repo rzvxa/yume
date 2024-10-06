@@ -26,6 +26,14 @@ pub fn DescriptorPool(comptime backend: RenderBackend) type {
     }
 }
 
+pub fn DescriptorSetLayout(comptime backend: RenderBackend) type {
+    switch (backend.api) {
+        .vulkan => {
+            return @import("vulkan/vulkan_descriptors.zig").VulkanDescriptorSetLayout;
+        },
+    }
+}
+
 pub fn GraphicBuffer(comptime backend: RenderBackend) type {
     switch (backend.api) {
         .vulkan => {
