@@ -5,6 +5,7 @@ const rendering = @import("../mod.zig");
 const DSize = rendering.DSize;
 const BufferUsageFlags = rendering.BufferUsageFlags;
 const MemoryPropertyFlags = rendering.MemoryPropertyFlags;
+const DescriptorBufferInfo = rendering.DescriptorBufferInfo;
 
 const debugAssert = @import("../../assert.zig").debugAssert;
 const VulkanDevice = @import("VulkanDevice.zig");
@@ -73,6 +74,21 @@ pub fn unmap(self: *Self) void {
     }
 }
 
+/// Create a buffer info descriptor
+///
+/// @param options.size (Optional) Size of the m_memory range of the descriptor
+/// @param options.offset (Optional) Byte offset from beginning
+///
+/// @return DescriptorImageInfo of specified offset and range
+///
+pub fn descriptorInfo(self: *Self, options: DescriptorInfoOption) DescriptorBufferInfo {
+    return .{
+        .buffer = self.buffer,
+        .offset = options.offset,
+        .range = options.size,
+    };
+}
+
 /// Returns the minimum instance size required to be compatible with devices minOffsetAlignment
 ///
 /// @param[in] instanceSize The size of an instance
@@ -88,6 +104,11 @@ pub fn getAlignment(instance_size: DSize, min_offset_alignment: DSize) DSize {
 }
 
 const MapOptions = struct {
+    size: DSize = vk.WHOLE_SIZE,
+    offset: DSize = 0,
+};
+
+const DescriptorInfoOption = struct {
     size: DSize = vk.WHOLE_SIZE,
     offset: DSize = 0,
 };

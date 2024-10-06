@@ -1,6 +1,12 @@
 const std = @import("std");
 const vk = @import("vulkan");
 
+const assert = @import("../../assert.zig").assert;
+const rendering = @import("../mod.zig");
+const DescriptorBufferInfo = rendering.DescriptorBufferInfo;
+const DescriptorSet = rendering.DescriptorSet;
+
+const List = @import("../../collections/mod.zig").List;
 const Allocator = std.mem.Allocator;
 const VulkanDevice = @import("VulkanDevice.zig");
 
@@ -35,6 +41,27 @@ pub const VulkanDescriptorPool = struct {
 
     pub fn deinit(self: *Self) void {
         self.device.device.destroyDescriptorPool(self.descriptor_pool, null);
+    }
+
+    fn allocateDescriptor(self: *Self, descriptor_set_layout: *vk.DescriptorSetLayout, descriptor: *vk.DescriptorSet) !void {
+        const alloc_info = vk.DescriptorSetAllocateInfo{
+            .descriptor_pool = self.descriptor_pool,
+            .descriptor_set_count = 1,
+            .p_set_layouts = @ptrCast(descriptor_set_layout),
+        };
+        try self.device.device.allocateDescriptorSets(&alloc_info, @ptrCast(descriptor));
+    }
+
+    fn freeDescriptors(self: *Self, descriptors: []vk.DescriptorSet) !void {
+        self.device.device.freeDescriptorSets(
+            self.descriptor_pool,
+            @as(u32, @truncate(descriptors.len)),
+            descriptors.ptr,
+        );
+    }
+
+    fn resetPool(self: *Self) void {
+        self.device.device.resetDescriptorPool(self.descriptor_pool, .{});
     }
 };
 
@@ -85,5 +112,61 @@ pub const VulkanDescriptorSetLayout = struct {
     pub fn deinit(self: *Self) void {
         self.device.device.destroyDescriptorSetLayout(self.descriptor_set_layout, null);
         self.bindings.deinit();
+    }
+};
+
+pub const VulkanDescriptorWriter = struct {
+    const Self = @This();
+    allocator: Allocator,
+    set_layout: *VulkanDescriptorSetLayout,
+    pool: *VulkanDescriptorPool,
+    writes: List(vk.WriteDescriptorSet),
+
+    pub fn init(set_layout: *VulkanDescriptorSetLayout, pool: *VulkanDescriptorPool, allocator: Allocator) !Self {
+        return .{
+            .allocator = allocator,
+            .set_layout = set_layout,
+            .pool = pool,
+            // we almost always write to at least one buffer so lets pre-allocate it.
+            .writes = try List(vk.WriteDescriptorSet).initCapacity(allocator, 1),
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.writes.deinit();
+    }
+
+    pub fn writeBuffer(self: *Self, binding: u32, buffer_info: *const DescriptorBufferInfo) !void {
+        const binding_description = if (self.set_layout.bindings.getPtr(binding)) |descr|
+            descr
+        else
+            std.debug.panic("Layout does not contain specified binding.", .{});
+
+        assert(binding_description.descriptor_count == 1, "Binding single descriptor infor, but binding expects multiple", .{});
+        const write = vk.WriteDescriptorSet{
+            .dst_set = .null_handle,
+            .dst_binding = binding,
+            .dst_array_element = 0,
+            .descriptor_count = 1,
+            .descriptor_type = binding_description.descriptor_type,
+            .p_image_info = undefined,
+            .p_buffer_info = @ptrCast(buffer_info),
+            .p_texel_buffer_view = undefined,
+        };
+        try self.writes.append(write);
+    }
+
+    pub fn flush(self: *Self, set: DescriptorSet) !void {
+        var set_ = set;
+        try self.pool.allocateDescriptor(&self.set_layout.descriptor_set_layout, &set_);
+        self.overwrite(set_);
+    }
+
+    pub fn overwrite(self: *Self, set: DescriptorSet) void {
+        for (0..self.writes.items.len) |i| {
+            self.writes.items[i].dst_set = set;
+        }
+
+        self.pool.device.device.updateDescriptorSets(@as(u32, @truncate(self.writes.items.len)), self.writes.items.ptr, 0, null);
     }
 };

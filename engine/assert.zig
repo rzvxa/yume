@@ -3,9 +3,9 @@ const std = @import("std");
 
 pub fn assert(ok: bool, comptime format: []const u8, args: anytype) void {
     if (!ok) {
-        comptime if (builtin.OptimizeMode == .Debug) {
+        if (comptime builtin.mode == .Debug) {
             assertionMessage(format, args);
-        };
+        }
         unreachable;
     }
 }

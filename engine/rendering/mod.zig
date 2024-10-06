@@ -34,6 +34,14 @@ pub fn DescriptorSetLayout(comptime backend: RenderBackend) type {
     }
 }
 
+pub fn DescriptorWriter(comptime backend: RenderBackend) type {
+    switch (backend.api) {
+        .vulkan => {
+            return @import("vulkan/vulkan_descriptors.zig").VulkanDescriptorWriter;
+        },
+    }
+}
+
 pub fn GraphicBuffer(comptime backend: RenderBackend) type {
     switch (backend.api) {
         .vulkan => {
@@ -63,3 +71,5 @@ pub const DSize = u64;
 const vk = @import("vulkan");
 pub const MemoryPropertyFlags = vk.MemoryPropertyFlags;
 pub const BufferUsageFlags = vk.BufferUsageFlags;
+pub const DescriptorBufferInfo = vk.DescriptorBufferInfo;
+pub const DescriptorSet = vk.DescriptorSet;

@@ -14,6 +14,8 @@ const Window = @import("../window/window.zig").Window(backend);
 const RenderDevice = rendering.Device(backend);
 const DescriptorPool = rendering.DescriptorPool(backend);
 const DescriptorSetLayout = rendering.DescriptorSetLayout(backend);
+const DescriptorSet = rendering.DescriptorSet;
+const DescriptorWriter = rendering.DescriptorWriter(backend);
 const GraphicBuffer = rendering.GraphicBuffer(backend);
 const GlobalUbo = rendering.GlobalUbo;
 
@@ -39,6 +41,7 @@ pub const StartupError = error{
 };
 
 pub const RunError = error{
+    Unknown,
     FailedToInitializeGlobalUbos,
     FailedToInitializeDescriptorSetLayout,
     OutOfMemory,
@@ -102,8 +105,20 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
         .stage_flags = .{ .vertex_bit = true, .fragment_bit = true },
     };
     defer allocator.free(bindings);
+
     var global_set_layout = DescriptorSetLayout.init(&self.device, bindings, allocator) catch return error.FailedToInitializeDescriptorSetLayout;
     defer global_set_layout.deinit();
+
+    const global_descriptor_sets = allocator.alloc(DescriptorSet, backend.max_frames_in_flight) catch return error.OutOfMemory;
+    defer allocator.free(global_descriptor_sets);
+
+    for (0..global_descriptor_sets.len) |i| {
+        var buffer_info = ubo_buffers[i].descriptorInfo(.{});
+        var writer = try DescriptorWriter.init(&global_set_layout, &self.global_pool, allocator);
+        defer writer.deinit();
+        try writer.writeBuffer(0, &buffer_info);
+        writer.flush(global_descriptor_sets[i]) catch return error.Unknown;
+    }
 
     var now = std.time.nanoTimestamp();
     while (!self.window.shouldClose()) {
