@@ -75,7 +75,7 @@ pub inline fn deinit(self: *GameApp) void {
     self.registry.deinit();
 }
 
-pub inline fn run(self: *GameApp) RunError!void {
+pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
     const allocator = self.arena.allocator();
     var ubo_buffers: [backend.max_frames_in_flight]GraphicBuffer = undefined;
     defer {
@@ -105,16 +105,25 @@ pub inline fn run(self: *GameApp) RunError!void {
     var global_set_layout = DescriptorSetLayout.init(&self.device, bindings, allocator) catch return error.FailedToInitializeDescriptorSetLayout;
     defer global_set_layout.deinit();
 
-    var now = std.time.milliTimestamp();
+    var now = std.time.nanoTimestamp();
     while (!self.window.shouldClose()) {
         glfw.pollEvents();
         const delta_time = dt: {
-            const new_time = std.time.milliTimestamp();
-            const delta = new_time - now;
+            const new_time = std.time.nanoTimestamp();
+            const delta: f32 = @as(f32, @floatFromInt(new_time - now)) / 1e9;
             now = new_time;
             break :dt delta;
         };
 
-        _ = delta_time;
+        switch (comptime @typeInfo(dispatcher)) {
+            .Struct => |struct_| {
+                inline for (struct_.decls) |decl| {
+                    if (comptime std.mem.eql(u8, decl.name, "update")) {
+                        dispatcher.update(delta_time);
+                    }
+                }
+            },
+            else => @compileError("expected a struct type as `dispatcher`"),
+        }
     }
 }

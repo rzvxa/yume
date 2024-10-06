@@ -6,6 +6,6 @@ pub fn main() !void {
     var app = try GameApp.init("Sandbox");
     defer app.deinit();
 
-    try app.run();
+    try app.run(struct {});
     std.debug.print("Bye!", .{});
 }
