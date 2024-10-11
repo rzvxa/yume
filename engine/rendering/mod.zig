@@ -10,6 +10,14 @@ pub const RenderBackend = struct {
     max_frames_in_flight: comptime_int,
 };
 
+pub fn Renderer(comptime backend: RenderBackend) type {
+    return switch (backend.api) {
+        .vulkan => {
+            return @import("vulkan/VulkanRenderer.zig");
+        },
+    };
+}
+
 pub fn Device(comptime backend: RenderBackend) type {
     return switch (backend.api) {
         .vulkan => {

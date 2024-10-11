@@ -147,6 +147,56 @@ pub fn createBuffer(
     return .{ .buf = buffer, .mem = buffer_memory };
 }
 
+pub fn getSwapChainSupport(self: *const Self) !SwapChainSupportDetails {
+    return try querySwapChainSupport(self.physical_device, self.instance, &self.surface, self.allocator);
+}
+
+pub fn findPhysicalQueueFamilies(self: *const Self) !QueueFamilyIndices {
+    return try findQueueFamilies(self.physical_device, self.instance, &self.surface, self.allocator);
+}
+
+pub fn findSupportedFormat(
+    self: *const Self,
+    candidates: []const vk.Format,
+    tiling: vk.ImageTiling,
+    features: vk.FormatFeatureFlags,
+) !vk.Format {
+    for (candidates) |format| {
+        const props = self.instance.getPhysicalDeviceFormatProperties(self.physical_device, format);
+
+        if (tiling == .linear and props.linear_tiling_features.contains(features)) {
+            return format;
+        }
+
+        if (tiling == .optimal and props.optimal_tiling_features.contains(features)) {
+            return format;
+        }
+    }
+
+    return error.NoSupportedFormat;
+}
+
+/// param[out] image
+/// param[out] image_memory
+pub fn createImageWithInfo(
+    self: *Self,
+    image_info: *const vk.ImageCreateInfo,
+    properties: vk.MemoryPropertyFlags,
+    image: *vk.Image,
+    image_memory: *vk.DeviceMemory,
+) !void {
+    image.* = try self.device.createImage(image_info, null);
+    const memory_requirements = self.device.getImageMemoryRequirements(image.*);
+
+    const alloc_info = vk.MemoryAllocateInfo{
+        .allocation_size = memory_requirements.size,
+        .memory_type_index = try self.findMemoryType(memory_requirements.memory_type_bits, properties),
+    };
+
+    image_memory.* = try self.device.allocateMemory(&alloc_info, null);
+    try self.device.bindImageMemory(image.*, image_memory.*, 0);
+}
+
 fn findMemoryType(self: *Self, type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
     const memory_properties = self.instance.getPhysicalDeviceMemoryProperties(self.physical_device);
     for (0..memory_properties.memory_type_count) |i| {
@@ -328,7 +378,7 @@ fn isDeviceSuitable(device: vk.PhysicalDevice, queues: *const QueueFamilyIndices
     return extensions_supported and swap_chain_adequate and supported_features.sampler_anisotropy == vk.TRUE;
 }
 
-fn querySwapChainSupport(device: vk.PhysicalDevice, instance: Instance, surface: *vk.SurfaceKHR, allocator: Allocator) !SwapChainSupportDetails {
+fn querySwapChainSupport(device: vk.PhysicalDevice, instance: Instance, surface: *const vk.SurfaceKHR, allocator: Allocator) !SwapChainSupportDetails {
     const capabilities = try instance.getPhysicalDeviceSurfaceCapabilitiesKHR(device, surface.*);
     const formats = try instance.getPhysicalDeviceSurfaceFormatsAllocKHR(device, surface.*, allocator);
     const present_modes = try instance.getPhysicalDeviceSurfacePresentModesAllocKHR(device, surface.*, allocator);
@@ -339,7 +389,7 @@ fn querySwapChainSupport(device: vk.PhysicalDevice, instance: Instance, surface:
     };
 }
 
-fn findQueueFamilies(device: vk.PhysicalDevice, instance: Instance, surface: *vk.SurfaceKHR, allocator: Allocator) !QueueFamilyIndices {
+fn findQueueFamilies(device: vk.PhysicalDevice, instance: Instance, surface: *const vk.SurfaceKHR, allocator: Allocator) !QueueFamilyIndices {
     const queue_families = try instance.getPhysicalDeviceQueueFamilyPropertiesAlloc(device, allocator);
     var queues: QueueFamilyIndices = undefined;
 

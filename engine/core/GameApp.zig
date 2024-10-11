@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const rendering = @import("../rendering/mod.zig");
 
-const backend = .{ .api = .vulkan, .max_frames_in_flight = 2 };
+const backend = @import("../constants.zig").backend;
 
 const Window = @import("../window/window.zig").Window(backend);
 const RenderDevice = rendering.Device(backend);
@@ -17,14 +17,17 @@ const DescriptorSetLayout = rendering.DescriptorSetLayout(backend);
 const DescriptorSet = rendering.DescriptorSet;
 const DescriptorWriter = rendering.DescriptorWriter(backend);
 const GraphicBuffer = rendering.GraphicBuffer(backend);
+const Renderer = rendering.Renderer(backend);
 const GlobalUbo = rendering.GlobalUbo;
 
 pub const GameApp = @This();
 
 // fields
 arena: ArenaAllocator,
+
 window: Window,
 device: RenderDevice,
+renderer: Renderer,
 
 global_pool: DescriptorPool,
 
@@ -36,6 +39,7 @@ pub const StartupError = error{
     RegistryInit,
     WindowCreation,
     RenderDeviceInit,
+    RendererInit,
     UnsupportedPlatform,
     DescriptorPoolCreation,
 };
@@ -58,12 +62,16 @@ pub inline fn init(title: [*:0]const u8) StartupError!GameApp {
     };
     var device = RenderDevice.init(allocator, &window, .{ .enable_validation_layers = false }) catch return error.RenderDeviceInit;
 
+    const renderer = Renderer.init(&device, &window, allocator) catch return error.RendererInit;
+
     const global_pool = rendering.initDefaultDescriptorPool(backend, &device, allocator) catch return error.DescriptorPoolCreation;
 
     return .{
         .arena = arena,
+
         .window = window,
         .device = device,
+        .renderer = renderer,
 
         .global_pool = global_pool,
 

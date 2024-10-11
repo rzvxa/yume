@@ -42,7 +42,7 @@ pub fn deinit(self: *Self) void {
     self.window.destroy();
 }
 
-pub fn shouldClose(self: *Self) bool {
+pub fn shouldClose(self: *const Self) bool {
     return self.window.shouldClose();
 }
 
@@ -50,6 +50,22 @@ pub fn createWindowSurface(self: *Self, vk_instance: vk.Instance, surface: *vk.S
     if (glfw.createWindowSurface(vk_instance, self.window, null, surface) != @intFromEnum(vk.Result.success)) {
         return error.FailedToCreateWindowSurface;
     }
+}
+
+pub inline fn getExtent(self: *const Self) vk.Extent2D {
+    return .{ .width = self.width, .height = self.height };
+}
+
+/// Waits until window extent is non-zero and returns it
+pub inline fn getValidExtnet(self: *const Self) vk.Extent2D {
+    var extent = self.getExtent();
+
+    while (extent.width == 0 or extent.height == 0) {
+        extent = self.getExtent();
+        glfw.waitEvents();
+    }
+
+    return extent;
 }
 
 fn framebufferResizeCallback(window: glfw.Window, width: u32, height: u32) void {
