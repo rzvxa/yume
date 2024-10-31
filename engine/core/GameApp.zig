@@ -12,6 +12,7 @@ const backend = @import("../constants.zig").backend;
 
 const Window = @import("../window/window.zig").Window(backend);
 const RenderDevice = rendering.Device(backend);
+const SimpleRenderPipeline = rendering.SimpleRenderPipeline;
 const DescriptorPool = rendering.DescriptorPool(backend);
 const DescriptorSetLayout = rendering.DescriptorSetLayout(backend);
 const DescriptorSet = rendering.DescriptorSet;
@@ -60,7 +61,7 @@ pub inline fn init(title: [*:0]const u8) StartupError!GameApp {
         error.WindowCreation => return error.WindowCreation,
         error.UnsupportedPlatform => return error.UnsupportedPlatform,
     };
-    var device = RenderDevice.init(allocator, &window, .{ .enable_validation_layers = false }) catch return error.RenderDeviceInit;
+    var device = RenderDevice.init(allocator, &window, .{ .enable_validation_layers = true }) catch return error.RenderDeviceInit;
 
     const renderer = Renderer.init(&device, &window, allocator) catch return error.RendererInit;
 
@@ -119,6 +120,14 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
 
     const global_descriptor_sets = allocator.alloc(DescriptorSet, backend.max_frames_in_flight) catch return error.OutOfMemory;
     defer allocator.free(global_descriptor_sets);
+
+    const render_pipeline = SimpleRenderPipeline.init(
+        &self.device,
+        self.renderer.swapchain.render_pass,
+        global_set_layout.descriptor_set_layout,
+        allocator,
+    ) catch return error.Unknown;
+    _ = render_pipeline;
 
     for (0..global_descriptor_sets.len) |i| {
         var buffer_info = ubo_buffers[i].descriptorInfo(.{});

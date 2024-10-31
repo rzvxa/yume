@@ -24,7 +24,8 @@ const apis: []const vk.ApiInfo = &.{
     vk.features.version_1_0,
     vk.extensions.khr_surface,
     vk.extensions.khr_swapchain,
-    // vk.extensions.ext_debug_utils,
+    // vk.extensions.khr_fragment_shading_rate,
+    vk.extensions.ext_debug_utils,
 };
 
 const BaseDispatch = vk.BaseWrapper(apis);
@@ -264,8 +265,8 @@ fn checkValidationLayerSupport(allocator: Allocator, vkb: *BaseDispatch) !bool {
     for (validation_layers) |layer_name| {
         var layer_found = false;
         for (available_layers) |layer_props| {
-            std.debug.print("eql?: {s} == {s}\n", .{ std.mem.span(layer_name), &layer_props.layer_name });
-            if (std.mem.eql(u8, std.mem.span(layer_name), &layer_props.layer_name)) {
+            const p = std.mem.span(@as([*:0]const u8, @ptrCast(&layer_props.layer_name)));
+            if (std.mem.eql(u8, std.mem.span(layer_name), p)) {
                 layer_found = true;
                 break;
             }

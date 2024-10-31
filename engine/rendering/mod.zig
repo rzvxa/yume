@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const frame = @import("frame.zig");
+pub const SimpleRenderPipeline = @import("SimpleRenderPipeline.zig");
 pub const GlobalUbo = frame.GlobalUbo;
 
 pub const RenderBackendApi = enum { vulkan };
