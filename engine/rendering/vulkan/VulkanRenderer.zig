@@ -4,6 +4,8 @@ const glfw = @import("glfw");
 
 const backend = @import("../../constants.zig").backend;
 
+const assert = @import("../../assert.zig").assert;
+const assertDebug = @import("../../assert.zig").assertDebug;
 const Allocator = std.mem.Allocator;
 
 const List = @import("../../collections/mod.zig").List;
@@ -47,8 +49,51 @@ pub fn deinit(self: *Self) void {
     self.allocator.free(self.command_buffers);
 }
 
-pub fn aspectRatio(self: *const Self) f32 {
+pub inline fn aspectRatio(self: *const Self) f32 {
     return self.swapchain.extentAspectRatio();
+}
+
+pub inline fn currentCommandBuffer(self: *const Self) vk.CommandBuffer {
+    assertDebug(self.is_frame_started, "Cannot get command buffer when frame is not in progress.", .{});
+    return self.command_buffers[self.current_frame_index];
+}
+
+pub fn beginFrame(self: *const Self) !?vk.CommandBuffer {
+    assert(!self.is_frame_started, "Can not call `beginFrame` while a frame is already in progress.", .{});
+    const result = try self.swapchain.acquireNextImage(self.current_image_index);
+    if (result == .error_out_of_date_khr) {
+        try self.recreateSwapchain();
+        return null;
+    }
+
+    if (result != .success and result != .suboptimal_khr) {
+        return error.FailedToAcquireSwapchainImage;
+    }
+
+    self.is_frame_started = true;
+    const command_buffer = self.currentCommandBuffer();
+
+    const begin_info = vk.CommandBufferBeginInfo{};
+
+    try command_buffer.beginCommandBuffer(&begin_info);
+
+    return command_buffer;
+}
+
+pub fn endFrame(self: *const Self) !void {
+    assert(self.is_frame_started, "Can not call `endFrame` while a frame is not in progress.", .{});
+    const command_buffer = self.currentCommandBuffer();
+    try command_buffer.endCommandBuffer();
+
+    const result = self.swapchain.submitCommandBuffers(&command_buffer, &self.current_image_index);
+    if (result == .error_out_of_date_khr or result == .suboptimal_khr or self.window.wasWindowResized()) {
+        self.window.resetWindowResizedFlag();
+        try self.recreateSwapChain();
+    } else if (result != .success) {
+        return error.FailedToAcquireSwapchainImage;
+    }
+    self.is_frame_started = false;
+    self.current_frame_index = (self.current_frame_index + 1) % backend.max_frames_in_flight;
 }
 
 fn recreateSwapchain(self: *Self) !void {

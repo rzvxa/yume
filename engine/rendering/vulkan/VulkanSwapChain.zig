@@ -31,10 +31,10 @@ window_extent: vk.Extent2D,
 
 swap_chain: vk.SwapchainKHR,
 
-// image_available_semaphores: []vk.Semaphore,
-// render_finished_semaphores: []vk.Semaphore,
-// in_flight_fences: []vk.Fence,
-// images_in_flight: []vk.Fence,
+image_available_semaphores: []vk.Semaphore,
+render_finished_semaphores: []vk.Semaphore,
+in_flight_fences: []vk.Fence,
+images_in_flight: []vk.Fence,
 
 current_frame: usize = 0,
 
@@ -50,6 +50,7 @@ pub fn init(
     const render_pass = try createRenderPass(device, &sc_res, depth_format);
     const cdr_res = try createDepthResources(device, &sc_res, depth_format, allocator);
     const swap_chain_frame_buffers = try createFramebuffers(device, render_pass, &sc_res, swap_chain_image_views, &cdr_res, allocator);
+    const sync_objects = try createSyncObjects(device, sc_res.swap_chain_images.len, allocator);
     return .{
         .allocator = allocator,
 
@@ -70,6 +71,11 @@ pub fn init(
         .depth_image_memories = cdr_res.depth_image_memories,
         .depth_image_views = cdr_res.depth_image_views,
         .swap_chain_depth_format = depth_format,
+
+        .image_available_semaphores = sync_objects.image_available_semaphores,
+        .render_finished_semaphores = sync_objects.render_finished_semaphores,
+        .in_flight_fences = sync_objects.in_flight_fences,
+        .images_in_flight = sync_objects.images_in_flight,
     };
 }
 
@@ -127,6 +133,25 @@ pub fn extentAspectRatio(self: *const Self) f32 {
     return @as(f32, @bitCast(self.swap_chain_extent.width)) / @as(f32, @bitCast(self.swap_chain_extent.height));
 }
 
+pub fn acquireNextImage(self: *const Self, image_index: u32) !vk.Result {
+    const dev = &self.device.device;
+    try dev.waitForFences(
+        1,
+        &self.in_flight_fences[self.current_frame],
+        vk.TRUE,
+        std.math.maxInt(u64),
+    );
+
+    const result = dev.acquireNextImageKHR(
+        self.swap_chain,
+        std.math.maxInt(u64),
+        self.image_available_semaphores[self.current_frame], // must not be a signaled semaphore
+        .null_handle,
+        image_index,
+    );
+
+    return result;
+}
 fn createSwapChain(
     device: *VulkanDevice,
     window_extent: vk.Extent2D,
@@ -387,6 +412,37 @@ fn createFramebuffers(
     return swap_chain_frame_buffers;
 }
 
+fn createSyncObjects(
+    device: *VulkanDevice,
+    image_count: usize,
+    allocator: Allocator,
+) !CreateSyncObjectsResult {
+    const image_available_semaphores = try allocator.alloc(vk.Semaphore, backend.max_frames_in_flight);
+    const render_finished_semaphores = try allocator.alloc(vk.Semaphore, backend.max_frames_in_flight);
+    const in_flight_fences = try allocator.alloc(vk.Fence, backend.max_frames_in_flight);
+    const images_in_flight = try allocator.alloc(vk.Fence, image_count);
+    // TODO: is there any cleaner way to initialize these?
+    for (0..image_count) |i| {
+        images_in_flight[i] = .null_handle;
+    }
+
+    const semaphore_info = vk.SemaphoreCreateInfo{};
+    const fence_info = vk.FenceCreateInfo{ .flags = .{ .signaled_bit = true } };
+
+    for (0..backend.max_frames_in_flight) |i| {
+        image_available_semaphores[i] = try device.device.createSemaphore(&semaphore_info, null);
+        render_finished_semaphores[i] = try device.device.createSemaphore(&semaphore_info, null);
+        in_flight_fences[i] = try device.device.createFence(&fence_info, null);
+    }
+
+    return .{
+        .image_available_semaphores = image_available_semaphores,
+        .render_finished_semaphores = render_finished_semaphores,
+        .in_flight_fences = in_flight_fences,
+        .images_in_flight = images_in_flight,
+    };
+}
+
 fn chooseSwapSurfaceFormat(available_formats: *const []vk.SurfaceFormatKHR) vk.SurfaceFormatKHR {
     for (available_formats.*) |it| {
         if (it.format == .b8g8r8a8_unorm and it.color_space == .srgb_nonlinear_khr) {
@@ -449,4 +505,11 @@ const CreateDepthResourcesResult = struct {
     depth_images: []vk.Image,
     depth_image_memories: []vk.DeviceMemory,
     depth_image_views: []vk.ImageView,
+};
+
+const CreateSyncObjectsResult = struct {
+    image_available_semaphores: []vk.Semaphore,
+    render_finished_semaphores: []vk.Semaphore,
+    in_flight_fences: []vk.Fence,
+    images_in_flight: []vk.Fence,
 };
