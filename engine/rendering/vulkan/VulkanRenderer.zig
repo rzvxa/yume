@@ -40,11 +40,11 @@ pub fn init(device: *VulkanDevice, window: *VulkanWindow, allocator: Allocator) 
 pub fn deinit(self: *Self) void {
     const dev = &self.device.device;
     dev.freeCommandBuffers(
-        dev.command_pool,
+        self.device.command_pool,
         @as(u32, @truncate(self.command_buffers.len)),
         self.command_buffers.ptr,
     );
-    self.command_buffers.deinit();
+    self.allocator.free(self.command_buffers);
 }
 
 pub fn aspectRatio(self: *const Self) f32 {

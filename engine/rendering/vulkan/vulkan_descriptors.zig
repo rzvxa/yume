@@ -111,7 +111,8 @@ pub const VulkanDescriptorSetLayout = struct {
 
     pub fn deinit(self: *Self) void {
         self.device.device.destroyDescriptorSetLayout(self.descriptor_set_layout, null);
-        self.bindings.deinit();
+        // TODO: this crashes!
+        // self.bindings.deinit();
     }
 };
 

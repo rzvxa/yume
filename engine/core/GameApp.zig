@@ -87,8 +87,10 @@ pub inline fn init(title: [*:0]const u8) StartupError!GameApp {
 pub inline fn deinit(self: *GameApp) void {
     self.window.deinit();
     self.global_pool.deinit();
+    self.renderer.deinit();
     self.device.deinit();
-    self.registry.deinit();
+    // TODO: this crashes!
+    // self.registry.deinit();
 }
 
 pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
@@ -187,4 +189,5 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
             cam.setPrespectiveProjection(math.trigonometric.radians(50.0), aspect_ratio, 0.01, 10);
         }
     }
+    self.device.device.deviceWaitIdle() catch return error.Unknown;
 }
