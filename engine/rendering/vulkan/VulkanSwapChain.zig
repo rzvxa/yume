@@ -123,6 +123,10 @@ pub fn compareSwapFormats(self: *const Self, other: *const Self) bool {
         self.swap_chain.swap_chain_image_format == other.swap_chain_image_format;
 }
 
+pub fn extentAspectRatio(self: *const Self) f32 {
+    return @as(f32, @bitCast(self.swap_chain_extent.width)) / @as(f32, @bitCast(self.swap_chain_extent.height));
+}
+
 fn createSwapChain(
     device: *VulkanDevice,
     window_extent: vk.Extent2D,

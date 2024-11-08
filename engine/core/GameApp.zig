@@ -21,6 +21,10 @@ const GraphicBuffer = rendering.GraphicBuffer(backend);
 const Renderer = rendering.Renderer(backend);
 const GlobalUbo = rendering.GlobalUbo;
 
+const math = @import("../root.zig").math;
+const Vec3 = @import("../root.zig").Vec3;
+const components = @import("../components/mod.zig");
+
 pub const GameApp = @This();
 
 // fields
@@ -121,6 +125,14 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
     const global_descriptor_sets = allocator.alloc(DescriptorSet, backend.max_frames_in_flight) catch return error.OutOfMemory;
     defer allocator.free(global_descriptor_sets);
 
+    for (0..global_descriptor_sets.len) |i| {
+        var buffer_info = ubo_buffers[i].descriptorInfo(.{});
+        var writer = try DescriptorWriter.init(&global_set_layout, &self.global_pool, allocator);
+        defer writer.deinit();
+        try writer.writeBuffer(0, &buffer_info);
+        writer.flush(global_descriptor_sets[i]) catch return error.Unknown;
+    }
+
     const render_pipeline = SimpleRenderPipeline.init(
         &self.device,
         self.renderer.swapchain.render_pass,
@@ -129,12 +141,17 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
     ) catch return error.Unknown;
     _ = render_pipeline;
 
-    for (0..global_descriptor_sets.len) |i| {
-        var buffer_info = ubo_buffers[i].descriptorInfo(.{});
-        var writer = try DescriptorWriter.init(&global_set_layout, &self.global_pool, allocator);
-        defer writer.deinit();
-        try writer.writeBuffer(0, &buffer_info);
-        writer.flush(global_descriptor_sets[i]) catch return error.Unknown;
+    const registry = &self.registry;
+    var camera_view = registry.view(.{ components.Position, components.Rotation, components.Camera }, .{});
+    {
+        const main_camera = registry.create();
+        registry.add(main_camera, components.Position{ .inner = Vec3.new(0, 0, -2.5) });
+        registry.add(main_camera, components.Rotation{ .inner = Vec3.as(0) });
+        registry.add(main_camera, comp: {
+            var camera = components.Camera{};
+            camera.setViewTarget(Vec3.new(-1, -2, 2), Vec3.new(0, 0, 2.5), Vec3.up);
+            break :comp camera;
+        });
     }
 
     var now = std.time.nanoTimestamp();
@@ -156,6 +173,18 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
                 }
             },
             else => @compileError("expected a struct type as `dispatcher`"),
+        }
+
+        var camera_iter = camera_view.entityIterator();
+
+        const aspect_ratio = self.renderer.aspectRatio();
+        while (camera_iter.next()) |entity| {
+            const pos = camera_view.getConst(components.Position, entity);
+            const rot = camera_view.getConst(components.Rotation, entity);
+            const cam = camera_view.get(components.Camera, entity);
+
+            cam.setViewYXZ(pos.inner, rot.inner);
+            cam.setPrespectiveProjection(math.trigonometric.radians(50.0), aspect_ratio, 0.01, 10);
         }
     }
 }

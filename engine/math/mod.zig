@@ -16,3 +16,6 @@ pub const Vec2 = vec.Vec2(f32);
 pub const Vec3 = vec.Vec3(f32);
 pub const Vec4 = vec.Vec4(f32);
 pub const Mat4 = mat.Mat4(f32);
+
+pub const BoolVec2 = vec.Vec2(bool);
+pub const BoolVec3 = vec.Vec3(bool);

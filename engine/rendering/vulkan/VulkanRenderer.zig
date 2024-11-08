@@ -47,6 +47,10 @@ pub fn deinit(self: *Self) void {
     self.command_buffers.deinit();
 }
 
+pub fn aspectRatio(self: *const Self) f32 {
+    return self.swapchain.extentAspectRatio();
+}
+
 fn recreateSwapchain(self: *Self) !void {
     const extent = self.window.getValidExtnet();
     try self.device.device.deviceWaitIdle();

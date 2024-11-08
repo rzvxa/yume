@@ -1195,6 +1195,11 @@ pub fn Vec2(comptime Real: type) type {
     return extern struct {
         pub usingnamespace VecMixin(@This(), 2, Real);
 
+        pub const up = @This().new(0, 1);
+        pub const down = @This().new(0, -1);
+        pub const left = @This().new(-1, 0);
+        pub const right = @This().new(1, 0);
+
         x: Real,
         y: Real,
     };
@@ -1205,6 +1210,13 @@ pub fn Vec3(comptime Real: type) type {
 
     return extern struct {
         pub usingnamespace VecMixin(@This(), 3, Real);
+
+        pub const up = @This().new(0, 1, 0);
+        pub const down = @This().new(0, -1, 0);
+        pub const left = @This().new(-1, 0, 0);
+        pub const right = @This().new(1, 0, 0);
+        pub const forward = @This().new(0, 0, 1);
+        pub const back = @This().new(0, 0, -1);
 
         x: Real,
         y: Real,

@@ -125,7 +125,7 @@ pub inline fn defaultPipelineConfigInfo(config_info: *PipelineConfigInfo, alloca
             .depth_bias_slope_factor = 0,
         },
         .multisample_info = .{
-            .sample_shading_enable = vk.FALSE,
+            .sample_shading_enable = vk.TRUE,
             .rasterization_samples = .{ .@"1_bit" = true },
             .min_sample_shading = 1,
             .p_sample_mask = null,
