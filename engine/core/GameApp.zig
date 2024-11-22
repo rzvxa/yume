@@ -20,6 +20,7 @@ const DescriptorWriter = rendering.DescriptorWriter(backend);
 const GraphicBuffer = rendering.GraphicBuffer(backend);
 const Renderer = rendering.Renderer(backend);
 const GlobalUbo = rendering.GlobalUbo;
+const FrameInfo = rendering.FrameInfo;
 
 const math = @import("../root.zig").math;
 const Vec3 = @import("../root.zig").Vec3;
@@ -141,7 +142,6 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
         global_set_layout.descriptor_set_layout,
         allocator,
     ) catch return error.Unknown;
-    _ = render_pipeline;
 
     const registry = &self.registry;
     var camera_view = registry.view(.{ components.Position, components.Rotation, components.Camera }, .{});
@@ -187,6 +187,35 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
 
             cam.setViewYXZ(pos.inner, rot.inner);
             cam.setPrespectiveProjection(math.trigonometric.radians(50.0), aspect_ratio, 0.01, 10);
+            const command_buffer = (self.renderer.beginFrame() catch return error.Unknown) orelse return error.Unknown;
+            if (command_buffer == .null_handle) {
+                continue;
+            }
+            const frame_index = self.renderer.current_frame_index;
+            const frame_info = FrameInfo{
+                .index = frame_index,
+                .time = delta_time,
+                .command_buffer = command_buffer,
+                .camera = cam,
+                .global_descriptor_set = global_descriptor_sets[frame_index],
+            };
+            std.debug.print("{} ---------------------------\n", .{global_descriptor_sets[frame_index]});
+            // _ = frame_info;
+            // _ = render_pipeline;
+
+            // update
+            var ubo = GlobalUbo{};
+            ubo.projection = cam.projection_matrix;
+            ubo.view = cam.view_matrix;
+            ubo_buffers[frame_index].writeToBuffer(.{ .data = &ubo });
+            ubo_buffers[frame_index].flush(.{}) catch return error.Unknown;
+
+            // render
+            self.renderer.beginSwapchainRenderPass(command_buffer);
+            render_pipeline.render(&frame_info);
+            self.renderer.endSwapchainRenderPass(command_buffer);
+
+            self.renderer.endFrame() catch return error.Unknown;
         }
     }
     self.device.device.deviceWaitIdle() catch return error.Unknown;

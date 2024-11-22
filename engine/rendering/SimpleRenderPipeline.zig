@@ -8,6 +8,7 @@ const Mat4 = @import("../math/mod.zig").Mat4;
 
 const VulkanDevice = @import("vulkan/VulkanDevice.zig");
 const VulkanPipeline = @import("vulkan/VulkanPipeline.zig");
+const FrameInfo = @import("mod.zig").FrameInfo;
 
 const Self = @This();
 
@@ -23,6 +24,24 @@ pub fn init(device: *VulkanDevice, render_pass: vk.RenderPass, global_set_layout
         .pipeline = pipeline,
         .pipeline_layout = pipeline_layout,
     };
+}
+
+pub fn render(self: *const Self, frame_info: *const FrameInfo) void {
+    self.pipeline.bind(frame_info.command_buffer);
+
+    std.debug.print("render: {any} {d}\n", .{ &frame_info.global_descriptor_set, &frame_info.global_descriptor_set });
+    self.device.device.cmdBindDescriptorSets(
+        frame_info.command_buffer,
+        .graphics,
+        self.pipeline_layout,
+        0,
+        1,
+        @ptrCast(&frame_info.global_descriptor_set),
+        0,
+        null,
+    );
+
+    // TODO Render
 }
 
 fn createPipelineLayout(device: *VulkanDevice, global_set_layout: vk.DescriptorSetLayout) !vk.PipelineLayout {

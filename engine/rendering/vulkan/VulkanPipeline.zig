@@ -188,6 +188,10 @@ pub inline fn defaultPipelineConfigInfo(config_info: *PipelineConfigInfo, alloca
     };
 }
 
+pub inline fn bind(self: *const Self, command_buffer: vk.CommandBuffer) void {
+    self.device.device.cmdBindPipeline(command_buffer, .graphics, self.graphics_pipeline);
+}
+
 var asset_root_directory: ?[]const u8 = null;
 inline fn readFile(path: []const u8, allocator: Allocator) ![]align(4) const u8 {
     if (asset_root_directory == null) {

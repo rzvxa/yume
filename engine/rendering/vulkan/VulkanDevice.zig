@@ -28,11 +28,11 @@ const apis: []const vk.ApiInfo = &.{
     vk.extensions.ext_debug_utils,
 };
 
-const BaseDispatch = vk.BaseWrapper(apis);
-const InstanceDispatch = vk.InstanceWrapper(apis);
-const DeviceDispatch = vk.DeviceWrapper(apis);
+pub const BaseDispatch = vk.BaseWrapper(apis);
+pub const InstanceDispatch = vk.InstanceWrapper(apis);
+pub const DeviceDispatch = vk.DeviceWrapper(apis);
 
-pub const Instance = vk.InstanceProxy(apis);
+const Instance = vk.InstanceProxy(apis);
 const Device = vk.DeviceProxy(apis);
 
 const Self = @This();

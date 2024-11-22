@@ -7,6 +7,7 @@ const VkInstance = @import("../../rendering/vulkan/VulkanDevice.zig").VkInstance
 const Self = @This();
 width: u32,
 height: u32,
+frame_buffer_resized: bool,
 title: [*:0]const u8,
 window: glfw.Window,
 
@@ -32,6 +33,7 @@ pub fn init(width: u32, height: u32, title: [*:0]const u8) error{ GLFWInit, Wind
         .height = height,
         .title = title,
         .window = window,
+        .frame_buffer_resized = false,
     };
     window.setUserPointer(&self);
     window.setFramebufferSizeCallback(Self.framebufferResizeCallback);
@@ -70,6 +72,7 @@ pub inline fn getValidExtnet(self: *const Self) vk.Extent2D {
 
 fn framebufferResizeCallback(window: glfw.Window, width: u32, height: u32) void {
     const vk_window = window.getUserPointer(Self) orelse unreachable;
+    vk_window.frame_buffer_resized = true;
     vk_window.width = width;
     vk_window.height = height;
 }

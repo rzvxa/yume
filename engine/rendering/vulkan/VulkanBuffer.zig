@@ -1,7 +1,11 @@
 const std = @import("std");
 const vk = @import("vulkan");
+const c = @cImport({
+    @cInclude("string.h");
+});
 
 const rendering = @import("../mod.zig");
+const GlobalUbo = rendering.GlobalUbo;
 const DSize = rendering.DSize;
 const BufferUsageFlags = rendering.BufferUsageFlags;
 const MemoryPropertyFlags = rendering.MemoryPropertyFlags;
@@ -54,9 +58,9 @@ pub fn deinit(self: *Self) void {
     self.device.device.freeMemory(self.memory, null);
 }
 
-/// Map a m_memory range of this buffer. If successful, m_mapped points to the specified buffer range.
+/// Map a memory range of this buffer. If successful, mapped points to the specified buffer range.
 ///
-/// @param[in] options.size (Optional) Size of the m_memory range to map. Pass VK_WHOLE_SIZE to map the complete
+/// @param[in] options.size (Optional) Size of the memory range to map. Pass VK_WHOLE_SIZE to map the complete
 /// buffer range.
 /// @param[in] options.offset (Optional) Byte offset from beginning
 pub fn map(self: *Self, options: MapOptions) !void {
@@ -64,7 +68,7 @@ pub fn map(self: *Self, options: MapOptions) !void {
     self.mapped = try self.device.device.mapMemory(self.memory, options.offset, options.size, .{});
 }
 
-/// Unmap a m_mapped m_memory range
+/// Unmap a mapped memory range
 ///
 /// @note Does not return a result as vkUnmapMemory can't fail
 pub fn unmap(self: *Self) void {
@@ -74,9 +78,44 @@ pub fn unmap(self: *Self) void {
     }
 }
 
+// Copies the specified data to the mapped buffer. Default value writes whole buffer range
+//
+// @param[in] data Pointer to the data to copy
+// @param size (Optional) Size of the data to copy. Pass vk.WHOLE_SIZE to flush the complete buffer
+// range.
+// @param offset (Optional) Byte offset from beginning of mapped region
+pub fn writeToBuffer(self: *Self, options: struct { data: *const anyopaque, size: DSize = vk.WHOLE_SIZE, offset: DSize = 0 }) void {
+    debugAssert(self.mapped != null, "Cannot copy to unmapped buffer", .{});
+    if (options.size == vk.WHOLE_SIZE) {
+        _ = c.memcpy(self.mapped, options.data, self.buffer_size);
+    } else {
+        var memOffset = @as([*]u8, @ptrCast(self.mapped));
+        memOffset += options.offset;
+        _ = c.memcpy(memOffset, options.data, options.size);
+    }
+}
+
+// Flush a memory range of the buffer to make it visible to the device
+//
+// @note Only required for non-coherent memory
+//
+// @param size (Optional) Size of the memory range to flush. Pass vk.WHOLE_SIZE to flush the
+// complete buffer range.
+// @param offset (Optional) Byte offset from beginning
+//
+// @return VkResult of the flush call
+pub fn flush(self: *Self, options: struct { size: DSize = vk.WHOLE_SIZE, offset: DSize = 0 }) !void {
+    const mapped_range = vk.MappedMemoryRange{
+        .memory = self.memory,
+        .offset = options.offset,
+        .size = options.size,
+    };
+    try self.device.device.flushMappedMemoryRanges(1, &.{mapped_range});
+}
+
 /// Create a buffer info descriptor
 ///
-/// @param options.size (Optional) Size of the m_memory range of the descriptor
+/// @param options.size (Optional) Size of the memory range of the descriptor
 /// @param options.offset (Optional) Byte offset from beginning
 ///
 /// @return DescriptorImageInfo of specified offset and range

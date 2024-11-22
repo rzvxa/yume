@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const List = @import("../../collections/mod.zig").List;
 
 const VulkanDevice = @import("VulkanDevice.zig");
+const AcquireNextImageKHRResult = @import("VulkanDevice.zig").DeviceDispatch.AcquireNextImageKHRResult;
 
 const Self = @This();
 
@@ -83,15 +84,15 @@ pub fn deinit(self: *Self) void {
     const dev = &self.device.device;
 
     for (0..self.swap_chain_image_views.len) |i| {
-        dev.destroyImageView(self.swap_chain_image_views.len[i], null);
+        dev.destroyImageView(self.swap_chain_image_views[i], null);
     }
-    self.allocator.free(self.swap_chain_image_views.len);
+    self.allocator.free(self.swap_chain_image_views);
 
-    if (self.swap_chain != null) {
+    if (self.swap_chain != .null_handle) {
         dev.destroySwapchainKHR(self.swap_chain, null);
     }
 
-    for (0..self.depth_images) |i| {
+    for (0..self.depth_images.len) |i| {
         dev.destroyImageView(self.depth_image_views[i], null);
         dev.destroyImage(self.depth_images[i], null);
         dev.freeMemory(self.depth_image_memories[i], null);
@@ -110,48 +111,95 @@ pub fn deinit(self: *Self) void {
         dev.destroyFence(self.in_flight_fences[i], null);
     }
 
-    self.swap_chain_frame_buffers.deinit();
+    self.allocator.free(self.swap_chain_frame_buffers);
 
-    self.depth_images.deinit();
-    self.depth_image_memories.deinit();
-    self.depth_image_views.deinit();
-    self.swap_chain_images.deinit();
-    self.swap_chain_image_views.deinit();
+    self.allocator.free(self.depth_images);
+    self.allocator.free(self.depth_image_memories);
+    self.allocator.free(self.depth_image_views);
+    self.allocator.free(self.swap_chain_images);
+    self.allocator.free(self.swap_chain_image_views);
 
-    self.image_available_semaphores.deinit();
-    self.render_finished_semaphores.deinit();
-    self.in_flight_fences.deinit();
-    self.images_in_flight.deinit();
+    self.allocator.free(self.image_available_semaphores);
+    self.allocator.free(self.render_finished_semaphores);
+    self.allocator.free(self.in_flight_fences);
+    self.allocator.free(self.images_in_flight);
 }
 
 pub fn compareSwapFormats(self: *const Self, other: *const Self) bool {
-    return self.swap_chain.swap_chain_depth_format == other.swap_chain.swap_chain_depth_format and
-        self.swap_chain.swap_chain_image_format == other.swap_chain_image_format;
+    return self.swap_chain_depth_format == other.swap_chain_depth_format and
+        self.swap_chain_image_format == other.swap_chain_image_format;
 }
 
 pub fn extentAspectRatio(self: *const Self) f32 {
     return @as(f32, @bitCast(self.swap_chain_extent.width)) / @as(f32, @bitCast(self.swap_chain_extent.height));
 }
 
-pub fn acquireNextImage(self: *const Self, image_index: u32) !vk.Result {
+pub fn acquireNextImage(self: *const Self) !AcquireNextImageKHRResult {
     const dev = &self.device.device;
-    try dev.waitForFences(
+    const fenceResult = try dev.waitForFences(
         1,
-        &self.in_flight_fences[self.current_frame],
+        &.{self.in_flight_fences[self.current_frame]},
         vk.TRUE,
         std.math.maxInt(u64),
     );
+    if (fenceResult != .success) {
+        return .{ .result = fenceResult, .image_index = 0 };
+    }
 
-    const result = dev.acquireNextImageKHR(
+    const imageResult = dev.acquireNextImageKHR(
         self.swap_chain,
         std.math.maxInt(u64),
         self.image_available_semaphores[self.current_frame], // must not be a signaled semaphore
         .null_handle,
-        image_index,
     );
+
+    return imageResult;
+}
+
+pub fn submitCommandBuffer(self: *Self, buffer: *vk.CommandBuffer, image_index: *u32) !vk.Result {
+    const ix = @as(usize, image_index.*);
+    if (self.images_in_flight[ix] != .null_handle) {
+        _ = try self.device.device.waitForFences(
+            1,
+            &.{self.images_in_flight[ix]},
+            vk.TRUE,
+            std.math.maxInt(u64),
+        );
+    }
+    self.images_in_flight[ix] = self.in_flight_fences[self.current_frame];
+
+    const wait_semaphores: [1]vk.Semaphore = .{self.image_available_semaphores[self.current_frame]};
+    const wait_stages: [1]vk.PipelineStageFlags = .{.{ .color_attachment_output_bit = true }};
+    const signal_semaphores: [1]vk.Semaphore = .{self.render_finished_semaphores[self.current_frame]};
+    const submit_info = vk.SubmitInfo{
+        .wait_semaphore_count = 1,
+        .p_wait_semaphores = &wait_semaphores,
+        .p_wait_dst_stage_mask = &wait_stages,
+
+        .command_buffer_count = 1,
+        .p_command_buffers = @ptrCast(buffer),
+
+        .signal_semaphore_count = 1,
+        .p_signal_semaphores = &signal_semaphores,
+    };
+
+    try self.device.device.resetFences(1, @ptrCast(&self.in_flight_fences[self.current_frame]));
+    try self.device.device.queueSubmit(self.device.graphics_queue, 1, &.{submit_info}, self.in_flight_fences[self.current_frame]);
+
+    const present_info = vk.PresentInfoKHR{
+        .wait_semaphore_count = 1,
+        .p_wait_semaphores = &signal_semaphores,
+        .swapchain_count = 1,
+        .p_swapchains = &.{self.swap_chain},
+        .p_image_indices = @ptrCast(image_index),
+    };
+
+    const result = try self.device.device.queuePresentKHR(self.device.present_queue, &present_info);
+    self.current_frame = (self.current_frame + 1) % backend.max_frames_in_flight;
 
     return result;
 }
+
 fn createSwapChain(
     device: *VulkanDevice,
     window_extent: vk.Extent2D,
@@ -300,6 +348,7 @@ fn createRenderPass(
         .dst_stage_mask = .{ .color_attachment_output_bit = true, .early_fragment_tests_bit = true },
         .src_access_mask = .{},
         .dst_access_mask = .{ .color_attachment_write_bit = true, .depth_stencil_attachment_write_bit = true },
+        .dependency_flags = .{ .by_region_bit = true },
     };
 
     const attachments: [2]vk.AttachmentDescription = .{ color_attachment, depth_attachment };
