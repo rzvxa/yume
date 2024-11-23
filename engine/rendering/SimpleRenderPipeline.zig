@@ -1,6 +1,7 @@
 // TODO: abstract me!
 const std = @import("std");
 const vk = @import("vulkan");
+const ecs = @import("coyote-ecs");
 
 const Allocator = std.mem.Allocator;
 
@@ -26,10 +27,9 @@ pub fn init(device: *VulkanDevice, render_pass: vk.RenderPass, global_set_layout
     };
 }
 
-pub fn render(self: *const Self, frame_info: *const FrameInfo) void {
+pub fn render(self: *const Self, frame_info: *const FrameInfo, world: *ecs.World) void {
     self.pipeline.bind(frame_info.command_buffer);
 
-    std.debug.print("render: {any} {d}\n", .{ &frame_info.global_descriptor_set, &frame_info.global_descriptor_set });
     self.device.device.cmdBindDescriptorSets(
         frame_info.command_buffer,
         .graphics,
@@ -40,6 +40,7 @@ pub fn render(self: *const Self, frame_info: *const FrameInfo) void {
         0,
         null,
     );
+    _ = world;
 
     // TODO Render
 }

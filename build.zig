@@ -18,10 +18,6 @@ pub fn build(b: *std.Build) void {
     const vk_dep = b.dependency("vulkan_zig", .{
         .registry = @as([]const u8, b.pathFromRoot("vendor/vk.xml")),
     });
-    const zig_ecs_dep = b.dependency("zig_ecs", .{
-        .target = target,
-        .optimize = optimize,
-    });
     const ziglm_dep = b.dependency("ziglm", .{
         .target = target,
         .optimize = optimize,
@@ -32,9 +28,13 @@ pub fn build(b: *std.Build) void {
     });
 
     const vk_bindings = vk_dep.module("vulkan-zig");
-    const zig_ecs_module = zig_ecs_dep.module("zig-ecs");
     const ziglm_module = ziglm_dep.module("ziglm");
     const glfw_module = glfw_dep.module("mach-glfw");
+    const coyote_ecs_module = b.addModule("coyote_ecs", .{
+        .root_source_file = b.path("vendor/coyote-ecs/src/coyote.zig"),
+        .optimize = optimize,
+        .target = target,
+    });
 
     const yume = b.addModule("yume", .{
         .root_source_file = b.path("engine/root.zig"),
@@ -43,9 +43,9 @@ pub fn build(b: *std.Build) void {
     });
 
     yume.addImport("vulkan", vk_bindings);
-    yume.addImport("zig-ecs", zig_ecs_module);
     yume.addImport("ziglm", ziglm_module);
     yume.addImport("glfw", glfw_module);
+    yume.addImport("coyote-ecs", coyote_ecs_module);
 
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when

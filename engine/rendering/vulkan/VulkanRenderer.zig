@@ -103,7 +103,7 @@ pub fn beginSwapchainRenderPass(self: *const Self, command_buffer: vk.CommandBuf
     assert(command_buffer == self.currentCommandBuffer(), "Can not begin render pass on command bufferfrom a different frame", .{});
 
     const clear_values: [2]vk.ClearValue = .{
-        .{ .color = .{ .float_32 = .{ 0, 0, 0, 0 } } },
+        .{ .color = .{ .float_32 = .{ 0.3, 0.3, 0.3, 0 } } },
         .{ .depth_stencil = .{ .depth = 1, .stencil = 0 } },
     };
 
