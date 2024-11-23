@@ -177,13 +177,13 @@ pub fn submitCommandBuffer(self: *Self, buffer: *vk.CommandBuffer, image_index: 
         .p_wait_dst_stage_mask = &wait_stages,
 
         .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast(buffer),
+        .p_command_buffers = @as(*[1]vk.CommandBuffer, buffer),
 
         .signal_semaphore_count = 1,
         .p_signal_semaphores = &signal_semaphores,
     };
 
-    try self.device.device.resetFences(1, @ptrCast(&self.in_flight_fences[self.current_frame]));
+    try self.device.device.resetFences(1, @as(*[1]vk.Fence, &self.in_flight_fences[self.current_frame]));
     try self.device.device.queueSubmit(self.device.graphics_queue, 1, &.{submit_info}, self.in_flight_fences[self.current_frame]);
 
     const present_info = vk.PresentInfoKHR{
@@ -191,7 +191,7 @@ pub fn submitCommandBuffer(self: *Self, buffer: *vk.CommandBuffer, image_index: 
         .p_wait_semaphores = &signal_semaphores,
         .swapchain_count = 1,
         .p_swapchains = &.{self.swap_chain},
-        .p_image_indices = @ptrCast(image_index),
+        .p_image_indices = @as(*[1]u32, image_index),
     };
 
     const result = try self.device.device.queuePresentKHR(self.device.present_queue, &present_info);

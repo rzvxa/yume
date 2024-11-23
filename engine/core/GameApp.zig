@@ -60,7 +60,6 @@ pub const RunError = error{
 pub inline fn init(title: [*:0]const u8) StartupError!GameApp {
     var arena = ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena.allocator();
-    const registry = ecs.Registry.init(allocator);
     var window = Window.init(800, 600, title) catch |err| switch (err) {
         error.GLFWInit => return error.GLFWInit,
         error.WindowCreation => return error.WindowCreation,
@@ -81,7 +80,7 @@ pub inline fn init(title: [*:0]const u8) StartupError!GameApp {
 
         .global_pool = global_pool,
 
-        .registry = registry,
+        .registry = ecs.Registry.init(allocator),
     };
 }
 
@@ -126,15 +125,19 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
     defer global_set_layout.deinit();
 
     const global_descriptor_sets = allocator.alloc(DescriptorSet, backend.max_frames_in_flight) catch return error.OutOfMemory;
+    std.debug.print("A {any}\n", .{global_descriptor_sets});
     defer allocator.free(global_descriptor_sets);
 
     for (0..global_descriptor_sets.len) |i| {
+        std.debug.print("b {} {any}\n", .{ i, global_descriptor_sets });
         var buffer_info = ubo_buffers[i].descriptorInfo(.{});
         var writer = try DescriptorWriter.init(&global_set_layout, &self.global_pool, allocator);
         defer writer.deinit();
         try writer.writeBuffer(0, &buffer_info);
-        writer.flush(global_descriptor_sets[i]) catch return error.Unknown;
+        writer.flush(&global_descriptor_sets[i]) catch return error.Unknown;
+        std.debug.print("c {} {any}\n", .{ i, global_descriptor_sets });
     }
+    std.debug.print("D {any}\n", .{global_descriptor_sets});
 
     const render_pipeline = SimpleRenderPipeline.init(
         &self.device,
@@ -142,20 +145,33 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
         global_set_layout.descriptor_set_layout,
         allocator,
     ) catch return error.Unknown;
+    std.debug.print("E {any}\n", .{global_descriptor_sets});
 
-    const registry = &self.registry;
-    var camera_view = registry.view(.{ components.Position, components.Rotation, components.Camera }, .{});
+    std.debug.print("registry {any}\n", .{self.registry});
+    const x = global_descriptor_sets[0];
+    std.debug.print("F {any}, {}\n", .{ global_descriptor_sets, x });
+    var camera = components.Camera{};
+    const campos = components.Position{ .inner = Vec3.new(0, 0, -2.5) };
+    const camrot = components.Rotation{ .inner = Vec3.as(0) };
     {
-        const main_camera = registry.create();
-        registry.add(main_camera, components.Position{ .inner = Vec3.new(0, 0, -2.5) });
-        registry.add(main_camera, components.Rotation{ .inner = Vec3.as(0) });
-        registry.add(main_camera, comp: {
-            var camera = components.Camera{};
-            camera.setViewTarget(Vec3.new(-1, -2, 2), Vec3.new(0, 0, 2.5), Vec3.up);
-            break :comp camera;
-        });
+        // std.debug.print("G {any} {}\n", .{ global_descriptor_sets, x });
+        // const main_camera = self.registry.create();
+        // std.debug.print("H {any}\n", .{global_descriptor_sets});
+        // self.registry.add(main_camera, components.Position{ .inner = Vec3.new(0, 0, -2.5) });
+        std.debug.print("J {any}\n", .{global_descriptor_sets});
+        // self.registry.add(main_camera, components.Rotation{ .inner = Vec3.as(0) });
+        // std.debug.print("K {any}\n", .{global_descriptor_sets});
+        //     registry.add(main_camera, comp: {
+        //         std.debug.print("L {any}\n", .{global_descriptor_sets});
+        //         var camera = components.Camera{};
+        //         std.debug.print("M {any}\n", .{global_descriptor_sets});
+        camera.setViewTarget(Vec3.new(-1, -2, 2), Vec3.new(0, 0, 2.5), Vec3.up);
+        std.debug.print("N {any}\n", .{global_descriptor_sets});
+        //         break :comp camera;
+        //     });
     }
 
+    // _ = self.registry.view(.{ components.Position, components.Rotation, components.Camera }, .{});
     var now = std.time.nanoTimestamp();
     while (!self.window.shouldClose()) {
         glfw.pollEvents();
@@ -177,46 +193,79 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
             else => @compileError("expected a struct type as `dispatcher`"),
         }
 
-        var camera_iter = camera_view.entityIterator();
-
         const aspect_ratio = self.renderer.aspectRatio();
-        while (camera_iter.next()) |entity| {
-            const pos = camera_view.getConst(components.Position, entity);
-            const rot = camera_view.getConst(components.Rotation, entity);
-            const cam = camera_view.get(components.Camera, entity);
-
-            cam.setViewYXZ(pos.inner, rot.inner);
-            cam.setPrespectiveProjection(math.trigonometric.radians(50.0), aspect_ratio, 0.01, 10);
-            const command_buffer = (self.renderer.beginFrame() catch return error.Unknown) orelse return error.Unknown;
-            if (command_buffer == .null_handle) {
-                continue;
-            }
-            const frame_index = self.renderer.current_frame_index;
-            const frame_info = FrameInfo{
-                .index = frame_index,
-                .time = delta_time,
-                .command_buffer = command_buffer,
-                .camera = cam,
-                .global_descriptor_set = global_descriptor_sets[frame_index],
-            };
-            std.debug.print("{} ---------------------------\n", .{global_descriptor_sets[frame_index]});
-            // _ = frame_info;
-            // _ = render_pipeline;
-
-            // update
-            var ubo = GlobalUbo{};
-            ubo.projection = cam.projection_matrix;
-            ubo.view = cam.view_matrix;
-            ubo_buffers[frame_index].writeToBuffer(.{ .data = &ubo });
-            ubo_buffers[frame_index].flush(.{}) catch return error.Unknown;
-
-            // render
-            self.renderer.beginSwapchainRenderPass(command_buffer);
-            render_pipeline.render(&frame_info);
-            self.renderer.endSwapchainRenderPass(command_buffer);
-
-            self.renderer.endFrame() catch return error.Unknown;
+        camera.setViewYXZ(campos.inner, camrot.inner);
+        camera.setPrespectiveProjection(math.trigonometric.radians(50.0), aspect_ratio, 0.01, 10);
+        const command_buffer = (self.renderer.beginFrame() catch return error.Unknown) orelse return error.Unknown;
+        if (command_buffer == .null_handle) {
+            continue;
         }
+        const frame_index = self.renderer.current_frame_index;
+        const frame_info = FrameInfo{
+            .index = frame_index,
+            .time = delta_time,
+            .command_buffer = command_buffer,
+            .camera = &camera,
+            .global_descriptor_set = global_descriptor_sets[frame_index],
+        };
+        std.debug.print("{any} {} {} ---------------------------\n", .{ global_descriptor_sets, global_descriptor_sets[frame_index], frame_index });
+        // _ = frame_info;
+        // _ = render_pipeline;
+
+        // update
+        var ubo = GlobalUbo{};
+        ubo.projection = camera.projection_matrix;
+        ubo.view = camera.view_matrix;
+        ubo_buffers[frame_index].writeToBuffer(.{ .data = &ubo });
+        ubo_buffers[frame_index].flush(.{}) catch return error.Unknown;
+
+        // render
+        self.renderer.beginSwapchainRenderPass(command_buffer);
+        render_pipeline.render(&frame_info);
+        self.renderer.endSwapchainRenderPass(command_buffer);
+
+        self.renderer.endFrame() catch return error.Unknown;
+
+        // var camera_iter = camera_view.entityIterator();
+
+        // const aspect_ratio = self.renderer.aspectRatio();
+        // while (camera_iter.next()) |entity| {
+        //     const pos = camera_view.getConst(components.Position, entity);
+        //     const rot = camera_view.getConst(components.Rotation, entity);
+        //     const cam = camera_view.get(components.Camera, entity);
+        //
+        //     cam.setViewYXZ(pos.inner, rot.inner);
+        //     cam.setPrespectiveProjection(math.trigonometric.radians(50.0), aspect_ratio, 0.01, 10);
+        //     const command_buffer = (self.renderer.beginFrame() catch return error.Unknown) orelse return error.Unknown;
+        //     if (command_buffer == .null_handle) {
+        //         continue;
+        //     }
+        //     const frame_index = self.renderer.current_frame_index;
+        //     // const frame_info = FrameInfo{
+        //     //     .index = frame_index,
+        //     //     .time = delta_time,
+        //     //     .command_buffer = command_buffer,
+        //     //     .camera = cam,
+        //     //     .global_descriptor_set = global_descriptor_sets[frame_index],
+        //     // };
+        //     std.debug.print("{any} {} {} ---------------------------\n", .{ global_descriptor_sets, global_descriptor_sets[frame_index], frame_index });
+        //     // _ = frame_info;
+        //     // _ = render_pipeline;
+        //
+        //     // update
+        //     var ubo = GlobalUbo{};
+        //     ubo.projection = cam.projection_matrix;
+        //     ubo.view = cam.view_matrix;
+        //     ubo_buffers[frame_index].writeToBuffer(.{ .data = &ubo });
+        //     ubo_buffers[frame_index].flush(.{}) catch return error.Unknown;
+        //
+        //     // render
+        //     self.renderer.beginSwapchainRenderPass(command_buffer);
+        //     // render_pipeline.render(&frame_info);
+        //     self.renderer.endSwapchainRenderPass(command_buffer);
+        //
+        //     self.renderer.endFrame() catch return error.Unknown;
+        // }
     }
     self.device.device.deviceWaitIdle() catch return error.Unknown;
 }

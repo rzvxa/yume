@@ -17,7 +17,7 @@ pub const VulkanDescriptorPool = struct {
         device: *VulkanDevice,
         pool_sizes: []const vk.DescriptorPoolSize,
         pool_flags: vk.DescriptorPoolCreateFlags = .{},
-        max_sets: u32 = 1000,
+        max_sets: u32,
     };
 
     device: *VulkanDevice,
@@ -47,9 +47,10 @@ pub const VulkanDescriptorPool = struct {
         const alloc_info = vk.DescriptorSetAllocateInfo{
             .descriptor_pool = self.descriptor_pool,
             .descriptor_set_count = 1,
-            .p_set_layouts = @ptrCast(descriptor_set_layout),
+            .p_set_layouts = @as(*[1]vk.DescriptorSetLayout, descriptor_set_layout),
         };
-        try self.device.device.allocateDescriptorSets(&alloc_info, @ptrCast(descriptor));
+        try self.device.device.allocateDescriptorSets(&alloc_info, @as(*[1]vk.DescriptorSet, descriptor));
+        std.debug.print("HERE {}\n", .{descriptor});
     }
 
     fn freeDescriptors(self: *Self, descriptors: []vk.DescriptorSet) !void {
@@ -137,7 +138,7 @@ pub const VulkanDescriptorWriter = struct {
         self.writes.deinit();
     }
 
-    pub fn writeBuffer(self: *Self, binding: u32, buffer_info: *const DescriptorBufferInfo) !void {
+    pub fn writeBuffer(self: *Self, binding: u32, buffer_info: *DescriptorBufferInfo) !void {
         const binding_description = if (self.set_layout.bindings.getPtr(binding)) |descr|
             descr
         else
@@ -151,21 +152,20 @@ pub const VulkanDescriptorWriter = struct {
             .descriptor_count = 1,
             .descriptor_type = binding_description.descriptor_type,
             .p_image_info = undefined,
-            .p_buffer_info = @ptrCast(buffer_info),
+            .p_buffer_info = @as(*[1]vk.DescriptorBufferInfo, buffer_info),
             .p_texel_buffer_view = undefined,
         };
         try self.writes.append(write);
     }
 
-    pub fn flush(self: *Self, set: DescriptorSet) !void {
-        var set_ = set;
-        try self.pool.allocateDescriptor(&self.set_layout.descriptor_set_layout, &set_);
-        self.overwrite(set_);
+    pub fn flush(self: *Self, set: *DescriptorSet) !void {
+        try self.pool.allocateDescriptor(&self.set_layout.descriptor_set_layout, set);
+        self.overwrite(set);
     }
 
-    pub fn overwrite(self: *Self, set: DescriptorSet) void {
+    pub fn overwrite(self: *Self, set: *const DescriptorSet) void {
         for (0..self.writes.items.len) |i| {
-            self.writes.items[i].dst_set = set;
+            self.writes.items[i].dst_set = set.*;
         }
 
         self.pool.device.device.updateDescriptorSets(@as(u32, @truncate(self.writes.items.len)), self.writes.items.ptr, 0, null);
