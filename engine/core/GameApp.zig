@@ -7,6 +7,7 @@ const ecs = @import("coyote-ecs");
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const rendering = @import("../rendering/mod.zig");
+const Mesh = @import("../rendering/Mesh.zig");
 
 const backend = @import("../constants.zig").backend;
 
@@ -89,8 +90,6 @@ pub inline fn deinit(self: *GameApp) void {
     self.global_pool.deinit();
     self.renderer.deinit();
     self.device.deinit();
-    // TODO: this crashes!
-    // self.registry.deinit();
 }
 
 pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
@@ -112,6 +111,26 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
         ) catch return error.FailedToInitializeGlobalUbos;
         ubo_buffers[i].map(.{}) catch return error.FailedToInitializeGlobalUbos;
     }
+
+    // const Camera = self.world.components.create(components.Camera) catch return error.Unknown;
+    // const Position = self.world.components.create(components.Position) catch return error.Unknown;
+    // const Rotation = self.world.components.create(components.Rotation) catch return error.Unknown;
+    // const MeshComp = self.world.components.create(components.MeshComp) catch return error.Unknown;
+    const T = struct {
+        mesh: Mesh,
+        pos: Vec3,
+        rot: Vec3,
+    };
+    var cube: T = .{
+        .pos = Vec3.new(0, 0, 10),
+        .rot = Vec3.as(0),
+        .mesh = Mesh.fromFile("assets/models/cube.obj", &self.device, allocator) catch return error.Unknown,
+    };
+
+    // var cube = self.world.entities.create() catch return error.Unknown;
+    // cube.attach(Position, components.Position{ .inner = Vec3.as(0) }) catch return error.Unknown;
+    // cube.attach(Rotation, components.Rotation{ .inner = Vec3.as(0) }) catch return error.Unknown;
+    // cube.attach(MeshComp, components.MeshComp{ .inner = cube_mesh }) catch return error.Unknown;
 
     var bindings = allocator.alloc(DescriptorSetLayout.BindingOptions, 1) catch return error.OutOfMemory;
     bindings[0] = .{
@@ -142,16 +161,22 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
         allocator,
     ) catch return error.Unknown;
 
-    var camera = self.world.entities.create() catch return error.Unknown;
-    const Camera = self.world.components.create(components.Camera) catch return error.Unknown;
-    const Position = self.world.components.create(components.Position) catch return error.Unknown;
-    const Rotation = self.world.components.create(components.Rotation) catch return error.Unknown;
+    var camera: struct {
+        cam: components.Camera,
+        pos: Vec3,
+        rot: Vec3,
+    } = .{
+        .cam = components.Camera{},
+        .pos = Vec3.new(0, 0, -2.5),
+        .rot = Vec3.as(0),
+    };
+    // var camera = self.world.entities.create() catch return error.Unknown;
     {
-        var cam = components.Camera{};
-        cam.setViewTarget(Vec3.new(-1, -2, 2), Vec3.new(0, 0, 2.5), Vec3.up);
-        camera.attach(Camera, cam) catch return error.Unknown;
-        camera.attach(Position, components.Position{ .inner = Vec3.new(0, 0, -2.5) }) catch return error.Unknown;
-        camera.attach(Rotation, components.Rotation{ .inner = Vec3.as(0) }) catch return error.Unknown;
+        // var cam = components.Camera{};
+        camera.cam.setViewTarget(Vec3.new(-1, -2, 2), Vec3.new(0, 0, 2.5), Vec3.up);
+        // camera.attach(Camera, cam) catch return error.Unknown;
+        // camera.attach(Position, components.Position{ .inner = Vec3.new(0, 0, -2.5) }) catch return error.Unknown;
+        // camera.attach(Rotation, components.Rotation{ .inner = Vec3.as(0) }) catch return error.Unknown;
     }
 
     var now = std.time.nanoTimestamp();
@@ -175,43 +200,43 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
             else => @compileError("expected a struct type as `dispatcher`"),
         }
 
-        var camera_iter = self.world.entities.iteratorFilter(components.Camera);
+        // var camera_iter = self.world.entities.iteratorFilter(components.Camera);
 
         const aspect_ratio = self.renderer.aspectRatio();
-        while (camera_iter.next()) |entity| {
-            const pos = ecs.Cast(components.Position, entity.getOneComponent(components.Position));
-            const rot = ecs.Cast(components.Rotation, entity.getOneComponent(components.Rotation));
-            var cam = ecs.Cast(components.Camera, entity.getOneComponent(components.Camera));
+        // while (camera_iter.next()) |entity| {
+        // const pos = ecs.Cast(components.Position, entity.getOneComponent(components.Position));
+        // const rot = ecs.Cast(components.Rotation, entity.getOneComponent(components.Rotation));
+        // var cam = ecs.Cast(components.Camera, entity.getOneComponent(components.Camera));
 
-            cam.setViewYXZ(pos.inner, rot.inner);
-            cam.setPrespectiveProjection(math.trigonometric.radians(50.0), aspect_ratio, 0.01, 10);
-            const command_buffer = (self.renderer.beginFrame() catch return error.Unknown) orelse return error.Unknown;
-            if (command_buffer == .null_handle) {
-                continue;
-            }
-            const frame_index = self.renderer.current_frame_index;
-            const frame_info = FrameInfo{
-                .index = frame_index,
-                .time = delta_time,
-                .command_buffer = command_buffer,
-                .camera = cam,
-                .global_descriptor_set = global_descriptor_sets[frame_index],
-            };
-
-            // update
-            var ubo = GlobalUbo{};
-            ubo.projection = cam.projection_matrix;
-            ubo.view = cam.view_matrix;
-            ubo_buffers[frame_index].writeToBuffer(.{ .data = &ubo });
-            ubo_buffers[frame_index].flush(.{}) catch return error.Unknown;
-
-            // render
-            self.renderer.beginSwapchainRenderPass(command_buffer);
-            render_pipeline.render(&frame_info, self.world);
-            self.renderer.endSwapchainRenderPass(command_buffer);
-
-            self.renderer.endFrame() catch return error.Unknown;
+        camera.cam.setViewYXZ(camera.pos, camera.rot);
+        camera.cam.setPrespectiveProjection(math.trigonometric.radians(50.0), aspect_ratio, 0.01, 10);
+        const command_buffer = (self.renderer.beginFrame() catch return error.Unknown) orelse return error.Unknown;
+        if (command_buffer == .null_handle) {
+            continue;
         }
+        const frame_index = self.renderer.current_frame_index;
+        const frame_info = FrameInfo{
+            .index = frame_index,
+            .time = delta_time,
+            .command_buffer = command_buffer,
+            .camera = &camera.cam,
+            .global_descriptor_set = global_descriptor_sets[frame_index],
+        };
+
+        // update
+        var ubo = GlobalUbo{};
+        ubo.projection = camera.cam.projection_matrix;
+        ubo.view = camera.cam.view_matrix;
+        ubo_buffers[frame_index].writeToBuffer(.{ .data = &ubo });
+        ubo_buffers[frame_index].flush(.{}) catch return error.Unknown;
+
+        // render
+        self.renderer.beginSwapchainRenderPass(command_buffer);
+        render_pipeline.render(&frame_info, T, &cube);
+        self.renderer.endSwapchainRenderPass(command_buffer);
+
+        self.renderer.endFrame() catch return error.Unknown;
     }
+    // }
     self.device.device.deviceWaitIdle() catch return error.Unknown;
 }

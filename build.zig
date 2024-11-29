@@ -22,6 +22,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const obj_dep = b.dependency("obj", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const glfw_dep = b.dependency("mach_glfw", .{
         .target = target,
         .optimize = optimize,
@@ -29,6 +33,7 @@ pub fn build(b: *std.Build) void {
 
     const vk_bindings = vk_dep.module("vulkan-zig");
     const ziglm_module = ziglm_dep.module("ziglm");
+    const obj_module = obj_dep.module("obj");
     const glfw_module = glfw_dep.module("mach-glfw");
     const coyote_ecs_module = b.addModule("coyote_ecs", .{
         .root_source_file = b.path("vendor/coyote-ecs/src/coyote.zig"),
@@ -44,6 +49,7 @@ pub fn build(b: *std.Build) void {
 
     yume.addImport("vulkan", vk_bindings);
     yume.addImport("ziglm", ziglm_module);
+    yume.addImport("obj", obj_module);
     yume.addImport("glfw", glfw_module);
     yume.addImport("coyote-ecs", coyote_ecs_module);
 

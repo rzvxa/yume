@@ -3,6 +3,7 @@ const vk = @import("vulkan");
 const glfw = @import("glfw");
 const Allocator = std.mem.Allocator;
 
+const DSize = @import("../mod.zig").DSize;
 const List = @import("../../collections/List.zig").List;
 const VulkanWindow = @import("../../window/vulkan/VulkanWindow.zig");
 
@@ -196,6 +197,51 @@ pub fn createImageWithInfo(
 
     image_memory.* = try self.device.allocateMemory(&alloc_info, null);
     try self.device.bindImageMemory(image.*, image_memory.*, 0);
+}
+
+pub fn copyBuffer(self: *Self, src: vk.Buffer, dst: vk.Buffer, size: DSize) !void {
+    const command_buffer = try self.beginSingleTimeCommands();
+
+    const copy_region = vk.BufferCopy{
+        .src_offset = 0,
+        .dst_offset = 0,
+        .size = size,
+    };
+
+    self.device.cmdCopyBuffer(command_buffer, src, dst, 1, &.{copy_region});
+    try self.endSingleTimeCommands(command_buffer);
+}
+
+pub fn beginSingleTimeCommands(self: *Self) !vk.CommandBuffer {
+    const alloc_info = vk.CommandBufferAllocateInfo{
+        .level = .primary,
+        .command_pool = self.command_pool,
+        .command_buffer_count = 1,
+    };
+
+    var command_buffer: vk.CommandBuffer = .null_handle;
+    try self.device.allocateCommandBuffers(&alloc_info, @ptrCast(&command_buffer));
+
+    const begin_info = vk.CommandBufferBeginInfo{
+        .flags = .{ .one_time_submit_bit = true },
+    };
+
+    try self.device.beginCommandBuffer(command_buffer, &begin_info);
+    return command_buffer;
+}
+
+pub fn endSingleTimeCommands(self: *Self, command_buffer: vk.CommandBuffer) !void {
+    try self.device.endCommandBuffer(command_buffer);
+
+    const submit_info = vk.SubmitInfo{
+        .command_buffer_count = 1,
+        .p_command_buffers = &.{command_buffer},
+    };
+
+    try self.device.queueSubmit(self.graphics_queue, 1, &.{submit_info}, .null_handle);
+    try self.device.queueWaitIdle(self.graphics_queue);
+
+    self.device.freeCommandBuffers(self.command_pool, 1, &.{command_buffer});
 }
 
 fn findMemoryType(self: *Self, type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {

@@ -6,10 +6,14 @@ const ecs = @import("coyote-ecs");
 const Allocator = std.mem.Allocator;
 
 const Mat4 = @import("../math/mod.zig").Mat4;
+const Vec3 = @import("../math/mod.zig").Vec3;
 
 const VulkanDevice = @import("vulkan/VulkanDevice.zig");
 const VulkanPipeline = @import("vulkan/VulkanPipeline.zig");
 const FrameInfo = @import("mod.zig").FrameInfo;
+const components = @import("../components/mod.zig");
+const transform = @import("../components/transform.zig");
+const Mesh = @import("../rendering/Mesh.zig");
 
 const Self = @This();
 
@@ -27,7 +31,7 @@ pub fn init(device: *VulkanDevice, render_pass: vk.RenderPass, global_set_layout
     };
 }
 
-pub fn render(self: *const Self, frame_info: *const FrameInfo, world: *ecs.World) void {
+pub fn render(self: *const Self, frame_info: *const FrameInfo, T: type, cube: *T) void {
     self.pipeline.bind(frame_info.command_buffer);
 
     self.device.device.cmdBindDescriptorSets(
@@ -40,7 +44,53 @@ pub fn render(self: *const Self, frame_info: *const FrameInfo, world: *ecs.World
         0,
         null,
     );
-    _ = world;
+
+    // var renderables = world.entities.iteratorFilter(components.MeshComp);
+
+    // var x: u32 = 0;
+    // while (renderables.next()) |entity| {
+    // std.debug.print("XXSS {d} {}\n>> {any}\n", .{ x, entity, entity.getOneComponent(components.MeshComp) });
+    // x += 1;
+    // const pos = ecs.Cast(components.Position, entity.getOneComponent(components.Position));
+    // const rot = ecs.Cast(components.Rotation, entity.getOneComponent(components.Rotation));
+    // const mesh = ecs.Cast(components.MeshComp, entity.getOneComponent(components.MeshComp));
+    const scale = Vec3.new(10, 10, 10);
+    const push = SimplePushConstantData{
+        .model_matrix = transform.mat4(&cube.pos, &cube.rot, &scale),
+        .normal_matrix = Mat4.fromMat(3, 3, transform.normalMatrix(&cube.rot, &scale)),
+    };
+
+    self.device.device.cmdPushConstants(
+        frame_info.command_buffer,
+        self.pipeline_layout,
+        .{ .vertex_bit = true, .fragment_bit = true },
+        0,
+        @sizeOf(SimplePushConstantData),
+        &push,
+    );
+    // if (mesh.inner) |*m| {
+    cube.mesh.bind(frame_info.command_buffer, self.device);
+    cube.mesh.draw(frame_info.command_buffer, self.device);
+    // }
+    // }
+
+    // for (auto& kv : frameInfo.gameObjects) {
+    // 	auto& go = kv.second;
+    // 	if (go.mesh == nullptr) continue;
+    // 	SimplePushConstantData push{};
+    // 	push.modelMatrix = go.transform.mat4();
+    // 	push.normalMatrix = go.transform.normalMatrix();
+    //
+    // 	vkCmdPushConstants(
+    // 		frameInfo.commandBuffer,
+    // 		m_pipelineLayout,
+    // 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+    // 		0,
+    // 		sizeof(SimplePushConstantData),
+    // 		&push);
+    // 	go.mesh->bind(frameInfo.commandBuffer);
+    // 	go.mesh->draw(frameInfo.commandBuffer);
+    // }
 
     // TODO Render
 }
@@ -80,6 +130,6 @@ fn createPipeline(device: *VulkanDevice, layout: vk.PipelineLayout, render_pass:
 }
 
 const SimplePushConstantData = struct {
-    model_matrix: Mat4 = Mat4.new(1),
-    normal_matrix: Mat4 = Mat4.new(1),
+    model_matrix: Mat4 = Mat4.as(1),
+    normal_matrix: Mat4 = Mat4.as(1),
 };

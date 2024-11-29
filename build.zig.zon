@@ -59,6 +59,10 @@
             .url = "https://github.com/karlobratko/ziglm/archive/24e3bf3c508861bd8122ffc794bbf2ddbf17d841.tar.gz",
             .hash = "1220d855461f71a116ee05650706fcc46c43d506b1b65afd0bbc8387778dfb8b74bb",
         },
+        .obj = .{
+            .url = "https://github.com/chip2n/zig-obj/archive/4ce054733812eb0b28d97adb0ea1f66f21fd41c8.tar.gz",
+            .hash = "12205e75ae77fad4d4d2e1b6489270612d8e44c8b9268580f0c9123f0f2fc7175a74",
+        },
         .mach_glfw = .{
             .path = "vendor/mach-glfw",
         },
