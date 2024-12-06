@@ -122,7 +122,7 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
         rot: Vec3,
     };
     var cube: T = .{
-        .pos = Vec3.new(0, 0, 10),
+        .pos = Vec3.new(0, 0, 0),
         .rot = Vec3.as(0),
         .mesh = Mesh.fromFile("assets/models/cube.obj", &self.device, allocator) catch return error.Unknown,
     };
@@ -173,7 +173,7 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
     // var camera = self.world.entities.create() catch return error.Unknown;
     {
         // var cam = components.Camera{};
-        camera.cam.setViewTarget(Vec3.new(-1, -2, 2), Vec3.new(0, 0, 2.5), Vec3.up);
+        camera.cam.setViewTarget(camera.pos, cube.pos, Vec3.up);
         // camera.attach(Camera, cam) catch return error.Unknown;
         // camera.attach(Position, components.Position{ .inner = Vec3.new(0, 0, -2.5) }) catch return error.Unknown;
         // camera.attach(Rotation, components.Rotation{ .inner = Vec3.as(0) }) catch return error.Unknown;
@@ -209,7 +209,7 @@ pub inline fn run(self: *GameApp, comptime dispatcher: type) RunError!void {
         // var cam = ecs.Cast(components.Camera, entity.getOneComponent(components.Camera));
 
         camera.cam.setViewYXZ(camera.pos, camera.rot);
-        camera.cam.setPrespectiveProjection(math.trigonometric.radians(50.0), aspect_ratio, 0.01, 10);
+        camera.cam.setPrespectiveProjection(math.trigonometric.radians(360.0), aspect_ratio, 0.01, 10);
         const command_buffer = (self.renderer.beginFrame() catch return error.Unknown) orelse return error.Unknown;
         if (command_buffer == .null_handle) {
             continue;

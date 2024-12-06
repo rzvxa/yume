@@ -8,11 +8,11 @@ const std = @import("std");
 const Self = @This();
 
 const epsilon = std.math.floatEps(f32);
-projection_matrix: Mat4 = Mat4.scalar(1),
-view_matrix: Mat4 = Mat4.scalar(1),
+projection_matrix: Mat4 = Mat4.as(1),
+view_matrix: Mat4 = Mat4.as(1),
 
 pub fn setOrthographicProjection(self: *Self, left: f32, right: f32, top: f32, bottom: f32, near: f32, far: f32) void {
-    self.projection_matrix = Mat4.scalar(1);
+    self.projection_matrix = Mat4.as(1);
     self.projection_matrix.setAt(0, 0, 2 / (right - left));
     self.projection_matrix.setAt(1, 1, 2 / (bottom - top));
     self.projection_matrix.setAt(2, 2, 1 / (far - near));
@@ -24,7 +24,7 @@ pub fn setOrthographicProjection(self: *Self, left: f32, right: f32, top: f32, b
 pub fn setPrespectiveProjection(self: *Self, fovy: f32, aspect: f32, near: f32, far: f32) void {
     assert(@abs(aspect - epsilon) > 0, "aspect ratio can't be 0.", .{});
     const tanHalfFovy = @tan(fovy / 2);
-    self.projection_matrix = Mat4.scalar(1);
+    self.projection_matrix = Mat4.as(1);
     self.projection_matrix.setAt(0, 0, 1 / (aspect * tanHalfFovy));
     self.projection_matrix.setAt(1, 1, 1 / (tanHalfFovy));
     self.projection_matrix.setAt(2, 2, far / (far - near));
@@ -37,7 +37,7 @@ pub fn setViewDirection(self: *Self, position: Vec3, direction: Vec3, up: Vec3) 
     const u = Vec3.cross(w, up).normalize();
     const v = Vec3.cross(w, u);
 
-    self.view_matrix = Mat4.scalar(1);
+    self.view_matrix = Mat4.as(1);
     self.view_matrix.setAt(0, 0, u.x);
     self.view_matrix.setAt(1, 0, u.y);
     self.view_matrix.setAt(2, 0, u.z);
@@ -72,7 +72,7 @@ pub fn setViewYXZ(self: *Self, position: Vec3, rotation: Vec3) void {
     const u = Vec3.new((c1 * c3 + s1 * s2 * s3), (c2 * s3), (c1 * s2 * s3 - c3 * s1));
     const v = Vec3.new((c3 * s1 * s2 - c1 * s3), (c2 * c3), (c1 * c3 * s2 + s1 * s3));
     const w = Vec3.new((c2 * s1), (-s2), (c1 * c2));
-    self.view_matrix = Mat4.scalar(1);
+    self.view_matrix = Mat4.as(1);
     self.view_matrix.setAt(0, 0, u.x);
     self.view_matrix.setAt(1, 0, u.y);
     self.view_matrix.setAt(2, 0, u.z);

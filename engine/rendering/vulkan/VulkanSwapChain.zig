@@ -302,21 +302,22 @@ fn createRenderPass(
     swapchain_result: *const CreateSwapchainResult,
     depth_format: vk.Format,
 ) !vk.RenderPass {
-    const depth_attachment = vk.AttachmentDescription{
-        .format = depth_format,
-        .samples = .{ .@"1_bit" = true },
-        .load_op = .clear,
-        .store_op = .dont_care,
-        .stencil_load_op = .dont_care,
-        .stencil_store_op = .dont_care,
-        .initial_layout = .undefined,
-        .final_layout = .depth_stencil_attachment_optimal,
-    };
+    _ = depth_format;
+    // const depth_attachment = vk.AttachmentDescription{
+    //     .format = depth_format,
+    //     .samples = .{ .@"1_bit" = true },
+    //     .load_op = .clear,
+    //     .store_op = .dont_care,
+    //     .stencil_load_op = .dont_care,
+    //     .stencil_store_op = .dont_care,
+    //     .initial_layout = .undefined,
+    //     .final_layout = .depth_stencil_attachment_optimal,
+    // };
 
-    const depth_attachment_ref = vk.AttachmentReference{
-        .attachment = 1,
-        .layout = .depth_stencil_attachment_optimal,
-    };
+    // const depth_attachment_ref = vk.AttachmentReference{
+    //     .attachment = 1,
+    //     .layout = .depth_stencil_attachment_optimal,
+    // };
 
     const color_attachment = vk.AttachmentDescription{
         .format = swapchain_result.swap_chain_image_format,
@@ -329,36 +330,36 @@ fn createRenderPass(
         .final_layout = .present_src_khr,
     };
 
-    const color_attachment_ref: [1]vk.AttachmentReference = .{.{
+    const color_attachment_ref = vk.AttachmentReference{
         .attachment = 0,
         .layout = .color_attachment_optimal,
-    }};
+    };
 
     const subpass = vk.SubpassDescription{
         .pipeline_bind_point = .graphics,
         .color_attachment_count = 1,
-        .p_color_attachments = &color_attachment_ref,
-        .p_depth_stencil_attachment = &depth_attachment_ref,
+        .p_color_attachments = @ptrCast(&color_attachment_ref),
+        // .p_depth_stencil_attachment = &depth_attachment_ref,
     };
 
-    const dependency = vk.SubpassDependency{
-        .src_subpass = 0,
-        .dst_subpass = 0,
-        .src_stage_mask = .{ .color_attachment_output_bit = true, .early_fragment_tests_bit = true },
-        .dst_stage_mask = .{ .color_attachment_output_bit = true, .early_fragment_tests_bit = true },
-        .src_access_mask = .{},
-        .dst_access_mask = .{ .color_attachment_write_bit = true, .depth_stencil_attachment_write_bit = true },
-        .dependency_flags = .{ .by_region_bit = true },
-    };
+    // const dependency = vk.SubpassDependency{
+    //     .src_subpass = 0,
+    //     .dst_subpass = 0,
+    //     .src_stage_mask = .{ .color_attachment_output_bit = true, .early_fragment_tests_bit = true },
+    //     .dst_stage_mask = .{ .color_attachment_output_bit = true, .early_fragment_tests_bit = true },
+    //     .src_access_mask = .{},
+    //     .dst_access_mask = .{ .color_attachment_write_bit = true, .depth_stencil_attachment_write_bit = true },
+    //     .dependency_flags = .{},
+    // };
 
-    const attachments: [2]vk.AttachmentDescription = .{ color_attachment, depth_attachment };
+    // const attachments: [2]vk.AttachmentDescription = .{ color_attachment, depth_attachment };
     const render_pass_info = vk.RenderPassCreateInfo{
-        .attachment_count = @as(u32, @truncate(attachments.len)),
-        .p_attachments = &attachments,
+        .attachment_count = 1,
+        .p_attachments = @ptrCast(&color_attachment),
         .subpass_count = 1,
         .p_subpasses = &.{subpass},
-        .dependency_count = 1,
-        .p_dependencies = &.{dependency},
+        // .dependency_count = 1,
+        // .p_dependencies = &.{dependency},
     };
 
     return try device.device.createRenderPass(&render_pass_info, null);
@@ -440,16 +441,18 @@ fn createFramebuffers(
     depth_result: *const CreateDepthResourcesResult,
     allocator: Allocator,
 ) ![]vk.Framebuffer {
+    _ = depth_result;
     const image_count = swapchain_result.swap_chain_images.len;
     var swap_chain_frame_buffers = try allocator.alloc(vk.Framebuffer, image_count);
     for (0..image_count) |i| {
-        const attachments: [2]vk.ImageView = .{ swapchain_image_views[i], depth_result.depth_image_views[i] };
+        // const attachments: [2]vk.ImageView = .{ swapchain_image_views[i], depth_result.depth_image_views[i] };
+        // const attachments: [2]vk.ImageView = .{ swapchain_image_views[i], depth_result.depth_image_views[i] };
 
         const swap_chain_extent = swapchain_result.swap_chain_extent;
         const frame_buffer_info = vk.FramebufferCreateInfo{
             .render_pass = render_pass,
-            .attachment_count = @as(u32, @truncate(attachments.len)),
-            .p_attachments = &attachments,
+            .attachment_count = 1,
+            .p_attachments = @ptrCast(&swapchain_image_views[i]),
             .width = swap_chain_extent.width,
             .height = swap_chain_extent.height,
             .layers = 1,

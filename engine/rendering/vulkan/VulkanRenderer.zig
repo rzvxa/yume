@@ -102,10 +102,11 @@ pub fn beginSwapchainRenderPass(self: *const Self, command_buffer: vk.CommandBuf
     assert(self.is_frame_started, "Can not call `beginSwapchainRenderPass` while frame is not in progress", .{});
     assert(command_buffer == self.currentCommandBuffer(), "Can not begin render pass on command bufferfrom a different frame", .{});
 
-    const clear_values: [2]vk.ClearValue = .{
-        .{ .color = .{ .float_32 = .{ 0.3, 0.3, 0.3, 0 } } },
-        .{ .depth_stencil = .{ .depth = 1, .stencil = 0 } },
-    };
+    // const clear_values: [2]vk.ClearValue = .{
+    //     .{ .color = .{ .float_32 = .{ 0.3, 0.3, 0.3, 0 } } },
+    //     .{ .depth_stencil = .{ .depth = 1, .stencil = 0 } },
+    // };
+    const clear_val = vk.ClearValue{ .color = .{ .float_32 = .{ 0.3, 0.3, 0.3, 0 } } };
 
     const render_pass_info = vk.RenderPassBeginInfo{
         .render_pass = self.swapchain.render_pass,
@@ -115,8 +116,8 @@ pub fn beginSwapchainRenderPass(self: *const Self, command_buffer: vk.CommandBuf
             .offset = .{ .x = 0, .y = 0 },
             .extent = self.swapchain.swap_chain_extent,
         },
-        .clear_value_count = 2,
-        .p_clear_values = &clear_values,
+        .clear_value_count = 1,
+        .p_clear_values = @ptrCast(&clear_val),
     };
 
     self.device.device.cmdBeginRenderPass(command_buffer, &render_pass_info, .@"inline");
@@ -124,8 +125,8 @@ pub fn beginSwapchainRenderPass(self: *const Self, command_buffer: vk.CommandBuf
     const viewport = vk.Viewport{
         .x = 0,
         .y = 0,
-        .width = @bitCast(self.swapchain.swap_chain_extent.width),
-        .height = @bitCast(self.swapchain.swap_chain_extent.height),
+        .width = 800,
+        .height = 600,
         .min_depth = 0,
         .max_depth = 1,
     };

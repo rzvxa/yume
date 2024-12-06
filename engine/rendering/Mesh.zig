@@ -93,6 +93,7 @@ pub fn fromFile(comptime filepath: []const u8, device: *VulkanDevice, allocator:
                 r.value_ptr.* = @as(u32, @truncate(vertices.items.len));
                 try vertices.append(vertex);
             }
+            std.debug.print("{any}\n", .{vertex});
             try indices.append(r.value_ptr.*);
         }
     }
@@ -100,7 +101,6 @@ pub fn fromFile(comptime filepath: []const u8, device: *VulkanDevice, allocator:
 }
 
 pub fn bind(self: *Self, command_buffer: vk.CommandBuffer, device: *VulkanDevice) void {
-    std.debug.print("HERE\n {any} \n\n\n", .{self.vertex_buffer});
     device.device.cmdBindVertexBuffers(
         command_buffer,
         0,
@@ -108,7 +108,6 @@ pub fn bind(self: *Self, command_buffer: vk.CommandBuffer, device: *VulkanDevice
         @ptrCast(&self.vertex_buffer.buffer),
         &.{0},
     );
-    std.debug.print("NEXT\n\n\n", .{});
 
     if (self.has_index_buffer) {
         device.device.cmdBindIndexBuffer(command_buffer, self.index_buffer.buffer, 0, .uint32);

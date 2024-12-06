@@ -54,7 +54,7 @@ pub fn render(self: *const Self, frame_info: *const FrameInfo, T: type, cube: *T
     // const pos = ecs.Cast(components.Position, entity.getOneComponent(components.Position));
     // const rot = ecs.Cast(components.Rotation, entity.getOneComponent(components.Rotation));
     // const mesh = ecs.Cast(components.MeshComp, entity.getOneComponent(components.MeshComp));
-    const scale = Vec3.new(10, 10, 10);
+    const scale = Vec3.new(1, 1, 1);
     const push = SimplePushConstantData{
         .model_matrix = transform.mat4(&cube.pos, &cube.rot, &scale),
         .normal_matrix = Mat4.fromMat(3, 3, transform.normalMatrix(&cube.rot, &scale)),
@@ -122,8 +122,8 @@ fn createPipeline(device: *VulkanDevice, layout: vk.PipelineLayout, render_pass:
     pipeline_config_info.pipeline_layout = layout;
     return try VulkanPipeline.init(
         device,
-        "assets/shaders/simple_shader.vert.spv",
-        "assets/shaders/simple_shader.frag.spv",
+        "assets/shaders/compiled/simple_shader.vert.spv",
+        "assets/shaders/compiled/simple_shader.frag.spv",
         &pipeline_config_info,
         allocator,
     );

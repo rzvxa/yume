@@ -69,11 +69,13 @@ pub fn init(
         .p_stages = &stages,
         .p_vertex_input_state = &vertex_input_info,
         .p_input_assembly_state = &config_info.input_assembly_info,
+        .p_tessellation_state = null,
         .p_viewport_state = &config_info.viewport_info,
         .p_rasterization_state = &config_info.rasterization_info,
         .p_multisample_state = &config_info.multisample_info,
         .p_color_blend_state = &config_info.color_blend_info,
-        .p_depth_stencil_state = &config_info.depth_stencil_info,
+        // .p_depth_stencil_state = &config_info.depth_stencil_info,
+        .p_depth_stencil_state = null,
         .p_dynamic_state = &config_info.dyncamic_state_info,
 
         .layout = config_info.pipeline_layout,
@@ -104,20 +106,20 @@ pub inline fn defaultPipelineConfigInfo(config_info: *PipelineConfigInfo, alloca
     config_info.* = .{
         .viewport_info = .{
             .viewport_count = 1,
-            .p_viewports = null,
+            .p_viewports = undefined,
             .scissor_count = 1,
-            .p_scissors = null,
+            .p_scissors = undefined,
         },
         .input_assembly_info = .{
             .topology = .triangle_list,
-            .primitive_restart_enable = vk.TRUE,
+            .primitive_restart_enable = vk.FALSE, // TODO: make me true?
         },
         .rasterization_info = .{
             .depth_clamp_enable = vk.FALSE,
             .rasterizer_discard_enable = vk.FALSE,
             .polygon_mode = .fill,
             .line_width = 1,
-            .cull_mode = .{},
+            .cull_mode = .{ .back_bit = true },
             .front_face = .clockwise,
             .depth_bias_enable = vk.FALSE,
             .depth_bias_constant_factor = 0,
@@ -125,10 +127,10 @@ pub inline fn defaultPipelineConfigInfo(config_info: *PipelineConfigInfo, alloca
             .depth_bias_slope_factor = 0,
         },
         .multisample_info = .{
-            .sample_shading_enable = vk.TRUE,
+            .sample_shading_enable = vk.FALSE, // TODO make me true?
             .rasterization_samples = .{ .@"1_bit" = true },
             .min_sample_shading = 1,
-            .p_sample_mask = null,
+            // .p_sample_mask = null,
             .alpha_to_coverage_enable = vk.FALSE,
             .alpha_to_one_enable = vk.FALSE,
         },
