@@ -1,6 +1,6 @@
 pub const collections = @import("collections/mod.zig");
 
-pub const GameApp = @import("core/GameApp.zig");
+pub const GameApp = @import("core/GameApp.zig").GameApp;
 
 // math
 pub const math = @import("math/mod.zig");

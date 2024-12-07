@@ -9,9 +9,9 @@ const Editor = struct {
 };
 
 pub fn main() !void {
-    var app = try GameApp.init("Yume Editor");
+    var app = try GameApp(Editor).init("Yume Editor");
     defer app.deinit();
 
-    try app.run(Editor);
+    try app.run();
     std.debug.print("Bye!", .{});
 }
