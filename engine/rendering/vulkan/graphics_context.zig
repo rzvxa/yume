@@ -129,6 +129,47 @@ pub const GraphicsContext = struct {
             .memory_type_index = try self.findMemoryTypeIndex(requirements.memory_type_bits, flags),
         }, null);
     }
+
+    pub fn createBuffer(
+        self: GraphicsContext,
+        size: vk.DeviceSize,
+        usage: vk.BufferUsageFlags,
+        properties: vk.MemoryPropertyFlags,
+    ) !struct {
+        buf: vk.Buffer,
+        mem: vk.DeviceMemory,
+    } {
+        const buffer_info = vk.BufferCreateInfo{
+            .size = size,
+            .usage = usage,
+            .sharing_mode = .exclusive,
+        };
+
+        const buffer = try self.dev.createBuffer(&buffer_info, null);
+
+        const memory_requirements = self.dev.getBufferMemoryRequirements(buffer);
+        const alloc_info = vk.MemoryAllocateInfo{
+            .allocation_size = memory_requirements.size,
+            .memory_type_index = try self.findMemoryTypeIndex(memory_requirements.memory_type_bits, properties),
+        };
+
+        const buffer_memory = try self.dev.allocateMemory(&alloc_info, null);
+        try self.dev.bindBufferMemory(buffer, buffer_memory, 0);
+        return .{ .buf = buffer, .mem = buffer_memory };
+    }
+
+    pub fn copyBuffer(self: GraphicsContext, src: vk.Buffer, dst: vk.Buffer, size: vk.DeviceSize) !void {
+        const command_buffer = try self.beginSingleTimeCommands();
+
+        const copy_region = vk.BufferCopy{
+            .src_offset = 0,
+            .dst_offset = 0,
+            .size = size,
+        };
+
+        self.device.cmdCopyBuffer(command_buffer, src, dst, 1, &.{copy_region});
+        try self.endSingleTimeCommands(command_buffer);
+    }
 };
 
 pub const Queue = struct {

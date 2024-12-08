@@ -11,41 +11,35 @@ color: math.Vec3,
 normal: math.Vec3,
 uv: math.Vec2,
 
-pub fn getBindingDescriptions(allocator: Allocator) ![]vk.VertexInputBindingDescription {
-    var result = try allocator.alloc(vk.VertexInputBindingDescription, 1);
-    result[0] = .{
-        .binding = 0,
-        .stride = @sizeOf(Self),
-        .input_rate = .vertex,
-    };
-    return result;
-}
+pub const binding_description = vk.VertexInputBindingDescription{
+    .binding = 0,
+    .stride = @sizeOf(Self),
+    .input_rate = .vertex,
+};
 
-pub fn getAttributeDescriptions(allocator: Allocator) ![]vk.VertexInputAttributeDescription {
-    var result = try allocator.alloc(vk.VertexInputAttributeDescription, 4);
-    result[0] = .{
-        .location = 0,
+pub const attribute_description = [_]vk.VertexInputAttributeDescription{
+    .{
         .binding = 0,
+        .location = 0,
         .format = .r32g32b32_sfloat,
         .offset = @offsetOf(Self, "position"),
-    };
-    result[1] = .{
-        .location = 1,
+    },
+    .{
         .binding = 0,
+        .location = 1,
         .format = .r32g32b32_sfloat,
         .offset = @offsetOf(Self, "color"),
-    };
-    result[2] = .{
-        .location = 2,
+    },
+    .{
         .binding = 0,
+        .location = 2,
         .format = .r32g32b32_sfloat,
         .offset = @offsetOf(Self, "normal"),
-    };
-    result[3] = .{
-        .location = 3,
+    },
+    .{
         .binding = 0,
+        .location = 3,
         .format = .r32g32_sfloat,
         .offset = @offsetOf(Self, "uv"),
-    };
-    return result;
-}
+    },
+};

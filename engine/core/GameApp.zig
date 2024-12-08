@@ -8,6 +8,10 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const Window = @import("../window/Window.zig");
 const renderer = @import("../rendering/vulkan/renderer.zig");
 const GraphicsContext = @import("../rendering/vulkan/graphics_context.zig").GraphicsContext;
+const Mesh = @import("../rendering/Mesh.zig");
+const Vertex = @import("../rendering/Vertex.zig");
+const Vec3 = @import("../root.zig").Vec3;
+const Vec2 = @import("../root.zig").Vec2;
 
 pub const StartupError = error{
     GLFWInit,
@@ -57,6 +61,27 @@ pub fn GameApp(comptime Dispatcher: type) type {
 
         pub inline fn run(self: *Self) RunError!void {
             var now = std.time.nanoTimestamp();
+            var triangle = Mesh.init(self.renderer, &.{
+                .{
+                    .position = Vec3.new(0, -0.5, 0),
+                    .color = Vec3.new(1, 0, 0),
+                    .normal = Vec3.as(0),
+                    .uv = Vec2.as(0),
+                },
+                .{
+                    .position = Vec3.new(0.5, 0.5, 0),
+                    .color = Vec3.new(0, 1, 0),
+                    .normal = Vec3.as(0),
+                    .uv = Vec2.as(0),
+                },
+                .{
+                    .position = Vec3.new(-0.5, 0.5, 0),
+                    .color = Vec3.new(0, 0, 1),
+                    .normal = Vec3.as(0),
+                    .uv = Vec2.as(0),
+                },
+            }, &.{}) catch return error.Unknown;
+            defer triangle.deinit();
             while (!self.window.shouldClose()) {
                 const size = self.window.getFramebufferSize();
 
@@ -74,7 +99,7 @@ pub fn GameApp(comptime Dispatcher: type) type {
                 };
 
                 self.update(dt);
-                self.renderer.render() catch return error.Unknown;
+                self.renderer.render(size, &triangle) catch return error.Unknown;
             }
             self.renderer.swapchain.waitForAllFences() catch return error.Unknown;
             self.renderer.gctx.dev.deviceWaitIdle() catch return error.Unknown;

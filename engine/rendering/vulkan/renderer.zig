@@ -6,47 +6,42 @@ const GraphicsContext = @import("graphics_context.zig").GraphicsContext;
 const Swapchain = @import("swapchain.zig").Swapchain;
 const Allocator = std.mem.Allocator;
 
+const assert = @import("../../assert.zig").assert;
+const Vec3 = @import("../../root.zig").Vec3;
+const Vec2 = @import("../../root.zig").Vec2;
 const Window = @import("../../window/Window.zig");
-
-const Vertex = struct {
-    const binding_description = vk.VertexInputBindingDescription{
-        .binding = 0,
-        .stride = @sizeOf(Vertex),
-        .input_rate = .vertex,
-    };
-
-    const attribute_description = [_]vk.VertexInputAttributeDescription{
-        .{
-            .binding = 0,
-            .location = 0,
-            .format = .r32g32_sfloat,
-            .offset = @offsetOf(Vertex, "pos"),
-        },
-        .{
-            .binding = 0,
-            .location = 1,
-            .format = .r32g32b32_sfloat,
-            .offset = @offsetOf(Vertex, "color"),
-        },
-    };
-
-    pos: [2]f32,
-    color: [3]f32,
-};
+const Vertex = @import("../Vertex.zig");
+const Mesh = @import("../Mesh.zig");
 
 const vertices = [_]Vertex{
-    .{ .pos = .{ 0, -0.5 }, .color = .{ 1, 0, 0 } },
-    .{ .pos = .{ 0.5, 0.5 }, .color = .{ 0, 1, 0 } },
-    .{ .pos = .{ -0.5, 0.5 }, .color = .{ 0, 0, 1 } },
+    .{
+        .position = Vec3.new(0, -0.5, 0),
+        .color = Vec3.new(1, 0, 0),
+        .normal = Vec3.as(0),
+        .uv = Vec2.as(0),
+    },
+    .{
+        .position = Vec3.new(0.5, 0.5, 0),
+        .color = Vec3.new(0, 1, 0),
+        .normal = Vec3.as(0),
+        .uv = Vec2.as(0),
+    },
+    .{
+        .position = Vec3.new(-0.5, 0.5, 0),
+        .color = Vec3.new(0, 0, 1),
+        .normal = Vec3.as(0),
+        .uv = Vec2.as(0),
+    },
 };
 
 pub fn Renderer() type {
     return struct {
         const Self = @This();
 
+        is_frame_started: bool = false,
+
         allocator: Allocator,
         extent: vk.Extent2D,
-        window: *Window,
         gctx: GraphicsContext,
         swapchain: Swapchain,
         pipeline_layout: vk.PipelineLayout,
@@ -54,8 +49,6 @@ pub fn Renderer() type {
         pipeline: vk.Pipeline,
         framebuffers: []vk.Framebuffer,
         pool: vk.CommandPool,
-        buffer: vk.Buffer,
-        memory: vk.DeviceMemory,
         cmdbufs: []vk.CommandBuffer,
 
         pub fn init(window: *Window, allocator: Allocator) !*Self {
@@ -63,7 +56,6 @@ pub fn Renderer() type {
             self.* = .{
                 .allocator = allocator,
                 .extent = vk.Extent2D{ .width = 800, .height = 600 },
-                .window = window,
                 .gctx = GraphicsContext.init(allocator, window.title, window.window) catch return error.FailedToInitializeGraphicsContext,
                 .swapchain = try Swapchain.init(&self.gctx, allocator, self.extent),
                 .pipeline_layout = try self.gctx.dev.createPipelineLayout(&.{
@@ -79,18 +71,9 @@ pub fn Renderer() type {
                 .pool = try self.gctx.dev.createCommandPool(&.{
                     .queue_family_index = self.gctx.graphics_queue.family,
                 }, null),
-                .buffer = try self.gctx.dev.createBuffer(&.{
-                    .size = @sizeOf(@TypeOf(vertices)),
-                    .usage = .{ .transfer_dst_bit = true, .vertex_buffer_bit = true },
-                    .sharing_mode = .exclusive,
-                }, null),
-                .memory = try self.gctx.allocate(self.gctx.dev.getBufferMemoryRequirements(self.buffer), .{ .device_local_bit = true }),
                 .cmdbufs = undefined,
             };
             std.log.debug("Using device: {s}", .{self.gctx.deviceName()});
-
-            try self.gctx.dev.bindBufferMemory(self.buffer, self.memory, 0);
-            try self.uploadVertices();
 
             self.cmdbufs = try self.createCommandBuffers();
 
@@ -99,8 +82,6 @@ pub fn Renderer() type {
 
         pub fn deinit(self: *Self) void {
             destroyCommandBuffers(&self.gctx, self.pool, self.allocator, self.cmdbufs);
-            self.gctx.dev.freeMemory(self.memory, null);
-            self.gctx.dev.destroyBuffer(self.buffer, null);
             self.gctx.dev.destroyCommandPool(self.pool, null);
             destroyFramebuffers(&self.gctx, self.allocator, self.framebuffers);
             self.gctx.dev.destroyPipeline(self.pipeline, null);
@@ -110,13 +91,21 @@ pub fn Renderer() type {
             self.gctx.deinit();
         }
 
-        pub fn render(self: *Self) !void {
+        pub fn render(self: *Self, extend: glfw.Window.Size, mesh: *Mesh) !void {
             const allocator = self.allocator;
-            const size = self.window.getFramebufferSize();
-            const w = size.width;
-            const h = size.height;
+            const w = extend.width;
+            const h = extend.height;
 
-            const cmdbuf = self.cmdbufs[self.swapchain.image_index];
+            try self.beginFrame();
+            self.beginSwapchainRenderPass();
+            const cmdbuf = self.currentCommandBuffer();
+
+            self.gctx.dev.cmdBindPipeline(cmdbuf, .graphics, self.pipeline);
+            mesh.bind(cmdbuf, &self.gctx);
+            mesh.draw(cmdbuf, &self.gctx);
+
+            self.endSwapchainRenderPass();
+            try self.endFrame();
 
             const state = self.swapchain.present(cmdbuf) catch |err| switch (err) {
                 error.OutOfDateKHR => Swapchain.PresentState.suboptimal,
@@ -158,19 +147,19 @@ pub fn Renderer() type {
                 @memcpy(gpu_vertices, vertices[0..]);
             }
 
-            try copyBuffer(&self.gctx, self.pool, self.buffer, staging_buffer, @sizeOf(@TypeOf(vertices)));
+            try self.copyBuffer(self.buffer, staging_buffer, @sizeOf(@TypeOf(vertices)));
         }
 
-        fn copyBuffer(gc: *const GraphicsContext, pool: vk.CommandPool, dst: vk.Buffer, src: vk.Buffer, size: vk.DeviceSize) !void {
+        pub fn copyBuffer(self: *Self, dst: vk.Buffer, src: vk.Buffer, size: vk.DeviceSize) !void {
             var cmdbuf_handle: vk.CommandBuffer = undefined;
-            try gc.dev.allocateCommandBuffers(&.{
-                .command_pool = pool,
+            try self.gctx.dev.allocateCommandBuffers(&.{
+                .command_pool = self.pool,
                 .level = .primary,
                 .command_buffer_count = 1,
             }, @ptrCast(&cmdbuf_handle));
-            defer gc.dev.freeCommandBuffers(pool, 1, @ptrCast(&cmdbuf_handle));
+            defer self.gctx.dev.freeCommandBuffers(self.pool, 1, @ptrCast(&cmdbuf_handle));
 
-            const cmdbuf = GraphicsContext.CommandBuffer.init(cmdbuf_handle, gc.dev.wrapper);
+            const cmdbuf = GraphicsContext.CommandBuffer.init(cmdbuf_handle, self.gctx.dev.wrapper);
 
             try cmdbuf.beginCommandBuffer(&.{
                 .flags = .{ .one_time_submit_bit = true },
@@ -190,20 +179,27 @@ pub fn Renderer() type {
                 .p_command_buffers = (&cmdbuf.handle)[0..1],
                 .p_wait_dst_stage_mask = undefined,
             };
-            try gc.dev.queueSubmit(gc.graphics_queue.handle, 1, @ptrCast(&si), .null_handle);
-            try gc.dev.queueWaitIdle(gc.graphics_queue.handle);
+            try self.gctx.dev.queueSubmit(self.gctx.graphics_queue.handle, 1, @ptrCast(&si), .null_handle);
+            try self.gctx.dev.queueWaitIdle(self.gctx.graphics_queue.handle);
         }
 
-        fn createCommandBuffers(self: *Self) ![]vk.CommandBuffer {
-            const cmdbufs = try self.allocator.alloc(vk.CommandBuffer, self.framebuffers.len);
-            errdefer self.allocator.free(cmdbufs);
+        pub fn beginFrame(self: *Self) !void {
+            assert(!self.is_frame_started, "Can not call `beginFrame` while a frame is already in progress.", .{});
+            const cmdbuf = self.currentCommandBuffer();
+            try self.gctx.dev.beginCommandBuffer(cmdbuf, &.{});
+            self.is_frame_started = true;
+        }
 
-            try self.gctx.dev.allocateCommandBuffers(&.{
-                .command_pool = self.pool,
-                .level = .primary,
-                .command_buffer_count = @intCast(cmdbufs.len),
-            }, cmdbufs.ptr);
-            errdefer self.gctx.dev.freeCommandBuffers(self.pool, @intCast(cmdbufs.len), cmdbufs.ptr);
+        pub fn endFrame(self: *Self) !void {
+            assert(self.is_frame_started, "Can not call `endFrame` while a frame is not in progress.", .{});
+            const cmdbuf = self.currentCommandBuffer();
+            try self.gctx.dev.endCommandBuffer(cmdbuf);
+            self.is_frame_started = false;
+        }
+
+        pub fn beginSwapchainRenderPass(self: *const Self) void {
+            const cmdbuf = self.currentCommandBuffer();
+            assert(self.is_frame_started, "Can not call `beginSwapchainRenderPass` while frame is not in progress", .{});
 
             const clear = vk.ClearValue{
                 .color = .{ .float_32 = .{ 0, 0, 0, 1 } },
@@ -223,34 +219,44 @@ pub fn Renderer() type {
                 .extent = self.extent,
             };
 
-            for (cmdbufs, self.framebuffers) |cmdbuf, framebuffer| {
-                try self.gctx.dev.beginCommandBuffer(cmdbuf, &.{});
+            self.gctx.dev.cmdSetViewport(cmdbuf, 0, 1, @ptrCast(&viewport));
+            self.gctx.dev.cmdSetScissor(cmdbuf, 0, 1, @ptrCast(&scissor));
 
-                self.gctx.dev.cmdSetViewport(cmdbuf, 0, 1, @ptrCast(&viewport));
-                self.gctx.dev.cmdSetScissor(cmdbuf, 0, 1, @ptrCast(&scissor));
+            // This needs to be a separate definition - see https://github.com/ziglang/zig/issues/7627.
+            const render_area = vk.Rect2D{
+                .offset = .{ .x = 0, .y = 0 },
+                .extent = self.extent,
+            };
 
-                // This needs to be a separate definition - see https://github.com/ziglang/zig/issues/7627.
-                const render_area = vk.Rect2D{
-                    .offset = .{ .x = 0, .y = 0 },
-                    .extent = self.extent,
-                };
+            self.gctx.dev.cmdBeginRenderPass(cmdbuf, &.{
+                .render_pass = self.render_pass,
+                .framebuffer = self.framebuffers[self.swapchain.image_index],
+                .render_area = render_area,
+                .clear_value_count = 1,
+                .p_clear_values = @ptrCast(&clear),
+            }, .@"inline");
+        }
 
-                self.gctx.dev.cmdBeginRenderPass(cmdbuf, &.{
-                    .render_pass = self.render_pass,
-                    .framebuffer = framebuffer,
-                    .render_area = render_area,
-                    .clear_value_count = 1,
-                    .p_clear_values = @ptrCast(&clear),
-                }, .@"inline");
+        pub fn endSwapchainRenderPass(self: *const Self) void {
+            const cmdbuf = self.currentCommandBuffer();
+            assert(self.is_frame_started, "Can not call endSwapChainRenderPass while frame is not in progress", .{});
+            self.gctx.dev.cmdEndRenderPass(cmdbuf);
+        }
 
-                self.gctx.dev.cmdBindPipeline(cmdbuf, .graphics, self.pipeline);
-                const offset = [_]vk.DeviceSize{0};
-                self.gctx.dev.cmdBindVertexBuffers(cmdbuf, 0, 1, @ptrCast(&self.buffer), &offset);
-                self.gctx.dev.cmdDraw(cmdbuf, vertices.len, 1, 0, 0);
+        inline fn currentCommandBuffer(self: *const Self) vk.CommandBuffer {
+            return self.cmdbufs[self.swapchain.image_index];
+        }
 
-                self.gctx.dev.cmdEndRenderPass(cmdbuf);
-                try self.gctx.dev.endCommandBuffer(cmdbuf);
-            }
+        fn createCommandBuffers(self: *Self) ![]vk.CommandBuffer {
+            const cmdbufs = try self.allocator.alloc(vk.CommandBuffer, self.framebuffers.len);
+            errdefer self.allocator.free(cmdbufs);
+
+            try self.gctx.dev.allocateCommandBuffers(&.{
+                .command_pool = self.pool,
+                .level = .primary,
+                .command_buffer_count = @intCast(cmdbufs.len),
+            }, cmdbufs.ptr);
+            errdefer self.gctx.dev.freeCommandBuffers(self.pool, @intCast(cmdbufs.len), cmdbufs.ptr);
 
             return cmdbufs;
         }
