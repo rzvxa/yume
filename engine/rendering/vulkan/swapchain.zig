@@ -241,7 +241,7 @@ const SwapImage = struct {
         gc.dev.destroyFence(self.frame_fence, null);
     }
 
-    fn waitForFence(self: SwapImage, gc: *const GraphicsContext) !void {
+    pub fn waitForFence(self: SwapImage, gc: *const GraphicsContext) !void {
         _ = try gc.dev.waitForFences(1, @ptrCast(&self.frame_fence), vk.TRUE, std.math.maxInt(u64));
     }
 };

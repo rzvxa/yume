@@ -2,7 +2,9 @@ const std = @import("std");
 const vk = @import("vulkan");
 const glfw = @import("glfw");
 const Allocator = std.mem.Allocator;
+const List = @import("../../collections/mod.zig").List;
 
+const validation_layers = [_][*:0]const u8{"VK_LAYER_KHRONOS_validation"};
 const required_device_extensions = [_][*:0]const u8{vk.extensions.khr_swapchain.name};
 
 /// To construct base, instance and device wrappers for vulkan-zig, you need to pass a list of 'apis' to it.
@@ -20,6 +22,7 @@ const apis: []const vk.ApiInfo = &.{
     vk.features.version_1_0,
     vk.extensions.khr_surface,
     vk.extensions.khr_swapchain,
+    vk.extensions.ext_debug_utils,
 };
 
 /// Next, pass the `apis` to the wrappers to create dispatch tables.
@@ -33,6 +36,9 @@ const Device = vk.DeviceProxy(apis);
 
 pub const GraphicsContext = struct {
     pub const CommandBuffer = vk.CommandBufferProxy(apis);
+    pub const Options = struct {
+        enable_validation_layers: bool = true,
+    };
 
     allocator: Allocator,
 
@@ -48,13 +54,14 @@ pub const GraphicsContext = struct {
     graphics_queue: Queue,
     present_queue: Queue,
 
-    pub fn init(allocator: Allocator, app_name: [*:0]const u8, window: glfw.Window) !GraphicsContext {
+    pub fn init(allocator: Allocator, app_name: [*:0]const u8, window: glfw.Window, comptime options: GraphicsContext.Options) !GraphicsContext {
         var self: GraphicsContext = undefined;
         self.allocator = allocator;
         const vk_proc: *const fn (instance: vk.Instance, procname: [*:0]const u8) callconv(.C) vk.PfnVoidFunction = @ptrCast(&glfw.getInstanceProcAddress);
         self.vkb = try BaseDispatch.load(vk_proc);
 
-        const glfw_exts = glfw.getRequiredInstanceExtensions() orelse return error.FailedToGetRequiredInstanceExts;
+        const exts = try getRequiredExtensions(allocator, options);
+        defer exts.deinit();
 
         const app_info = vk.ApplicationInfo{
             .p_application_name = app_name,
@@ -64,11 +71,26 @@ pub const GraphicsContext = struct {
             .api_version = vk.API_VERSION_1_2,
         };
 
-        const instance = try self.vkb.createInstance(&.{
+        var create_instance_info = vk.InstanceCreateInfo{
             .p_application_info = &app_info,
-            .enabled_extension_count = @truncate(glfw_exts.len),
-            .pp_enabled_extension_names = @ptrCast(glfw_exts),
-        }, null);
+            .enabled_extension_count = @truncate(exts.items.len),
+            .pp_enabled_extension_names = @ptrCast(exts.items),
+        };
+
+        if (options.enable_validation_layers) {
+            create_instance_info.enabled_layer_count = validation_layers.len;
+            create_instance_info.pp_enabled_layer_names = &validation_layers;
+            const debug_create_info = vk.DebugUtilsMessengerCreateInfoEXT{
+                .message_severity = .{ .warning_bit_ext = true },
+                .message_type = .{ .general_bit_ext = true },
+                .pfn_user_callback = &debug_callback,
+            };
+            create_instance_info.p_next = &debug_create_info;
+        } else {
+            create_instance_info.enabled_layer_count = 0;
+            create_instance_info.p_next = null;
+        }
+        const instance = try self.vkb.createInstance(&create_instance_info, null);
 
         const vki = try allocator.create(InstanceDispatch);
         errdefer allocator.destroy(vki);
@@ -145,6 +167,7 @@ pub const GraphicsContext = struct {
             .sharing_mode = .exclusive,
         };
 
+        std.debug.print("{any} \n", .{buffer_info});
         const buffer = try self.dev.createBuffer(&buffer_info, null);
 
         const memory_requirements = self.dev.getBufferMemoryRequirements(buffer);
@@ -333,4 +356,29 @@ fn checkExtensionSupport(
     }
 
     return true;
+}
+
+fn getRequiredExtensions(allocator: Allocator, comptime options: GraphicsContext.Options) error{ VulkanUnavailable, OutOfMemory }!List([*:0]const u8) {
+    const glfw_extensions: [][*:0]const u8 = glfw.getRequiredInstanceExtensions() orelse return error.VulkanUnavailable;
+    var extensions = List([*:0]const u8).initCapacity(allocator, glfw_extensions.len + 1) catch return error.OutOfMemory;
+    extensions.appendSliceAssumeCapacity(glfw_extensions);
+
+    if (options.enable_validation_layers) {
+        extensions.appendAssumeCapacity("VK_EXT_debug_utils");
+    }
+
+    return extensions;
+}
+
+fn debug_callback(
+    message_severity: vk.DebugUtilsMessageSeverityFlagsEXT,
+    message_types: vk.DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: ?*const vk.DebugUtilsMessengerCallbackDataEXT,
+    p_user_data: ?*anyopaque,
+) callconv(vk.vulkan_call_conv) vk.Bool32 {
+    _ = message_severity;
+    _ = message_types;
+    _ = p_user_data;
+    std.debug.print("{?s}\n", .{p_callback_data.?.p_message});
+    return vk.FALSE;
 }

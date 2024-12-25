@@ -81,6 +81,7 @@ pub fn GameApp(comptime Dispatcher: type) type {
                     .uv = Vec2.as(0),
                 },
             }, &.{}) catch return error.Unknown;
+            // var triangle = Mesh.fromFile("cube.obj", self.renderer, self.arena.allocator()) catch return error.Unknown;
             defer triangle.deinit();
             while (!self.window.shouldClose()) {
                 const size = self.window.getFramebufferSize();

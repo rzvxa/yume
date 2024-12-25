@@ -56,7 +56,7 @@ pub fn Renderer() type {
             self.* = .{
                 .allocator = allocator,
                 .extent = vk.Extent2D{ .width = 800, .height = 600 },
-                .gctx = GraphicsContext.init(allocator, window.title, window.window) catch return error.FailedToInitializeGraphicsContext,
+                .gctx = GraphicsContext.init(allocator, window.title, window.window, .{ .enable_validation_layers = true }) catch return error.FailedToInitializeGraphicsContext,
                 .swapchain = try Swapchain.init(&self.gctx, allocator, self.extent),
                 .pipeline_layout = try self.gctx.dev.createPipelineLayout(&.{
                     .flags = .{},
@@ -70,6 +70,7 @@ pub fn Renderer() type {
                 .framebuffers = try createFramebuffers(&self.gctx, allocator, self.render_pass, self.swapchain),
                 .pool = try self.gctx.dev.createCommandPool(&.{
                     .queue_family_index = self.gctx.graphics_queue.family,
+                    .flags = .{ .reset_command_buffer_bit = true },
                 }, null),
                 .cmdbufs = undefined,
             };
@@ -186,6 +187,8 @@ pub fn Renderer() type {
         pub fn beginFrame(self: *Self) !void {
             assert(!self.is_frame_started, "Can not call `beginFrame` while a frame is already in progress.", .{});
             const cmdbuf = self.currentCommandBuffer();
+            const current = self.swapchain.currentSwapImage();
+            try current.waitForFence(self.swapchain.gc);
             try self.gctx.dev.beginCommandBuffer(cmdbuf, &.{});
             self.is_frame_started = true;
         }
