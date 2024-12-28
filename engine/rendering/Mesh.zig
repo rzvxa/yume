@@ -37,10 +37,13 @@ pub fn deinit(self: *Self) void {
     }
 }
 
-pub fn fromFile(comptime filepath: []const u8, renderer: *Renderer, allocator: Allocator) !Self {
-    std.debug.print("HERE: {any}\n", .{renderer});
+pub fn fromFile(comptime filepath: []const u8, renderer: *Renderer, a: Allocator) !Self {
+    _ = a;
+    var ha = std.heap.HeapAllocator.init();
+    const allocator = ha.allocator();
+    std.debug.print("HERE: {any}\n", .{allocator});
     const model = try obj.parseObj(allocator, @embedFile("../" ++ filepath));
-    std.debug.print("fails>?: {any}\n", .{renderer.allocator});
+    std.debug.print("fails>?: {any}\n", .{allocator});
     std.debug.print("Loaded: {s} with {any} vertices\n {any}\n", .{ filepath, model.vertices.len, renderer });
 
     var vertices = std.ArrayList(Vertex).init(allocator);
@@ -76,7 +79,7 @@ pub fn fromFile(comptime filepath: []const u8, renderer: *Renderer, allocator: A
                     model.vertices[3 * vix + 1],
                     model.vertices[3 * vix + 2],
                 ),
-                .color = Vec3.as(1),
+                .color = Vec3.new(1, 0, 0),
                 .normal = Vec3.as(0),
                 .uv = Vec2.as(0),
             };

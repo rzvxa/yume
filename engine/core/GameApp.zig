@@ -60,31 +60,31 @@ pub fn GameApp(comptime Dispatcher: type) type {
         }
 
         pub inline fn run(self: *Self) RunError!void {
-            // const allocator = self.arena.allocator();
+            const allocator = self.arena.allocator();
             var now = std.time.nanoTimestamp();
             std.debug.print("HERE: {any}\n", .{self.renderer});
-            // var m = Mesh.fromFile("cube.obj", self.renderer, allocator) catch return error.Unknown;
+            var m = Mesh.fromFile("cube.obj", self.renderer, allocator) catch return error.Unknown;
             // defer m.deinit();
-            var m = Mesh.init(self.renderer, &.{
-                .{
-                    .position = Vec3.new(0, -0.5, 0),
-                    .color = Vec3.new(1, 0, 0),
-                    .normal = Vec3.as(0),
-                    .uv = Vec2.as(0),
-                },
-                .{
-                    .position = Vec3.new(0.5, 0.5, 0),
-                    .color = Vec3.new(0, 1, 0),
-                    .normal = Vec3.as(0),
-                    .uv = Vec2.as(0),
-                },
-                .{
-                    .position = Vec3.new(-0.5, 0.5, 0),
-                    .color = Vec3.new(0, 0, 1),
-                    .normal = Vec3.as(0),
-                    .uv = Vec2.as(0),
-                },
-            }, &.{ 0, 1, 2 }) catch return error.Unknown;
+            // var m = Mesh.init(self.renderer, &.{
+            //     .{
+            //         .position = Vec3.new(0, -0.5, 0),
+            //         .color = Vec3.new(1, 0, 0),
+            //         .normal = Vec3.as(0),
+            //         .uv = Vec2.as(0),
+            //     },
+            //     .{
+            //         .position = Vec3.new(0.5, 0.5, 0),
+            //         .color = Vec3.new(0, 1, 0),
+            //         .normal = Vec3.as(0),
+            //         .uv = Vec2.as(0),
+            //     },
+            //     .{
+            //         .position = Vec3.new(-0.5, 0.5, 0),
+            //         .color = Vec3.new(0, 0, 1),
+            //         .normal = Vec3.as(0),
+            //         .uv = Vec2.as(0),
+            //     },
+            // }, &.{ 0, 1, 2 }) catch return error.Unknown;
             defer m.deinit();
             while (!self.window.shouldClose()) {
                 const size = self.window.getFramebufferSize();
