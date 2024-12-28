@@ -24,10 +24,9 @@ index_buffer: VulkanBuffer = undefined,
 index_count: u32 = 0,
 
 pub fn init(renderer: *Renderer, vertices: []const Vertex, indices: []const u32) !Self {
-    _ = indices;
     var self: Self = Self{};
     try self.createVertexBuffers(renderer, vertices);
-    // try self.createIndexBuffers(renderer, indices);
+    try self.createIndexBuffers(renderer, indices);
     return self;
 }
 
@@ -39,8 +38,10 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn fromFile(comptime filepath: []const u8, renderer: *Renderer, allocator: Allocator) !Self {
+    std.debug.print("HERE: {any}\n", .{renderer});
     const model = try obj.parseObj(allocator, @embedFile("../" ++ filepath));
-    std.debug.print("Loaded: {s} with {any} vertices\n", .{ filepath, model.vertices.len });
+    std.debug.print("fails>?: {any}\n", .{renderer.allocator});
+    std.debug.print("Loaded: {s} with {any} vertices\n {any}\n", .{ filepath, model.vertices.len, renderer });
 
     var vertices = std.ArrayList(Vertex).init(allocator);
     defer vertices.deinit();
@@ -100,7 +101,6 @@ pub fn fromFile(comptime filepath: []const u8, renderer: *Renderer, allocator: A
                 r.value_ptr.* = @as(u32, @truncate(vertices.items.len));
                 try vertices.append(vertex);
             }
-            std.debug.print("{any}\n", .{vertex});
             try indices.append(r.value_ptr.*);
         }
     }
@@ -161,37 +161,37 @@ fn createVertexBuffers(self: *Self, renderer: *Renderer, vertices: []const Verte
     try renderer.copyBuffer(self.vertex_buffer.buffer, staging_buffer.buffer, buffer_size);
 }
 
-// fn createIndexBuffers(self: *Self, gctx: *GraphicsContext, indices: []const u32) !void {
-//     self.index_count = @as(u32, @truncate(indices.len));
-//     self.has_index_buffer = self.index_count > 0;
-//
-//     if (!self.has_index_buffer) {
-//         return;
-//     }
-//
-//     const buffer_size = @sizeOf(u32) * self.index_count;
-//     const index_size = @sizeOf(u32);
-//
-//     var staging_buffer = try VulkanBuffer.init(
-//         gctx,
-//         index_size,
-//         self.index_count,
-//         .{ .transfer_src_bit = true },
-//         .{ .host_visible_bit = true, .host_coherent_bit = true },
-//         1,
-//     );
-//
-//     try staging_buffer.map(.{});
-//     staging_buffer.writeToBuffer(.{ .data = indices.ptr });
-//
-//     self.index_buffer = try VulkanBuffer.init(
-//         gctx,
-//         index_size,
-//         self.index_count,
-//         .{ .index_buffer_bit = true, .transfer_dst_bit = true },
-//         .{ .device_local_bit = true },
-//         1,
-//     );
-//
-//     try gctx.copyBuffer(staging_buffer.buffer, self.index_buffer.buffer, buffer_size);
-// }
+fn createIndexBuffers(self: *Self, renderer: *Renderer, indices: []const u32) !void {
+    self.index_count = @as(u32, @truncate(indices.len));
+    self.has_index_buffer = self.index_count > 0;
+
+    if (!self.has_index_buffer) {
+        return;
+    }
+
+    const buffer_size = @sizeOf(u32) * self.index_count;
+    const index_size = @sizeOf(u32);
+
+    var staging_buffer = try VulkanBuffer.init(
+        renderer,
+        index_size,
+        self.index_count,
+        .{ .transfer_src_bit = true },
+        .{ .host_visible_bit = true, .host_coherent_bit = true },
+        1,
+    );
+
+    try staging_buffer.map(.{});
+    staging_buffer.writeToBuffer(.{ .data = indices.ptr });
+
+    self.index_buffer = try VulkanBuffer.init(
+        renderer,
+        index_size,
+        self.index_count,
+        .{ .index_buffer_bit = true, .transfer_dst_bit = true },
+        .{ .device_local_bit = true },
+        1,
+    );
+
+    try renderer.copyBuffer(self.index_buffer.buffer, staging_buffer.buffer, buffer_size);
+}

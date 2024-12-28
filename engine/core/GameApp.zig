@@ -60,8 +60,12 @@ pub fn GameApp(comptime Dispatcher: type) type {
         }
 
         pub inline fn run(self: *Self) RunError!void {
+            // const allocator = self.arena.allocator();
             var now = std.time.nanoTimestamp();
-            var triangle = Mesh.init(self.renderer, &.{
+            std.debug.print("HERE: {any}\n", .{self.renderer});
+            // var m = Mesh.fromFile("cube.obj", self.renderer, allocator) catch return error.Unknown;
+            // defer m.deinit();
+            var m = Mesh.init(self.renderer, &.{
                 .{
                     .position = Vec3.new(0, -0.5, 0),
                     .color = Vec3.new(1, 0, 0),
@@ -80,9 +84,8 @@ pub fn GameApp(comptime Dispatcher: type) type {
                     .normal = Vec3.as(0),
                     .uv = Vec2.as(0),
                 },
-            }, &.{}) catch return error.Unknown;
-            // var triangle = Mesh.fromFile("cube.obj", self.renderer, self.arena.allocator()) catch return error.Unknown;
-            defer triangle.deinit();
+            }, &.{ 0, 1, 2 }) catch return error.Unknown;
+            defer m.deinit();
             while (!self.window.shouldClose()) {
                 const size = self.window.getFramebufferSize();
 
@@ -100,7 +103,8 @@ pub fn GameApp(comptime Dispatcher: type) type {
                 };
 
                 self.update(dt);
-                self.renderer.render(size, &triangle) catch return error.Unknown;
+                self.renderer.render(size, &m) catch return error.Unknown;
+                // self.renderer.render(size, &cube) catch return error.Unknown;
             }
             self.renderer.swapchain.waitForAllFences() catch return error.Unknown;
             self.renderer.gctx.dev.deviceWaitIdle() catch return error.Unknown;

@@ -167,7 +167,7 @@ pub const GraphicsContext = struct {
             .sharing_mode = .exclusive,
         };
 
-        std.debug.print("{any} \n", .{buffer_info});
+        // std.debug.print("{any} \n {} \n", .{ buffer_info, self.dev });
         const buffer = try self.dev.createBuffer(&buffer_info, null);
 
         const memory_requirements = self.dev.getBufferMemoryRequirements(buffer);
@@ -179,19 +179,6 @@ pub const GraphicsContext = struct {
         const buffer_memory = try self.dev.allocateMemory(&alloc_info, null);
         try self.dev.bindBufferMemory(buffer, buffer_memory, 0);
         return .{ .buf = buffer, .mem = buffer_memory };
-    }
-
-    pub fn copyBuffer(self: GraphicsContext, src: vk.Buffer, dst: vk.Buffer, size: vk.DeviceSize) !void {
-        const command_buffer = try self.beginSingleTimeCommands();
-
-        const copy_region = vk.BufferCopy{
-            .src_offset = 0,
-            .dst_offset = 0,
-            .size = size,
-        };
-
-        self.device.cmdCopyBuffer(command_buffer, src, dst, 1, &.{copy_region});
-        try self.endSingleTimeCommands(command_buffer);
     }
 };
 
