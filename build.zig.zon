@@ -51,21 +51,6 @@
         //    // actually used.
         //    .lazy = false,
         //},
-        .vulkan_zig = .{
-            .url = "https://github.com/Snektron/vulkan-zig/archive/66b7b773bb61e2102025f2d5ff0ae8c5f53e19cc.tar.gz",
-            .hash = "12208958f173b8b81bfac797955f0416ab38b21d1f69d4ebf6c7ca460a828a41cd45",
-        },
-        .ziglm = .{
-            .url = "https://github.com/karlobratko/ziglm/archive/24e3bf3c508861bd8122ffc794bbf2ddbf17d841.tar.gz",
-            .hash = "1220d855461f71a116ee05650706fcc46c43d506b1b65afd0bbc8387778dfb8b74bb",
-        },
-        .obj = .{
-            .url = "https://github.com/chip2n/zig-obj/archive/4ce054733812eb0b28d97adb0ea1f66f21fd41c8.tar.gz",
-            .hash = "12205e75ae77fad4d4d2e1b6489270612d8e44c8b9268580f0c9123f0f2fc7175a74",
-        },
-        .mach_glfw = .{
-            .path = "vendor/mach-glfw",
-        },
     },
 
     // Specifies the set of files and directories that are included in this package.
@@ -79,9 +64,6 @@
     .paths = .{
         "build.zig",
         "build.zig.zon",
-        "src",
-        // For example...
-        //"LICENSE",
-        //"README.md",
+        "engine",
     },
 }
