@@ -64,6 +64,7 @@ pub fn build(b: *std.Build) !void {
             "vendor/imgui/imgui_impl_sdl3.cpp",
             "vendor/imgui/imgui_impl_vulkan.cpp",
             "vendor/imgui/cimgui.cpp",
+            "vendor/imgui/cimgui_internal.cpp",
             "vendor/imgui/cimgui_impl_sdl3.cpp",
             "vendor/imgui/cimgui_impl_vulkan.cpp",
         },

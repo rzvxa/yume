@@ -1,5 +1,6 @@
 const std = @import("std");
 
+// const VulkanEditor = @import("VulkanEditor.zig");
 const VulkanEngine = @import("VulkanEngine.zig");
 
 pub fn main() !void {
@@ -10,11 +11,10 @@ pub fn main() !void {
 
     var cwd_buff: [1024]u8 = undefined;
     const cwd = std.process.getCwd(cwd_buff[0..]) catch @panic("cwd_buff too small");
-    std.log.info("Running from: {s}", .{ cwd });
+    std.log.info("Running from: {s}", .{cwd});
 
     var engine = VulkanEngine.init(gpa.allocator());
     defer engine.cleanup();
 
     engine.run();
 }
-

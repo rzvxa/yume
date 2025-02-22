@@ -15,6 +15,10 @@ const Mat4 = math3d.Mat4;
 const texs = @import("textures.zig");
 const Texture = texs.Texture;
 
+const Engine = @import("VulkanEngine.zig");
+const AllocatedImage = @import("VulkanEngine.zig").AllocatedImage;
+const AllocatedBuffer = @import("VulkanEngine.zig").AllocatedBuffer;
+
 const log = std.log.scoped(.vulkan_engine);
 
 const Self = @This();
@@ -24,16 +28,6 @@ const window_extent = c.VkExtent2D{ .width = 1600, .height = 900 };
 const VK_NULL_HANDLE = null;
 
 const vk_alloc_cbs: ?*c.VkAllocationCallbacks = null;
-
-pub const AllocatedBuffer = struct {
-    buffer: c.VkBuffer,
-    allocation: c.VmaAllocation,
-};
-
-pub const AllocatedImage = struct {
-    image: c.VkImage,
-    allocation: c.VmaAllocation,
-};
 
 // Scene management
 const Material = struct {
@@ -84,6 +78,8 @@ const UploadContext = struct {
 };
 
 const FRAME_OVERLAP = 2;
+
+engine: Engine,
 
 // Data
 //
@@ -211,6 +207,7 @@ pub fn init(a: std.mem.Allocator) Self {
     _ = c.SDL_ShowWindow(window);
 
     var engine = Self{
+        .engine = Engine.init(a),
         .window = window,
         .allocator = a,
         .deletion_queue = std.ArrayList(VulkanDeleter).init(a),
@@ -624,11 +621,6 @@ const PipelineBuilder = struct {
             .pAttachments = &self.color_blend_attachment_state,
         });
 
-        const dynamicState = c.VkPipelineDynamicStateCreateInfo{
-            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-            .dynamicStateCount = 2,
-            .pDynamicStates = &[_]c.VkDynamicState{ c.VK_DYNAMIC_STATE_SCISSOR, c.VK_DYNAMIC_STATE_VIEWPORT },
-        };
         const pipeline_ci = std.mem.zeroInit(c.VkGraphicsPipelineCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
             .stageCount = @as(u32, @intCast(self.shader_stages.len)),
@@ -640,7 +632,6 @@ const PipelineBuilder = struct {
             .pMultisampleState = &self.multisample_state,
             .pColorBlendState = &color_blend_state,
             .pDepthStencilState = &self.depth_stencil_state,
-            .pDynamicState = &[_]c.VkPipelineDynamicStateCreateInfo{dynamicState},
             .layout = self.pipeline_layout,
             .renderPass = render_pass,
             .subpass = 0,
@@ -1367,7 +1358,7 @@ pub fn cleanup(self: *Self) void {
 }
 
 fn load_textures(self: *Self) void {
-    const lost_empire_image = texs.load_image_from_file(self, "assets/lost_empire-RGBA.png") catch @panic("Failed to load image");
+    const lost_empire_image = texs.load_image_from_file_ed(self, "assets/lost_empire-RGBA.png") catch @panic("Failed to load image");
     self.image_deletion_queue.append(VmaImageDeleter{ .image = lost_empire_image }) catch @panic("Out of memory");
     const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -1574,11 +1565,6 @@ pub fn run(self: *Self) void {
             }
         }
 
-        if (self.camera_input.squared_norm() > (0.1 * 0.1)) {
-            const camera_delta = self.camera_input.normalized().mul(delta * 5.0);
-            self.camera_pos = Vec3.add(self.camera_pos, camera_delta);
-        }
-
         {
             c.cImGui_ImplVulkan_NewFrame();
             c.cImGui_ImplSDL3_NewFrame();
@@ -1649,38 +1635,10 @@ pub fn run(self: *Self) void {
             c.ImGui_End();
 
             _ = c.ImGui_Begin("Game", null, 0);
-            const game_image = c.ImGui_GetWindowDrawList();
-            me = self;
-            c.ImDrawList_AddCallback(game_image, extern struct {
-                fn f(dl: [*c]const c.ImDrawList, dc: [*c]const c.ImDrawCmd) callconv(.C) void {
-                    const cmd = me.get_current_frame().main_command_buffer;
-                    std.log.debug("{any}\n{any}\n{any}", .{ dl, dc, cmd });
-                    const cr = dc.*.ClipRect;
-                    const w = cr.z - cr.x;
-                    const h = cr.w - cr.y;
-                    c.vkCmdSetScissor(cmd, 0, 1, &[_]c.VkRect2D{.{
-                        .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
-                        .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
-                    }});
-                    c.vkCmdSetViewport(cmd, 0, 1, &[_]c.VkViewport{.{
-                        .x = cr.x,
-                        .y = cr.y,
-                        .width = w,
-                        .height = h,
-                        .minDepth = 0.0,
-                        .maxDepth = 1.0,
-                    }});
-
-                    const aspect = w / h;
-                    me.draw_objects(cmd, me.renderables.items, aspect);
-
-                    c.vkCmdSetScissor(cmd, 0, 1, &[_]c.VkRect2D{.{
-                        .offset = .{ .x = 0, .y = 0 },
-                        .extent = window_extent,
-                    }});
-                }
-            }.f, null);
-            c.ImDrawList_AddCallback(game_image, c.ImDrawCallback_ResetRenderState, null);
+            // const game_draw_list = c.ImGui_GetWindowDrawList();
+            // c.ImDrawList_AddCallback(game_draw_list, struct {
+            //     fn f(dl: *const c.ImDrawList, dc: *const c.ImDrawCmd) void {}
+            // }.f);
             c.ImGui_End();
 
             // var open = true;
@@ -1724,7 +1682,6 @@ fn draw(self: *Self) void {
     var swapchain_image_index: u32 = undefined;
     check_vk(c.vkAcquireNextImageKHR(self.device, self.swapchain, timeout, frame.present_semaphore, VK_NULL_HANDLE, &swapchain_image_index)) catch @panic("Failed to acquire swapchain image");
 
-    current_image_idx = swapchain_image_index;
     var cmd = frame.main_command_buffer;
 
     check_vk(c.vkResetCommandBuffer(cmd, 0)) catch @panic("Failed to reset command buffer");
@@ -1769,11 +1726,6 @@ fn draw(self: *Self) void {
     });
     c.vkCmdBeginRenderPass(cmd, &render_pass_begin_info, c.VK_SUBPASS_CONTENTS_INLINE);
 
-    c.vkCmdSetScissor(cmd, 0, 1, &[_]c.VkRect2D{.{
-        .offset = .{ .x = 0, .y = 0 },
-        .extent = self.swapchain_extent,
-    }});
-
     // UI
     c.cImGui_ImplVulkan_RenderDrawData(c.ImGui_GetDrawData(), cmd);
 
@@ -1804,94 +1756,6 @@ fn draw(self: *Self) void {
     check_vk(c.vkQueuePresentKHR(self.present_queue, &present_info)) catch @panic("Failed to present swapchain image");
 
     self.frame_number +%= 1;
-}
-
-fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject, aspect: f32) void {
-    const view = Mat4.translation(self.camera_pos);
-    var proj = Mat4.perspective(std.math.degreesToRadians(70.0), aspect, 0.1, 200.0);
-
-    proj.j.y *= -1.0;
-
-    // Create and bind the camera buffer
-    const curr_camera_data = GPUCameraData{
-        .view = view,
-        .proj = proj,
-        .view_proj = proj.mul(view),
-    };
-
-    const frame_index: usize = @intCast(@mod(self.frame_number, FRAME_OVERLAP));
-
-    // TODO: meta function that deals with alignment and copying of data with
-    // map/unmap. We now have two versions, one for a single pointer to struct
-    // and one for array/slices (used to copy mesh vertices).
-    const padded_camera_data_size = self.pad_uniform_buffer_size(@sizeOf(GPUCameraData));
-    const scene_data_base_offset = padded_camera_data_size * FRAME_OVERLAP;
-    const padded_scene_data_size = self.pad_uniform_buffer_size(@sizeOf(GPUSceneData));
-
-    const camera_data_offset = padded_camera_data_size * frame_index;
-    const scene_data_offset = scene_data_base_offset + padded_scene_data_size * frame_index;
-
-    var data: ?*align(@alignOf(GPUCameraData)) anyopaque = undefined;
-    check_vk(c.vmaMapMemory(self.vma_allocator, self.camera_and_scene_buffer.allocation, &data)) catch @panic("Failed to map camera buffer");
-
-    const camera_data: *GPUCameraData = @ptrFromInt(@intFromPtr(data) + camera_data_offset);
-    const scene_data: *GPUSceneData = @ptrFromInt(@intFromPtr(data) + scene_data_offset);
-    camera_data.* = curr_camera_data;
-    const framed = @as(f32, @floatFromInt(self.frame_number)) / 120.0;
-    scene_data.ambient_color = Vec3.make(@sin(framed), 0.0, @cos(framed)).to_point4();
-
-    c.vmaUnmapMemory(self.vma_allocator, self.camera_and_scene_buffer.allocation);
-
-    // NOTE: In this copy I do conversion. Now, this is generally unsafe as none
-    // of the structures involved are c compatible (marked extern). However, we
-    // so happen to know it is safe to do so for Mat4.
-    // TODO: In the future we should mark all the math structure as extern, so
-    // we can more easily pass them back and forth from C and do those kind of
-    // conversions.
-    var object_data: ?*align(@alignOf(GPUObjectData)) anyopaque = undefined;
-    check_vk(c.vmaMapMemory(self.vma_allocator, self.get_current_frame().object_buffer.allocation, &object_data)) catch @panic("Failed to map object buffer");
-    var object_data_arr: [*]GPUObjectData = @ptrCast(object_data orelse unreachable);
-    for (objects, 0..) |object, index| {
-        object_data_arr[index] = GPUObjectData{
-            .model_matrix = object.transform,
-        };
-    }
-    c.vmaUnmapMemory(self.vma_allocator, self.get_current_frame().object_buffer.allocation);
-
-    for (objects, 0..) |object, index| {
-        if (index == 0 or object.material != objects[index - 1].material) {
-            c.vkCmdBindPipeline(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline);
-
-            // Compute the offset for dynamic uniform buffers (for now just the one containing scene data, the
-            // camera data is not dynamic)
-            const uniform_offsets = [_]u32{
-                @as(u32, @intCast(camera_data_offset)),
-                @as(u32, @intCast(scene_data_offset)),
-            };
-
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 0, 1, &self.camera_and_scene_set, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
-
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 1, 1, &self.get_current_frame().object_descriptor_set, 0, null);
-        }
-
-        if (object.material.texture_set != VK_NULL_HANDLE) {
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 2, 1, &object.material.texture_set, 0, null);
-        }
-
-        const push_constants = MeshPushConstants{
-            .data = Vec4.ZERO,
-            .render_matrix = object.transform,
-        };
-
-        c.vkCmdPushConstants(cmd, object.material.pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &push_constants);
-
-        if (index == 0 or object.mesh != objects[index - 1].mesh) {
-            const offset: c.VkDeviceSize = 0;
-            c.vkCmdBindVertexBuffers(cmd, 0, 1, &object.mesh.vertex_buffer.buffer, &offset);
-        }
-
-        c.vkCmdDraw(cmd, @as(u32, @intCast(object.mesh.vertices.len)), 1, 0, @intCast(index));
-    }
 }
 
 fn create_material(self: *Self, pipeline: c.VkPipeline, pipeline_layout: c.VkPipelineLayout, name: []const u8) *Material {
@@ -2021,5 +1885,3 @@ fn check_sdl_bool(res: c.SDL_bool) void {
 
 var dockspace_flags = c.ImGuiDockNodeFlags_PassthruCentralNode;
 var first_time = true;
-var me: *Self = undefined;
-var current_image_idx: u32 = 0;

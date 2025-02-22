@@ -31,6 +31,9 @@
 //   the backend itself (imgui_impl_vulkan.cpp), but should PROBABLY NOT be used by your own engine/app code.
 // Read comments in imgui_impl_vulkan.h.
 
+// Auto-generated forward declarations for C header
+typedef struct ImGui_ImplVulkan_InitInfo_t ImGui_ImplVulkan_InitInfo;
+typedef struct ImGui_ImplVulkanH_FrameSemaphores_t ImGui_ImplVulkanH_FrameSemaphores;
 #pragma once
 
 #ifdef __cplusplus
@@ -57,7 +60,7 @@ extern "C"
 #endif // #if defined(IMGUI_IMPL_VULKAN_NO_PROTOTYPES)&&!defined(VK_NO_PROTOTYPES)
 #include <vulkan/vulkan.h>  // Initialization data, for ImGui_ImplVulkan_Init()
 // [Please zero-clear before use!]
-typedef struct ImGui_ImplVulkan_InitInfo_t
+struct ImGui_ImplVulkan_InitInfo_t
 {
     VkInstance                   Instance;
     VkPhysicalDevice             PhysicalDevice;
@@ -78,7 +81,8 @@ typedef struct ImGui_ImplVulkan_InitInfo_t
     // Allocation, Debugging
     const VkAllocationCallbacks* Allocator;
     void (*CheckVkResultFn)(VkResult err);
-} ImGui_ImplVulkan_InitInfo;
+    VkDeviceSize                 MinAllocationSize;      // Minimum allocation size. Set to 1024*1024 to satisfy zealous best practices validation layer and waste a little memory.
+};
 
 typedef struct ImDrawData_t ImDrawData;
 // Called by user code
@@ -131,7 +135,7 @@ CIMGUI_IMPL_API int           cImGui_ImplVulkanH_GetMinImageCountFromPresentMode
 // Helper structure to hold the data needed by one rendering frame
 // (Used by example's main.cpp. Used by multi-viewport features. Probably NOT used by your own engine/app.)
 // [Please zero-clear before use!]
-typedef struct ImGui_ImplVulkanH_Frame_t
+struct ImGui_ImplVulkanH_Frame_t
 {
     VkCommandPool   CommandPool;
     VkCommandBuffer CommandBuffer;
@@ -139,17 +143,17 @@ typedef struct ImGui_ImplVulkanH_Frame_t
     VkImage         Backbuffer;
     VkImageView     BackbufferView;
     VkFramebuffer   Framebuffer;
-} ImGui_ImplVulkanH_Frame;
+};
 
-typedef struct ImGui_ImplVulkanH_FrameSemaphores_t
+struct ImGui_ImplVulkanH_FrameSemaphores_t
 {
     VkSemaphore ImageAcquiredSemaphore;
     VkSemaphore RenderCompleteSemaphore;
-} ImGui_ImplVulkanH_FrameSemaphores;
+};
 
 // Helper structure to hold the data needed by one rendering context into one OS window
 // (Used by example's main.cpp. Used by multi-viewport features. Probably NOT used by your own engine/app.)
-typedef struct ImGui_ImplVulkanH_Window_t
+struct ImGui_ImplVulkanH_Window_t
 {
     int                      Width;
     int                      Height;
@@ -167,7 +171,7 @@ typedef struct ImGui_ImplVulkanH_Window_t
     uint32_t                 SemaphoreIndex;  // Current set of swapchain wait semaphores we're using (needs to be distinct from per frame data)
     ImGui_ImplVulkanH_Frame* Frames;
     ImGui_ImplVulkanH_FrameSemaphores* FrameSemaphores;
-} ImGui_ImplVulkanH_Window;
+};
 #endif// #ifndef IMGUI_DISABLE
 #ifdef __cplusplus
 } // End of extern "C" block
