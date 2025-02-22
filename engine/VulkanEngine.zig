@@ -150,6 +150,14 @@ deletion_queue: std.ArrayList(VulkanDeleter) = undefined,
 buffer_deletion_queue: std.ArrayList(VmaBufferDeleter) = undefined,
 image_deletion_queue: std.ArrayList(VmaImageDeleter) = undefined,
 
+// imgui state
+first_time: bool = true,
+game_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
+mouse: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
+game_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
+is_game_window_active: bool = false,
+is_game_window_focused: bool = false,
+
 pub const MeshPushConstants = struct {
     data: Vec4,
     render_matrix: Mat4,
@@ -259,9 +267,9 @@ fn init_instance(self: *Self) void {
 
     // Instance creation and optional debug utilities
     const instance = vki.create_instance(std.heap.page_allocator, .{
-        .application_name = "VkGuide",
+        .application_name = "yume",
         .application_version = c.VK_MAKE_VERSION(0, 1, 0),
-        .engine_name = "VkGuide",
+        .engine_name = "yume",
         .engine_version = c.VK_MAKE_VERSION(0, 1, 0),
         .api_version = c.VK_MAKE_VERSION(1, 1, 0),
         .debug = true,
@@ -1315,6 +1323,104 @@ fn init_imgui(self: *Self) void {
     self.deletion_queue.append(VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool)) catch @panic("Out of memory");
 
     c.ImGui_GetIO().*.ConfigFlags |= c.ImGuiConfigFlags_DockingEnable;
+    c.ImGui_GetIO().*.ConfigWindowsMoveFromTitleBarOnly = true;
+
+    const ImVec2 = struct {
+        fn f(x: f32, y: f32) c.ImVec2 {
+            return c.ImVec2{ .x = x, .y = y };
+        }
+    }.f;
+    const ImVec4 = struct {
+        fn f(x: f32, y: f32, z: f32, w: f32) c.ImVec4 {
+            return c.ImVec4{ .x = x, .y = y, .z = z, .w = w };
+        }
+    }.f;
+
+    const style = c.ImGui_GetStyle();
+    style.*.Alpha = 1.0;
+    style.*.DisabledAlpha = 0.6000000238418579;
+    style.*.WindowPadding = ImVec2(8.0, 8.0);
+    style.*.WindowRounding = 0.0;
+    style.*.WindowBorderSize = 1.0;
+    style.*.WindowMinSize = ImVec2(32.0, 32.0);
+    style.*.WindowTitleAlign = ImVec2(0.0, 0.5);
+    style.*.WindowMenuButtonPosition = c.ImGuiDir_Left;
+    style.*.ChildRounding = 0.0;
+    style.*.ChildBorderSize = 1.0;
+    style.*.PopupRounding = 0.0;
+    style.*.PopupBorderSize = 1.0;
+    style.*.FramePadding = ImVec2(4.0, 3.0);
+    style.*.FrameRounding = 0.0;
+    style.*.FrameBorderSize = 0.0;
+    style.*.ItemSpacing = ImVec2(8.0, 4.0);
+    style.*.ItemInnerSpacing = ImVec2(4.0, 4.0);
+    style.*.CellPadding = ImVec2(4.0, 2.0);
+    style.*.IndentSpacing = 21.0;
+    style.*.ColumnsMinSpacing = 6.0;
+    style.*.ScrollbarSize = 14.0;
+    style.*.ScrollbarRounding = 9.0;
+    style.*.GrabMinSize = 10.0;
+    style.*.GrabRounding = 0.0;
+    style.*.TabRounding = 4.0;
+    style.*.TabBorderSize = 0.0;
+    style.*.TabMinWidthForCloseButton = 0.0;
+    style.*.ColorButtonPosition = c.ImGuiDir_Right;
+    style.*.ButtonTextAlign = ImVec2(0.5, 0.5);
+    style.*.SelectableTextAlign = ImVec2(0.0, 0.0);
+
+    style.*.Colors[c.ImGuiCol_Text] = ImVec4(1.0, 1.0, 1.0, 1.0);
+    style.*.Colors[c.ImGuiCol_TextDisabled] = ImVec4(0.4980392158031464, 0.4980392158031464, 0.4980392158031464, 1.0);
+    style.*.Colors[c.ImGuiCol_WindowBg] = ImVec4(0.05882352963089943, 0.05882352963089943, 0.05882352963089943, 0.9399999976158142);
+    style.*.Colors[c.ImGuiCol_ChildBg] = ImVec4(1.0, 1.0, 1.0, 0.0);
+    style.*.Colors[c.ImGuiCol_PopupBg] = ImVec4(0.0784313753247261, 0.0784313753247261, 0.0784313753247261, 0.9399999976158142);
+    style.*.Colors[c.ImGuiCol_Border] = ImVec4(0.4274509847164154, 0.4274509847164154, 0.4980392158031464, 0.5);
+    style.*.Colors[c.ImGuiCol_BorderShadow] = ImVec4(0.0, 0.0, 0.0, 0.0);
+    style.*.Colors[c.ImGuiCol_FrameBg] = ImVec4(0.2000000029802322, 0.2078431397676468, 0.2196078449487686, 0.5400000214576721);
+    style.*.Colors[c.ImGuiCol_FrameBgHovered] = ImVec4(0.4000000059604645, 0.4000000059604645, 0.4000000059604645, 0.4000000059604645);
+    style.*.Colors[c.ImGuiCol_FrameBgActive] = ImVec4(0.1764705926179886, 0.1764705926179886, 0.1764705926179886, 0.6700000166893005);
+    style.*.Colors[c.ImGuiCol_TitleBg] = ImVec4(0.03921568766236305, 0.03921568766236305, 0.03921568766236305, 1.0);
+    style.*.Colors[c.ImGuiCol_TitleBgActive] = ImVec4(0.2862745225429535, 0.2862745225429535, 0.2862745225429535, 1.0);
+    style.*.Colors[c.ImGuiCol_TitleBgCollapsed] = ImVec4(0.0, 0.0, 0.0, 0.5099999904632568);
+    style.*.Colors[c.ImGuiCol_MenuBarBg] = ImVec4(0.1372549086809158, 0.1372549086809158, 0.1372549086809158, 1.0);
+    style.*.Colors[c.ImGuiCol_ScrollbarBg] = ImVec4(0.01960784383118153, 0.01960784383118153, 0.01960784383118153, 0.5299999713897705);
+    style.*.Colors[c.ImGuiCol_ScrollbarGrab] = ImVec4(0.3098039329051971, 0.3098039329051971, 0.3098039329051971, 1.0);
+    style.*.Colors[c.ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.407843142747879, 0.407843142747879, 0.407843142747879, 1.0);
+    style.*.Colors[c.ImGuiCol_ScrollbarGrabActive] = ImVec4(0.5098039507865906, 0.5098039507865906, 0.5098039507865906, 1.0);
+    style.*.Colors[c.ImGuiCol_CheckMark] = ImVec4(0.9372549057006836, 0.9372549057006836, 0.9372549057006836, 1.0);
+    style.*.Colors[c.ImGuiCol_SliderGrab] = ImVec4(0.5098039507865906, 0.5098039507865906, 0.5098039507865906, 1.0);
+    style.*.Colors[c.ImGuiCol_SliderGrabActive] = ImVec4(0.8588235378265381, 0.8588235378265381, 0.8588235378265381, 1.0);
+    style.*.Colors[c.ImGuiCol_Button] = ImVec4(0.4392156898975372, 0.4392156898975372, 0.4392156898975372, 0.4000000059604645);
+    style.*.Colors[c.ImGuiCol_ButtonHovered] = ImVec4(0.4588235318660736, 0.4666666686534882, 0.47843137383461, 1.0);
+    style.*.Colors[c.ImGuiCol_ButtonActive] = ImVec4(0.4196078479290009, 0.4196078479290009, 0.4196078479290009, 1.0);
+    style.*.Colors[c.ImGuiCol_Header] = ImVec4(0.6980392336845398, 0.6980392336845398, 0.6980392336845398, 0.3100000023841858);
+    style.*.Colors[c.ImGuiCol_HeaderHovered] = ImVec4(0.6980392336845398, 0.6980392336845398, 0.6980392336845398, 0.800000011920929);
+    style.*.Colors[c.ImGuiCol_HeaderActive] = ImVec4(0.47843137383461, 0.4980392158031464, 0.5176470875740051, 1.0);
+    style.*.Colors[c.ImGuiCol_Separator] = ImVec4(0.4274509847164154, 0.4274509847164154, 0.4980392158031464, 0.5);
+    style.*.Colors[c.ImGuiCol_SeparatorHovered] = ImVec4(0.7176470756530762, 0.7176470756530762, 0.7176470756530762, 0.7799999713897705);
+    style.*.Colors[c.ImGuiCol_SeparatorActive] = ImVec4(0.5098039507865906, 0.5098039507865906, 0.5098039507865906, 1.0);
+    style.*.Colors[c.ImGuiCol_ResizeGrip] = ImVec4(0.9098039269447327, 0.9098039269447327, 0.9098039269447327, 0.25);
+    style.*.Colors[c.ImGuiCol_ResizeGripHovered] = ImVec4(0.8078431487083435, 0.8078431487083435, 0.8078431487083435, 0.6700000166893005);
+    style.*.Colors[c.ImGuiCol_ResizeGripActive] = ImVec4(0.4588235318660736, 0.4588235318660736, 0.4588235318660736, 0.949999988079071);
+    style.*.Colors[c.ImGuiCol_Tab] = ImVec4(0.1764705926179886, 0.3490196168422699, 0.5764706134796143, 0.8619999885559082);
+    style.*.Colors[c.ImGuiCol_TabHovered] = ImVec4(0.2588235437870026, 0.5882353186607361, 0.9764705896377563, 0.800000011920929);
+    style.*.Colors[c.ImGuiCol_TabActive] = ImVec4(0.196078434586525, 0.407843142747879, 0.6784313917160034, 1.0);
+    style.*.Colors[c.ImGuiCol_TabUnfocused] = ImVec4(0.06666667014360428, 0.1019607856869698, 0.1450980454683304, 0.9724000096321106);
+    style.*.Colors[c.ImGuiCol_TabUnfocusedActive] = ImVec4(0.1333333402872086, 0.2588235437870026, 0.4235294163227081, 1.0);
+    style.*.Colors[c.ImGuiCol_PlotLines] = ImVec4(0.6078431606292725, 0.6078431606292725, 0.6078431606292725, 1.0);
+    style.*.Colors[c.ImGuiCol_PlotLinesHovered] = ImVec4(1.0, 0.4274509847164154, 0.3490196168422699, 1.0);
+    style.*.Colors[c.ImGuiCol_PlotHistogram] = ImVec4(0.729411780834198, 0.6000000238418579, 0.1490196138620377, 1.0);
+    style.*.Colors[c.ImGuiCol_PlotHistogramHovered] = ImVec4(1.0, 0.6000000238418579, 0.0, 1.0);
+    style.*.Colors[c.ImGuiCol_TableHeaderBg] = ImVec4(0.1882352977991104, 0.1882352977991104, 0.2000000029802322, 1.0);
+    style.*.Colors[c.ImGuiCol_TableBorderStrong] = ImVec4(0.3098039329051971, 0.3098039329051971, 0.3490196168422699, 1.0);
+    style.*.Colors[c.ImGuiCol_TableBorderLight] = ImVec4(0.2274509817361832, 0.2274509817361832, 0.2470588237047195, 1.0);
+    style.*.Colors[c.ImGuiCol_TableRowBg] = ImVec4(0.0, 0.0, 0.0, 0.0);
+    style.*.Colors[c.ImGuiCol_TableRowBgAlt] = ImVec4(1.0, 1.0, 1.0, 0.05999999865889549);
+    style.*.Colors[c.ImGuiCol_TextSelectedBg] = ImVec4(0.8666666746139526, 0.8666666746139526, 0.8666666746139526, 0.3499999940395355);
+    style.*.Colors[c.ImGuiCol_DragDropTarget] = ImVec4(1.0, 1.0, 0.0, 0.8999999761581421);
+    style.*.Colors[c.ImGuiCol_NavHighlight] = ImVec4(0.6000000238418579, 0.6000000238418579, 0.6000000238418579, 1.0);
+    style.*.Colors[c.ImGuiCol_NavWindowingHighlight] = ImVec4(1.0, 1.0, 1.0, 0.699999988079071);
+    style.*.Colors[c.ImGuiCol_NavWindowingDimBg] = ImVec4(0.800000011920929, 0.800000011920929, 0.800000011920929, 0.2000000029802322);
+    style.*.Colors[c.ImGuiCol_ModalWindowDimBg] = ImVec4(0.800000011920929, 0.800000011920929, 0.800000011920929, 0.3499999940395355);
 }
 
 pub fn cleanup(self: *Self) void {
@@ -1512,65 +1618,24 @@ pub fn run(self: *Self) void {
     var event: c.SDL_Event = undefined;
     while (!quit) {
         while (c.SDL_PollEvent(&event) != 0) {
-            const io = c.ImGui_GetIO();
+            if (event.type == c.SDL_EVENT_MOUSE_MOTION) {
+                self.mouse.x = event.motion.x;
+                self.mouse.y = event.motion.y;
+            }
+            const mouse = self.mouse;
+
+            _ = c.cImGui_ImplSDL3_ProcessEvent(&event);
             if (event.type == c.SDL_EVENT_QUIT) {
                 quit = true;
-            } else if (((event.type == c.SDL_EVENT_MOUSE_MOTION or event.type == c.SDL_EVENT_MOUSE_BUTTON_DOWN or event.type == c.SDL_EVENT_MOUSE_BUTTON_UP) and io.*.WantCaptureMouse) or ((event.type == c.SDL_EVENT_KEY_DOWN or event.type == c.SDL_EVENT_KEY_UP) and io.*.WantCaptureMouse)) {
-                _ = c.cImGui_ImplSDL3_ProcessEvent(&event);
-            } else if (event.type == c.SDL_EVENT_KEY_DOWN) {
-                switch (event.key.keysym.scancode) {
-                    c.SDL_SCANCODE_SPACE => {
-                        self.selected_shader = if (self.selected_shader == 1) 0 else 1;
-                    },
-                    c.SDL_SCANCODE_M => {
-                        self.selected_mesh = if (self.selected_mesh == 1) 0 else 1;
-                    },
-
-                    // WASD for camera
-                    c.SDL_SCANCODE_W => {
-                        self.camera_input.z = 1.0;
-                    },
-                    c.SDL_SCANCODE_S => {
-                        self.camera_input.z = -1.0;
-                    },
-                    c.SDL_SCANCODE_A => {
-                        self.camera_input.x = 1.0;
-                    },
-                    c.SDL_SCANCODE_D => {
-                        self.camera_input.x = -1.0;
-                    },
-                    c.SDL_SCANCODE_E => {
-                        self.camera_input.y = 1.0;
-                    },
-                    c.SDL_SCANCODE_Q => {
-                        self.camera_input.y = -1.0;
-                    },
-
-                    else => {},
-                }
-            } else if (event.type == c.SDL_EVENT_KEY_UP) {
-                switch (event.key.keysym.scancode) {
-                    c.SDL_SCANCODE_W => {
-                        self.camera_input.z = 0.0;
-                    },
-                    c.SDL_SCANCODE_S => {
-                        self.camera_input.z = 0.0;
-                    },
-                    c.SDL_SCANCODE_A => {
-                        self.camera_input.x = 0.0;
-                    },
-                    c.SDL_SCANCODE_D => {
-                        self.camera_input.x = 0.0;
-                    },
-                    c.SDL_SCANCODE_E => {
-                        self.camera_input.y = 0.0;
-                    },
-                    c.SDL_SCANCODE_Q => {
-                        self.camera_input.y = 0.0;
-                    },
-
-                    else => {},
-                }
+            } else if (self.is_game_window_active and
+                (mouse.x > self.game_window_rect.x and mouse.x < self.game_window_rect.z) and
+                (mouse.y > self.game_window_rect.y and mouse.y < self.game_window_rect.w))
+            {
+                self.processGameEvent(event);
+            } else {
+                self.camera_input.x = 0;
+                self.camera_input.y = 0;
+                self.camera_input.z = 0;
             }
         }
 
@@ -1618,8 +1683,8 @@ pub fn run(self: *Self) void {
                 var dockspace_id = c.ImGui_GetID("MyDockSpace");
                 _ = c.ImGui_DockSpaceEx(dockspace_id, c.ImVec2{ .x = 0, .y = 0 }, dockspace_flags, null);
 
-                if (first_time) {
-                    first_time = false;
+                if (self.first_time) {
+                    self.first_time = false;
 
                     c.ImGui_DockBuilderRemoveNode(dockspace_id); // clear any previous layout
                     _ = c.ImGui_DockBuilderAddNodeEx(dockspace_id, dockspace_flags | c.ImGuiDockNodeFlags_DockSpace);
@@ -1649,13 +1714,24 @@ pub fn run(self: *Self) void {
             c.ImGui_End();
 
             _ = c.ImGui_Begin("Game", null, 0);
+            const old_is_game_window_focused = self.is_game_window_focused;
+            self.is_game_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
+            if (self.is_game_window_focused) {
+                if (!old_is_game_window_focused) {
+                    self.is_game_window_active = true;
+                }
+            } else {
+                self.is_game_window_active = false;
+            }
             const game_image = c.ImGui_GetWindowDrawList();
-            me = self;
+            self.game_view_size = c.ImGui_GetWindowSize();
             c.ImDrawList_AddCallback(game_image, extern struct {
                 fn f(dl: [*c]const c.ImDrawList, dc: [*c]const c.ImDrawCmd) callconv(.C) void {
+                    _ = dl;
+                    const me: *Self = @alignCast(@ptrCast(dc.*.UserCallbackData));
                     const cmd = me.get_current_frame().main_command_buffer;
-                    std.log.debug("{any}\n{any}\n{any}", .{ dl, dc, cmd });
                     const cr = dc.*.ClipRect;
+                    me.game_window_rect = cr;
                     const w = cr.z - cr.x;
                     const h = cr.w - cr.y;
                     c.vkCmdSetScissor(cmd, 0, 1, &[_]c.VkRect2D{.{
@@ -1665,13 +1741,13 @@ pub fn run(self: *Self) void {
                     c.vkCmdSetViewport(cmd, 0, 1, &[_]c.VkViewport{.{
                         .x = cr.x,
                         .y = cr.y,
-                        .width = w,
-                        .height = h,
+                        .width = me.game_view_size.x,
+                        .height = me.game_view_size.y,
                         .minDepth = 0.0,
                         .maxDepth = 1.0,
                     }});
 
-                    const aspect = w / h;
+                    const aspect = me.game_view_size.x / me.game_view_size.y;
                     me.draw_objects(cmd, me.renderables.items, aspect);
 
                     c.vkCmdSetScissor(cmd, 0, 1, &[_]c.VkRect2D{.{
@@ -1679,13 +1755,13 @@ pub fn run(self: *Self) void {
                         .extent = window_extent,
                     }});
                 }
-            }.f, null);
+            }.f, self);
             c.ImDrawList_AddCallback(game_image, c.ImDrawCallback_ResetRenderState, null);
             c.ImGui_End();
 
-            // var open = true;
+            var open = true;
             // Imgui frame
-            // c.ImGui_ShowDemoWindow(&open);
+            c.ImGui_ShowDemoWindow(&open);
 
             c.ImGui_Render();
         }
@@ -1705,6 +1781,67 @@ pub fn run(self: *Self) void {
             const new_title = std.fmt.allocPrintZ(self.allocator, "Vulkan - FPS: {d:6.3}, ms: {d:6.3}", .{ fps, delta * 1000.0 }) catch @panic("Out of memory");
             defer self.allocator.free(new_title);
             _ = c.SDL_SetWindowTitle(self.window, new_title.ptr);
+        }
+    }
+}
+
+fn processGameEvent(self: *Self, event: c.SDL_Event) void {
+    if (event.type == c.SDL_EVENT_KEY_DOWN) {
+        switch (event.key.keysym.scancode) {
+            c.SDL_SCANCODE_SPACE => {
+                self.selected_shader = if (self.selected_shader == 1) 0 else 1;
+            },
+            c.SDL_SCANCODE_M => {
+                self.selected_mesh = if (self.selected_mesh == 1) 0 else 1;
+            },
+
+            // WASD for camera
+            c.SDL_SCANCODE_W => {
+                self.camera_input.z = 1.0;
+            },
+            c.SDL_SCANCODE_S => {
+                self.camera_input.z = -1.0;
+            },
+            c.SDL_SCANCODE_A => {
+                self.camera_input.x = 1.0;
+            },
+            c.SDL_SCANCODE_D => {
+                self.camera_input.x = -1.0;
+            },
+            c.SDL_SCANCODE_E => {
+                self.camera_input.y = 1.0;
+            },
+            c.SDL_SCANCODE_Q => {
+                self.camera_input.y = -1.0;
+            },
+
+            else => {},
+        }
+    } else if (event.type == c.SDL_EVENT_KEY_UP) {
+        switch (event.key.keysym.scancode) {
+            c.SDL_SCANCODE_ESCAPE => {
+                self.is_game_window_active = false;
+            },
+            c.SDL_SCANCODE_W => {
+                self.camera_input.z = 0.0;
+            },
+            c.SDL_SCANCODE_S => {
+                self.camera_input.z = 0.0;
+            },
+            c.SDL_SCANCODE_A => {
+                self.camera_input.x = 0.0;
+            },
+            c.SDL_SCANCODE_D => {
+                self.camera_input.x = 0.0;
+            },
+            c.SDL_SCANCODE_E => {
+                self.camera_input.y = 0.0;
+            },
+            c.SDL_SCANCODE_Q => {
+                self.camera_input.y = 0.0;
+            },
+
+            else => {},
         }
     }
 }
@@ -2020,6 +2157,4 @@ fn check_sdl_bool(res: c.SDL_bool) void {
 }
 
 var dockspace_flags = c.ImGuiDockNodeFlags_PassthruCentralNode;
-var first_time = true;
-var me: *Self = undefined;
 var current_image_idx: u32 = 0;
