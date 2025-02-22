@@ -31,7 +31,7 @@ pub fn load_image_from_file(engine: *Engine, filepath: []const u8) !Engine.Alloc
     log.info("Loaded image from file to ram: {s}", .{filepath});
 
     const image_size = @as(c.VkDeviceSize, @intCast(width * height * 4));
-    const format = c.VK_FORMAT_R8G8B8A8_SRGB;
+    const format = c.VK_FORMAT_R8G8B8A8_UNORM;
 
     const staging_buffer = engine.create_buffer(image_size, c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, c.VMA_MEMORY_USAGE_CPU_ONLY);
     defer c.vmaDestroyBuffer(engine.vma_allocator, staging_buffer.buffer, staging_buffer.allocation);
@@ -52,7 +52,20 @@ pub fn load_image_from_file(engine: *Engine, filepath: []const u8) !Engine.Alloc
         .depth = 1,
     };
 
-    const img_info = std.mem.zeroInit(c.VkImageCreateInfo, .{ .sType = c.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = c.VK_IMAGE_TYPE_2D, .format = format, .extent = extent, .mipLevels = 1, .arrayLayers = 1, .samples = c.VK_SAMPLE_COUNT_1_BIT, .tiling = c.VK_IMAGE_TILING_OPTIMAL, .usage = c.VK_IMAGE_USAGE_TRANSFER_DST_BIT | c.VK_IMAGE_USAGE_SAMPLED_BIT });
+    const img_info = std.mem.zeroInit(
+        c.VkImageCreateInfo,
+        .{
+            .sType = c.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .imageType = c.VK_IMAGE_TYPE_2D,
+            .format = format,
+            .extent = extent,
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = c.VK_SAMPLE_COUNT_1_BIT,
+            .tiling = c.VK_IMAGE_TILING_OPTIMAL,
+            .usage = c.VK_IMAGE_USAGE_TRANSFER_DST_BIT | c.VK_IMAGE_USAGE_SAMPLED_BIT,
+        },
+    );
 
     const alloc_ci = std.mem.zeroInit(c.VmaAllocationCreateInfo, .{
         .usage = c.VMA_MEMORY_USAGE_GPU_ONLY,

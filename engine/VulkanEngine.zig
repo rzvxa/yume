@@ -43,6 +43,7 @@ const Material = struct {
 };
 
 const RenderObject = struct {
+    name: [*c]const u8,
     mesh: *Mesh,
     material: *Material,
     transform: Mat4,
@@ -151,12 +152,20 @@ buffer_deletion_queue: std.ArrayList(VmaBufferDeleter) = undefined,
 image_deletion_queue: std.ArrayList(VmaImageDeleter) = undefined,
 
 // imgui state
+play: bool = false,
+imgui_demo_open: bool = false,
+
 first_time: bool = true,
 game_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
 mouse: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
 game_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
 is_game_window_active: bool = false,
 is_game_window_focused: bool = false,
+
+play_icon_ds: c.VkDescriptorSet = undefined,
+pause_icon_ds: c.VkDescriptorSet = undefined,
+stop_icon_ds: c.VkDescriptorSet = undefined,
+fast_forward_icon_ds: c.VkDescriptorSet = undefined,
 
 pub const MeshPushConstants = struct {
     data: Vec4,
@@ -1140,6 +1149,7 @@ fn create_shader_module(self: *Self, code: []const u8) ?c.VkShaderModule {
 
 fn init_scene(self: *Self) void {
     const monkey = RenderObject{
+        .name = "monkey",
         .mesh = self.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
         .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
         .transform = Mat4.IDENTITY,
@@ -1218,6 +1228,7 @@ fn init_scene(self: *Self) void {
     c.vkUpdateDescriptorSets(self.device, 1, &write_descriptor_set, 0, null);
 
     const lost_empire = RenderObject{
+        .name = "lost_empire",
         .mesh = self.meshes.getPtr("lost_empire") orelse @panic("Failed to get triangle mesh"),
         .transform = Mat4.translation(Vec3.make(5.0, -10.0, 0.0)),
         .material = material,
@@ -1225,6 +1236,7 @@ fn init_scene(self: *Self) void {
     self.renderables.append(lost_empire) catch @panic("Out of memory");
 
     var x: i32 = -20;
+    var i: i32 = 0;
     while (x <= 20) : (x += 1) {
         var y: i32 = -20;
         while (y <= 20) : (y += 1) {
@@ -1232,7 +1244,9 @@ fn init_scene(self: *Self) void {
             const scale = Mat4.scale(Vec3.make(0.2, 0.2, 0.2));
             const transform = Mat4.mul(translation, scale);
 
+            i += 1;
             const tri = RenderObject{
+                .name = "triangle",
                 .mesh = self.meshes.getPtr("triangle") orelse @panic("Failed to get triangle mesh"),
                 .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
                 .transform = transform,
@@ -1317,8 +1331,16 @@ fn init_imgui(self: *Self) void {
         .MSAASamples = c.VK_SAMPLE_COUNT_1_BIT,
     });
 
+    const io = c.ImGui_GetIO();
+    _ = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/roboto.ttf", 14, null, null);
+
     _ = c.cImGui_ImplVulkan_Init(&init_info, self.render_pass);
     _ = c.cImGui_ImplVulkan_CreateFontsTexture();
+
+    self.play_icon_ds = self.create_imgui_texture("assets/icons/play.png");
+    self.pause_icon_ds = self.create_imgui_texture("assets/icons/pause.png");
+    self.stop_icon_ds = self.create_imgui_texture("assets/icons/stop.png");
+    self.fast_forward_icon_ds = self.create_imgui_texture("assets/icons/fast-forward.png");
 
     self.deletion_queue.append(VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool)) catch @panic("Out of memory");
 
@@ -1358,10 +1380,10 @@ fn init_imgui(self: *Self) void {
     style.*.IndentSpacing = 21.0;
     style.*.ColumnsMinSpacing = 6.0;
     style.*.ScrollbarSize = 14.0;
-    style.*.ScrollbarRounding = 9.0;
+    style.*.ScrollbarRounding = 0.0;
     style.*.GrabMinSize = 10.0;
     style.*.GrabRounding = 0.0;
-    style.*.TabRounding = 4.0;
+    style.*.TabRounding = 0.0;
     style.*.TabBorderSize = 0.0;
     style.*.TabMinWidthForCloseButton = 0.0;
     style.*.ColorButtonPosition = c.ImGuiDir_Right;
@@ -1369,58 +1391,58 @@ fn init_imgui(self: *Self) void {
     style.*.SelectableTextAlign = ImVec2(0.0, 0.0);
 
     style.*.Colors[c.ImGuiCol_Text] = ImVec4(1.0, 1.0, 1.0, 1.0);
-    style.*.Colors[c.ImGuiCol_TextDisabled] = ImVec4(0.4980392158031464, 0.4980392158031464, 0.4980392158031464, 1.0);
-    style.*.Colors[c.ImGuiCol_WindowBg] = ImVec4(0.05882352963089943, 0.05882352963089943, 0.05882352963089943, 0.9399999976158142);
-    style.*.Colors[c.ImGuiCol_ChildBg] = ImVec4(1.0, 1.0, 1.0, 0.0);
-    style.*.Colors[c.ImGuiCol_PopupBg] = ImVec4(0.0784313753247261, 0.0784313753247261, 0.0784313753247261, 0.9399999976158142);
-    style.*.Colors[c.ImGuiCol_Border] = ImVec4(0.4274509847164154, 0.4274509847164154, 0.4980392158031464, 0.5);
-    style.*.Colors[c.ImGuiCol_BorderShadow] = ImVec4(0.0, 0.0, 0.0, 0.0);
-    style.*.Colors[c.ImGuiCol_FrameBg] = ImVec4(0.2000000029802322, 0.2078431397676468, 0.2196078449487686, 0.5400000214576721);
-    style.*.Colors[c.ImGuiCol_FrameBgHovered] = ImVec4(0.4000000059604645, 0.4000000059604645, 0.4000000059604645, 0.4000000059604645);
-    style.*.Colors[c.ImGuiCol_FrameBgActive] = ImVec4(0.1764705926179886, 0.1764705926179886, 0.1764705926179886, 0.6700000166893005);
-    style.*.Colors[c.ImGuiCol_TitleBg] = ImVec4(0.03921568766236305, 0.03921568766236305, 0.03921568766236305, 1.0);
-    style.*.Colors[c.ImGuiCol_TitleBgActive] = ImVec4(0.2862745225429535, 0.2862745225429535, 0.2862745225429535, 1.0);
-    style.*.Colors[c.ImGuiCol_TitleBgCollapsed] = ImVec4(0.0, 0.0, 0.0, 0.5099999904632568);
-    style.*.Colors[c.ImGuiCol_MenuBarBg] = ImVec4(0.1372549086809158, 0.1372549086809158, 0.1372549086809158, 1.0);
-    style.*.Colors[c.ImGuiCol_ScrollbarBg] = ImVec4(0.01960784383118153, 0.01960784383118153, 0.01960784383118153, 0.5299999713897705);
-    style.*.Colors[c.ImGuiCol_ScrollbarGrab] = ImVec4(0.3098039329051971, 0.3098039329051971, 0.3098039329051971, 1.0);
-    style.*.Colors[c.ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.407843142747879, 0.407843142747879, 0.407843142747879, 1.0);
-    style.*.Colors[c.ImGuiCol_ScrollbarGrabActive] = ImVec4(0.5098039507865906, 0.5098039507865906, 0.5098039507865906, 1.0);
-    style.*.Colors[c.ImGuiCol_CheckMark] = ImVec4(0.9372549057006836, 0.9372549057006836, 0.9372549057006836, 1.0);
-    style.*.Colors[c.ImGuiCol_SliderGrab] = ImVec4(0.5098039507865906, 0.5098039507865906, 0.5098039507865906, 1.0);
-    style.*.Colors[c.ImGuiCol_SliderGrabActive] = ImVec4(0.8588235378265381, 0.8588235378265381, 0.8588235378265381, 1.0);
-    style.*.Colors[c.ImGuiCol_Button] = ImVec4(0.4392156898975372, 0.4392156898975372, 0.4392156898975372, 0.4000000059604645);
-    style.*.Colors[c.ImGuiCol_ButtonHovered] = ImVec4(0.4588235318660736, 0.4666666686534882, 0.47843137383461, 1.0);
-    style.*.Colors[c.ImGuiCol_ButtonActive] = ImVec4(0.4196078479290009, 0.4196078479290009, 0.4196078479290009, 1.0);
-    style.*.Colors[c.ImGuiCol_Header] = ImVec4(0.6980392336845398, 0.6980392336845398, 0.6980392336845398, 0.3100000023841858);
-    style.*.Colors[c.ImGuiCol_HeaderHovered] = ImVec4(0.6980392336845398, 0.6980392336845398, 0.6980392336845398, 0.800000011920929);
-    style.*.Colors[c.ImGuiCol_HeaderActive] = ImVec4(0.47843137383461, 0.4980392158031464, 0.5176470875740051, 1.0);
-    style.*.Colors[c.ImGuiCol_Separator] = ImVec4(0.4274509847164154, 0.4274509847164154, 0.4980392158031464, 0.5);
-    style.*.Colors[c.ImGuiCol_SeparatorHovered] = ImVec4(0.7176470756530762, 0.7176470756530762, 0.7176470756530762, 0.7799999713897705);
-    style.*.Colors[c.ImGuiCol_SeparatorActive] = ImVec4(0.5098039507865906, 0.5098039507865906, 0.5098039507865906, 1.0);
-    style.*.Colors[c.ImGuiCol_ResizeGrip] = ImVec4(0.9098039269447327, 0.9098039269447327, 0.9098039269447327, 0.25);
-    style.*.Colors[c.ImGuiCol_ResizeGripHovered] = ImVec4(0.8078431487083435, 0.8078431487083435, 0.8078431487083435, 0.6700000166893005);
-    style.*.Colors[c.ImGuiCol_ResizeGripActive] = ImVec4(0.4588235318660736, 0.4588235318660736, 0.4588235318660736, 0.949999988079071);
-    style.*.Colors[c.ImGuiCol_Tab] = ImVec4(0.1764705926179886, 0.3490196168422699, 0.5764706134796143, 0.8619999885559082);
-    style.*.Colors[c.ImGuiCol_TabHovered] = ImVec4(0.2588235437870026, 0.5882353186607361, 0.9764705896377563, 0.800000011920929);
-    style.*.Colors[c.ImGuiCol_TabActive] = ImVec4(0.196078434586525, 0.407843142747879, 0.6784313917160034, 1.0);
-    style.*.Colors[c.ImGuiCol_TabUnfocused] = ImVec4(0.06666667014360428, 0.1019607856869698, 0.1450980454683304, 0.9724000096321106);
-    style.*.Colors[c.ImGuiCol_TabUnfocusedActive] = ImVec4(0.1333333402872086, 0.2588235437870026, 0.4235294163227081, 1.0);
-    style.*.Colors[c.ImGuiCol_PlotLines] = ImVec4(0.6078431606292725, 0.6078431606292725, 0.6078431606292725, 1.0);
-    style.*.Colors[c.ImGuiCol_PlotLinesHovered] = ImVec4(1.0, 0.4274509847164154, 0.3490196168422699, 1.0);
-    style.*.Colors[c.ImGuiCol_PlotHistogram] = ImVec4(0.729411780834198, 0.6000000238418579, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_PlotHistogramHovered] = ImVec4(1.0, 0.6000000238418579, 0.0, 1.0);
+    style.*.Colors[c.ImGuiCol_TextDisabled] = ImVec4(0.5921568870544434, 0.5921568870544434, 0.5921568870544434, 1.0);
+    style.*.Colors[c.ImGuiCol_WindowBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[c.ImGuiCol_ChildBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[c.ImGuiCol_PopupBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[c.ImGuiCol_Border] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
+    style.*.Colors[c.ImGuiCol_BorderShadow] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
+    style.*.Colors[c.ImGuiCol_FrameBg] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
+    style.*.Colors[c.ImGuiCol_FrameBgHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[c.ImGuiCol_FrameBgActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[c.ImGuiCol_TitleBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[c.ImGuiCol_TitleBgActive] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[c.ImGuiCol_TitleBgCollapsed] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[c.ImGuiCol_MenuBarBg] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
+    style.*.Colors[c.ImGuiCol_ScrollbarBg] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
+    style.*.Colors[c.ImGuiCol_ScrollbarGrab] = ImVec4(0.321568638086319, 0.321568638086319, 0.3333333432674408, 1.0);
+    style.*.Colors[c.ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.3529411852359772, 0.3529411852359772, 0.3725490272045135, 1.0);
+    style.*.Colors[c.ImGuiCol_ScrollbarGrabActive] = ImVec4(0.3529411852359772, 0.3529411852359772, 0.3725490272045135, 1.0);
+    style.*.Colors[c.ImGuiCol_CheckMark] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[c.ImGuiCol_SliderGrab] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[c.ImGuiCol_SliderGrabActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[c.ImGuiCol_Button] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
+    style.*.Colors[c.ImGuiCol_ButtonHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[c.ImGuiCol_ButtonActive] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[c.ImGuiCol_Header] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
+    style.*.Colors[c.ImGuiCol_HeaderHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[c.ImGuiCol_HeaderActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[c.ImGuiCol_Separator] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
+    style.*.Colors[c.ImGuiCol_SeparatorHovered] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
+    style.*.Colors[c.ImGuiCol_SeparatorActive] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
+    style.*.Colors[c.ImGuiCol_ResizeGrip] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[c.ImGuiCol_ResizeGripHovered] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
+    style.*.Colors[c.ImGuiCol_ResizeGripActive] = ImVec4(0.321568638086319, 0.321568638086319, 0.3333333432674408, 1.0);
+    style.*.Colors[c.ImGuiCol_Tab] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[c.ImGuiCol_TabHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[c.ImGuiCol_TabActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[c.ImGuiCol_TabUnfocused] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[c.ImGuiCol_TabUnfocusedActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[c.ImGuiCol_PlotLines] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[c.ImGuiCol_PlotLinesHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[c.ImGuiCol_PlotHistogram] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[c.ImGuiCol_PlotHistogramHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
     style.*.Colors[c.ImGuiCol_TableHeaderBg] = ImVec4(0.1882352977991104, 0.1882352977991104, 0.2000000029802322, 1.0);
     style.*.Colors[c.ImGuiCol_TableBorderStrong] = ImVec4(0.3098039329051971, 0.3098039329051971, 0.3490196168422699, 1.0);
     style.*.Colors[c.ImGuiCol_TableBorderLight] = ImVec4(0.2274509817361832, 0.2274509817361832, 0.2470588237047195, 1.0);
     style.*.Colors[c.ImGuiCol_TableRowBg] = ImVec4(0.0, 0.0, 0.0, 0.0);
     style.*.Colors[c.ImGuiCol_TableRowBgAlt] = ImVec4(1.0, 1.0, 1.0, 0.05999999865889549);
-    style.*.Colors[c.ImGuiCol_TextSelectedBg] = ImVec4(0.8666666746139526, 0.8666666746139526, 0.8666666746139526, 0.3499999940395355);
-    style.*.Colors[c.ImGuiCol_DragDropTarget] = ImVec4(1.0, 1.0, 0.0, 0.8999999761581421);
-    style.*.Colors[c.ImGuiCol_NavHighlight] = ImVec4(0.6000000238418579, 0.6000000238418579, 0.6000000238418579, 1.0);
+    style.*.Colors[c.ImGuiCol_TextSelectedBg] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[c.ImGuiCol_DragDropTarget] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[c.ImGuiCol_NavHighlight] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
     style.*.Colors[c.ImGuiCol_NavWindowingHighlight] = ImVec4(1.0, 1.0, 1.0, 0.699999988079071);
     style.*.Colors[c.ImGuiCol_NavWindowingDimBg] = ImVec4(0.800000011920929, 0.800000011920929, 0.800000011920929, 0.2000000029802322);
-    style.*.Colors[c.ImGuiCol_ModalWindowDimBg] = ImVec4(0.800000011920929, 0.800000011920929, 0.800000011920929, 0.3499999940395355);
+    style.*.Colors[c.ImGuiCol_ModalWindowDimBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
 }
 
 pub fn cleanup(self: *Self) void {
@@ -1479,7 +1501,7 @@ fn load_textures(self: *Self) void {
         .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
         .image = lost_empire_image.image,
-        .format = c.VK_FORMAT_R8G8B8A8_SRGB,
+        .format = c.VK_FORMAT_R8G8B8A8_UNORM,
         .components = .{
             .r = c.VK_COMPONENT_SWIZZLE_IDENTITY,
             .g = c.VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -1627,10 +1649,7 @@ pub fn run(self: *Self) void {
             _ = c.cImGui_ImplSDL3_ProcessEvent(&event);
             if (event.type == c.SDL_EVENT_QUIT) {
                 quit = true;
-            } else if (self.is_game_window_active and
-                (mouse.x > self.game_window_rect.x and mouse.x < self.game_window_rect.z) and
-                (mouse.y > self.game_window_rect.y and mouse.y < self.game_window_rect.w))
-            {
+            } else if (self.is_game_window_active and self.isInGameView(mouse)) {
                 self.processGameEvent(event);
             } else {
                 self.camera_input.x = 0;
@@ -1648,6 +1667,41 @@ pub fn run(self: *Self) void {
             c.cImGui_ImplVulkan_NewFrame();
             c.cImGui_ImplSDL3_NewFrame();
             c.ImGui_NewFrame();
+            if (self.imgui_demo_open) {
+                c.ImGui_ShowDemoWindow(&self.imgui_demo_open);
+            }
+
+            if (c.ImGui_BeginMainMenuBar()) {
+                if (c.ImGui_BeginMenu("File")) {
+                    if (c.ImGui_MenuItem("New")) {}
+                    if (c.ImGui_MenuItem("Open")) {}
+                    if (c.ImGui_MenuItem("Save")) {}
+                    if (c.ImGui_MenuItem("Quit")) {}
+                    c.ImGui_EndMenu();
+                }
+                if (c.ImGui_BeginMenu("Edit")) {
+                    if (c.ImGui_MenuItemEx("Undo", "CTRL+Z", false, true)) {}
+                    if (c.ImGui_MenuItemEx("Redo", "CTRL+Y", false, false)) {} // Disabled item
+                    c.ImGui_Separator();
+                    if (c.ImGui_MenuItemEx("Cut", "CTRL+X", false, true)) {}
+                    if (c.ImGui_MenuItemEx("Copy", "CTRL+C", false, true)) {}
+                    if (c.ImGui_MenuItemEx("Paste", "CTRL+V", false, true)) {}
+                    c.ImGui_EndMenu();
+                }
+                if (c.ImGui_BeginMenu("Help")) {
+                    _ = c.ImGui_MenuItemBoolPtr("ImGui Demo Window", null, &self.imgui_demo_open, true);
+                    c.ImGui_Separator();
+                    if (c.ImGui_MenuItem("About")) {}
+                    c.ImGui_EndMenu();
+                }
+                c.ImGui_SetCursorPosX((c.ImGui_GetCursorPosX() - (13 * 3)) + (window_extent.width / 2) - c.ImGui_GetCursorPosX());
+                if (c.ImGui_ImageButton("Play", if (self.play) self.stop_icon_ds else self.play_icon_ds, c.ImVec2{ .x = 13, .y = 13 })) {
+                    self.play = !self.play;
+                }
+                _ = c.ImGui_ImageButton("Pause", self.pause_icon_ds, c.ImVec2{ .x = 13, .y = 13 });
+                _ = c.ImGui_ImageButton("Next", self.fast_forward_icon_ds, c.ImVec2{ .x = 13, .y = 13 });
+                c.ImGui_EndMainMenuBar();
+            }
 
             // We are using the ImGuiWindowFlags_NoDocking flag to make the parent window not dockable into,
             // because it would be confusing to have two docking targets within each others.
@@ -1697,20 +1751,32 @@ pub fn run(self: *Self) void {
                     const dock_id_down = c.ImGui_DockBuilderSplitNode(dockspace_id, c.ImGuiDir_Down, 0.25, null, &dockspace_id);
 
                     // we now dock our windows into the docking node we made above
-                    c.ImGui_DockBuilderDockWindow("Down", dock_id_down);
-                    c.ImGui_DockBuilderDockWindow("Left", dock_id_left);
+                    c.ImGui_DockBuilderDockWindow("Assets", dock_id_down);
+                    c.ImGui_DockBuilderDockWindow("Hierarchy", dock_id_left);
                     c.ImGui_DockBuilderFinish(dockspace_id);
                 }
             }
 
             c.ImGui_End();
 
-            _ = c.ImGui_Begin("Left", null, 0);
-            c.ImGui_Text("Hello, left!");
+            _ = c.ImGui_Begin("Hierarchy", null, 0);
+            for (self.renderables.items) |r| {
+                var node_flags = c.ImGuiTreeNodeFlags_OpenOnArrow;
+                if (std.mem.eql(u8, std.mem.span(r.name), "triangle")) {
+                    node_flags = c.ImGuiTreeNodeFlags_Leaf;
+                }
+                if (c.ImGui_TreeNodeEx(r.name, node_flags)) {
+                    c.ImGui_TreePop();
+                }
+            }
             c.ImGui_End();
 
-            _ = c.ImGui_Begin("Down", null, 0);
-            c.ImGui_Text("Hello, down!");
+            _ = c.ImGui_Begin("Assets", null, 0);
+            c.ImGui_Text("TODO");
+            c.ImGui_End();
+
+            _ = c.ImGui_Begin("Properties", null, 0);
+            c.ImGui_Text("TODO");
             c.ImGui_End();
 
             _ = c.ImGui_Begin("Game", null, 0);
@@ -1718,6 +1784,8 @@ pub fn run(self: *Self) void {
             self.is_game_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
             if (self.is_game_window_focused) {
                 if (!old_is_game_window_focused) {
+                    self.is_game_window_active = true;
+                } else if (self.isInGameView(c.ImGui_GetMousePos()) and c.ImGui_IsMouseClicked(c.ImGuiMouseButton_Left)) {
                     self.is_game_window_active = true;
                 }
             } else {
@@ -1738,8 +1806,10 @@ pub fn run(self: *Self) void {
                         .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
                         .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
                     }});
+
+                    const vx = if (cr.x > 0) cr.x else cr.z - me.game_view_size.x;
                     c.vkCmdSetViewport(cmd, 0, 1, &[_]c.VkViewport{.{
-                        .x = cr.x,
+                        .x = vx,
                         .y = cr.y,
                         .width = me.game_view_size.x,
                         .height = me.game_view_size.y,
@@ -1758,10 +1828,6 @@ pub fn run(self: *Self) void {
             }.f, self);
             c.ImDrawList_AddCallback(game_image, c.ImDrawCallback_ResetRenderState, null);
             c.ImGui_End();
-
-            var open = true;
-            // Imgui frame
-            c.ImGui_ShowDemoWindow(&open);
 
             c.ImGui_Render();
         }
@@ -1878,7 +1944,7 @@ fn draw(self: *Self) void {
     const color = math3d.abs(std.math.sin(@as(f32, @floatFromInt(self.frame_number)) / 120.0));
 
     const color_clear: c.VkClearValue = .{
-        .color = .{ .float32 = [_]f32{ 0.0, 0.0, color, 1.0 } },
+        .color = .{ .float32 = [_]f32{ color, 0.0, color, 1.0 } },
     };
 
     const depth_clear = c.VkClearValue{
@@ -2139,6 +2205,54 @@ pub fn immediate_submit(self: *Self, submit_ctx: anytype) void {
     check_vk(c.vkResetCommandPool(self.device, self.upload_context.command_pool, 0)) catch @panic("Failed to reset command pool");
 }
 
+fn create_imgui_texture(self: *Self, filepath: []const u8) c.VkDescriptorSet {
+    const img = texs.load_image_from_file(self, filepath) catch @panic("Failed to load image");
+    self.image_deletion_queue.append(VmaImageDeleter{ .image = img }) catch @panic("Out of memory");
+
+    // Create the Image View
+    var image_view: c.VkImageView = undefined;
+    {
+        const info = c.VkImageViewCreateInfo{
+            .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = img.image,
+            .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
+            .format = c.VK_FORMAT_R8G8B8A8_UNORM,
+            .subresourceRange = .{
+                .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+        };
+        check_vk(c.vkCreateImageView(self.device, &info, vk_alloc_cbs, &image_view)) catch @panic("Failed to create image view");
+    }
+    self.textures.put(filepath, Texture{ .image = img, .image_view = image_view }) catch @panic("OOM");
+    self.deletion_queue.append(VulkanDeleter.make(image_view, c.vkDestroyImageView)) catch @panic("OOM");
+    // Create Sampler
+    var sampler: c.VkSampler = undefined;
+    {
+        const sampler_info = c.VkSamplerCreateInfo{
+            .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .magFilter = c.VK_FILTER_LINEAR,
+            .minFilter = c.VK_FILTER_LINEAR,
+            .mipmapMode = c.VK_SAMPLER_MIPMAP_MODE_LINEAR,
+            .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT, // outside image bounds just use border color
+            .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .minLod = -1000,
+            .maxLod = 1000,
+            .maxAnisotropy = 1.0,
+        };
+        check_vk(c.vkCreateSampler(self.device, &sampler_info, vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
+    }
+    self.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("OOM");
+    return c.cImGui_ImplVulkan_AddTexture(sampler, image_view, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
+fn isInGameView(self: *Self, pos: c.ImVec2) bool {
+    return (pos.x > self.game_window_rect.x and pos.x < self.game_window_rect.z) and
+        (pos.y > self.game_window_rect.y and pos.y < self.game_window_rect.w);
+}
+
 // Error checking for vulkan and SDL
 //
 
@@ -2156,5 +2270,5 @@ fn check_sdl_bool(res: c.SDL_bool) void {
     }
 }
 
-var dockspace_flags = c.ImGuiDockNodeFlags_PassthruCentralNode;
+var dockspace_flags: c.ImGuiDockNodeFlags = 0;
 var current_image_idx: u32 = 0;

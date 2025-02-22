@@ -88,7 +88,7 @@ pub fn create_instance(alloc: std.mem.Allocator, opts: VkiInstanceOpts) !Instanc
         if (ExtensionFinder.find(required_ext, extension_props)) {
             try extensions.append(arena, required_ext);
         } else {
-            log.err("Required vulkan extension not supported: {s}", .{ required_ext });
+            log.err("Required vulkan extension not supported: {s}", .{required_ext});
             return error.vulkan_extension_not_supported;
         }
     }
@@ -172,11 +172,7 @@ pub const PhysicalDevice = struct {
 /// # Allocations
 /// This function does not require persistent allocations.
 ///
-pub fn select_physical_device(
-    a: std.mem.Allocator,
-    instance: c.VkInstance,
-    opts: PhysicalDeviceSelectOpts
-) !PhysicalDevice {
+pub fn select_physical_device(a: std.mem.Allocator, instance: c.VkInstance, opts: PhysicalDeviceSelectOpts) !PhysicalDevice {
     var physical_device_count: u32 = undefined;
     try check_vk(c.vkEnumeratePhysicalDevices(instance, &physical_device_count, null));
 
@@ -213,7 +209,7 @@ pub fn select_physical_device(
     const res = suitable_pd.?;
 
     const device_name = @as([*:0]const u8, @ptrCast(@alignCast(res.properties.deviceName[0..])));
-    log.info("Selected physical device: {s}", .{ device_name });
+    log.info("Selected physical device: {s}", .{device_name});
 
     return res;
 }
@@ -245,10 +241,7 @@ pub const Device = struct {
 ///
 /// # Allocations
 /// This function does not require persistent allocations.
-pub fn create_logical_device(
-    a: std.mem.Allocator,
-    opts: DeviceCreateOpts
-) !Device {
+pub fn create_logical_device(a: std.mem.Allocator, opts: DeviceCreateOpts) !Device {
     var arena_state = std.heap.ArenaAllocator.init(a);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -412,7 +405,7 @@ fn pick_swapchain_format(formats: []const c.VkSurfaceFormatKHR, opts: SwapchainC
     // TODO: Add support for specifying desired format.
     _ = opts;
     for (formats) |format| {
-        if (format.format == c.VK_FORMAT_B8G8R8A8_SRGB and
+        if (format.format == c.VK_FORMAT_B8G8R8A8_UNORM and
             format.colorSpace == c.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
         {
             return format.format;
@@ -454,21 +447,13 @@ fn make_swapchain_extent(capabilities: c.VkSurfaceCapabilitiesKHR, opts: Swapcha
         .height = opts.window_height,
     };
 
-    extent.width = @max(
-        capabilities.minImageExtent.width,
-        @min(capabilities.maxImageExtent.width, extent.width));
-    extent.height = @max(
-        capabilities.minImageExtent.height,
-        @min(capabilities.maxImageExtent.height, extent.height));
+    extent.width = @max(capabilities.minImageExtent.width, @min(capabilities.maxImageExtent.width, extent.width));
+    extent.height = @max(capabilities.minImageExtent.height, @min(capabilities.maxImageExtent.height, extent.height));
 
     return extent;
 }
 
-fn make_physical_device(
-    a: std.mem.Allocator,
-    device: c.VkPhysicalDevice,
-    surface: c.VkSurfaceKHR
-) !PhysicalDevice {
+fn make_physical_device(a: std.mem.Allocator, device: c.VkPhysicalDevice, surface: c.VkSurfaceKHR) !PhysicalDevice {
     var props = std.mem.zeroInit(c.VkPhysicalDeviceProperties, .{});
     c.vkGetPhysicalDeviceProperties(device, &props);
 
@@ -489,7 +474,7 @@ fn make_physical_device(
         if (graphics_queue_family == PhysicalDevice.INVALID_QUEUE_FAMILY_INDEX and
             queue_family.queueFlags & c.VK_QUEUE_GRAPHICS_BIT != 0)
         {
-            graphics_queue_family= index;
+            graphics_queue_family = index;
         }
 
         if (present_queue_family == PhysicalDevice.INVALID_QUEUE_FAMILY_INDEX) {
@@ -507,14 +492,16 @@ fn make_physical_device(
         }
 
         if (transfer_queue_family == PhysicalDevice.INVALID_QUEUE_FAMILY_INDEX and
-            queue_family.queueFlags & c.VK_QUEUE_TRANSFER_BIT != 0) {
+            queue_family.queueFlags & c.VK_QUEUE_TRANSFER_BIT != 0)
+        {
             transfer_queue_family = index;
         }
 
         if (graphics_queue_family != PhysicalDevice.INVALID_QUEUE_FAMILY_INDEX and
             present_queue_family != PhysicalDevice.INVALID_QUEUE_FAMILY_INDEX and
             compute_queue_family != PhysicalDevice.INVALID_QUEUE_FAMILY_INDEX and
-            transfer_queue_family != PhysicalDevice.INVALID_QUEUE_FAMILY_INDEX) {
+            transfer_queue_family != PhysicalDevice.INVALID_QUEUE_FAMILY_INDEX)
+        {
             break;
         }
     }
@@ -537,7 +524,8 @@ fn is_physical_device_suitable(a: std.mem.Allocator, device: PhysicalDevice, opt
     if (device.graphics_queue_family == PhysicalDevice.INVALID_QUEUE_FAMILY_INDEX or
         device.present_queue_family == PhysicalDevice.INVALID_QUEUE_FAMILY_INDEX or
         device.compute_queue_family == PhysicalDevice.INVALID_QUEUE_FAMILY_INDEX or
-        device.transfer_queue_family == PhysicalDevice.INVALID_QUEUE_FAMILY_INDEX) {
+        device.transfer_queue_family == PhysicalDevice.INVALID_QUEUE_FAMILY_INDEX)
+    {
         return false;
     }
 
@@ -602,24 +590,13 @@ const SwapchainSupportInfo = struct {
     }
 };
 
-fn create_image_view(
-    device: c.VkDevice,
-    image: c.VkImage,
-    format: c.VkFormat,
-    aspect_flags: c.VkImageAspectFlags,
-    alloc_cb: ?*c.VkAllocationCallbacks
-) !c.VkImageView {
+fn create_image_view(device: c.VkDevice, image: c.VkImage, format: c.VkFormat, aspect_flags: c.VkImageAspectFlags, alloc_cb: ?*c.VkAllocationCallbacks) !c.VkImageView {
     const view_info = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = image,
         .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
         .format = format,
-        .components = .{
-            .r = c.VK_COMPONENT_SWIZZLE_IDENTITY,
-            .g = c.VK_COMPONENT_SWIZZLE_IDENTITY,
-            .b = c.VK_COMPONENT_SWIZZLE_IDENTITY,
-            .a = c.VK_COMPONENT_SWIZZLE_IDENTITY
-        },
+        .components = .{ .r = c.VK_COMPONENT_SWIZZLE_IDENTITY, .g = c.VK_COMPONENT_SWIZZLE_IDENTITY, .b = c.VK_COMPONENT_SWIZZLE_IDENTITY, .a = c.VK_COMPONENT_SWIZZLE_IDENTITY },
         .subresourceRange = .{
             .aspectMask = aspect_flags,
             .baseMipLevel = 0,
@@ -644,8 +621,7 @@ fn get_vulkan_instance_funct(comptime Fn: type, instance: c.VkInstance, name: [*
 }
 
 fn create_debug_callback(instance: c.VkInstance, opts: VkiInstanceOpts) !c.VkDebugUtilsMessengerEXT {
-    const create_fn_opt = get_vulkan_instance_funct(
-        c.PFN_vkCreateDebugUtilsMessengerEXT, instance, "vkCreateDebugUtilsMessengerEXT");
+    const create_fn_opt = get_vulkan_instance_funct(c.PFN_vkCreateDebugUtilsMessengerEXT, instance, "vkCreateDebugUtilsMessengerEXT");
     if (create_fn_opt) |create_fn| {
         const create_info = std.mem.zeroInit(c.VkDebugUtilsMessengerCreateInfoEXT, .{
             .sType = c.VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
@@ -668,16 +644,10 @@ fn create_debug_callback(instance: c.VkInstance, opts: VkiInstanceOpts) !c.VkDeb
 }
 
 pub fn get_destroy_debug_utils_messenger_fn(instance: c.VkInstance) c.PFN_vkDestroyDebugUtilsMessengerEXT {
-    return get_vulkan_instance_funct(
-        c.PFN_vkDestroyDebugUtilsMessengerEXT, instance, "vkDestroyDebugUtilsMessengerEXT");
+    return get_vulkan_instance_funct(c.PFN_vkDestroyDebugUtilsMessengerEXT, instance, "vkDestroyDebugUtilsMessengerEXT");
 }
 
-fn default_debug_callback(
-    severity: c.VkDebugUtilsMessageSeverityFlagBitsEXT,
-    msg_type: c.VkDebugUtilsMessageTypeFlagsEXT,
-    callback_data: ?* const c.VkDebugUtilsMessengerCallbackDataEXT,
-    user_data: ?*anyopaque
-) callconv(.C) c.VkBool32 {
+fn default_debug_callback(severity: c.VkDebugUtilsMessageSeverityFlagBitsEXT, msg_type: c.VkDebugUtilsMessageTypeFlagsEXT, callback_data: ?*const c.VkDebugUtilsMessengerCallbackDataEXT, user_data: ?*anyopaque) callconv(.C) c.VkBool32 {
     _ = user_data;
     const severity_str = switch (severity) {
         c.VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT => "verbose",
@@ -756,4 +726,3 @@ pub fn check_vk(result: c.VkResult) !void {
         else => error.vk_errror_unknown,
     };
 }
-
