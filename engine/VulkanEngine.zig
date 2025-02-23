@@ -1,5 +1,8 @@
+const c = @import("clibs");
+
 const std = @import("std");
-const c = @import("clibs.zig");
+
+const utils = @import("utils.zig");
 
 const vki = @import("vulkan_init.zig");
 const check_vk = vki.check_vk;
@@ -12,18 +15,22 @@ const Vec3 = math3d.Vec3;
 const Vec4 = math3d.Vec4;
 const Mat4 = math3d.Mat4;
 
+const context = @import("context.zig");
+
 const texs = @import("textures.zig");
 const Texture = texs.Texture;
+
+const window_extent = context.window_extent;
 
 const log = std.log.scoped(.vulkan_engine);
 
 const Self = @This();
 
-const window_extent = c.VkExtent2D{ .width = 1600, .height = 900 };
-
 const VK_NULL_HANDLE = null;
 
 const vk_alloc_cbs: ?*c.VkAllocationCallbacks = null;
+
+pub const RenderCommand = c.VkCommandBuffer;
 
 pub const AllocatedBuffer = struct {
     buffer: c.VkBuffer,
@@ -152,8 +159,7 @@ buffer_deletion_queue: std.ArrayList(VmaBufferDeleter) = undefined,
 image_deletion_queue: std.ArrayList(VmaImageDeleter) = undefined,
 
 // imgui state
-play: bool = false,
-imgui_demo_open: bool = false,
+current_image_idx: u32 = 0,
 
 first_time: bool = true,
 game_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
@@ -220,13 +226,7 @@ pub const VmaImageDeleter = struct {
     }
 };
 
-pub fn init(a: std.mem.Allocator) Self {
-    check_sdl(c.SDL_Init(c.SDL_INIT_VIDEO));
-
-    const window = c.SDL_CreateWindow("Vulkan", window_extent.width, window_extent.height, c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE) orelse @panic("Failed to create SDL window");
-
-    _ = c.SDL_ShowWindow(window);
-
+pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
     var engine = Self{
         .window = window,
         .allocator = a,
@@ -242,7 +242,7 @@ pub fn init(a: std.mem.Allocator) Self {
     engine.init_instance();
 
     // Create the window surface
-    check_sdl_bool(c.SDL_Vulkan_CreateSurface(window, engine.instance, vk_alloc_cbs, &engine.surface));
+    utils.checkSdlBool(c.SDL_Vulkan_CreateSurface(window, engine.instance, vk_alloc_cbs, &engine.surface));
 
     engine.init_device();
 
@@ -337,7 +337,7 @@ fn init_device(self: *Self) void {
 fn init_swapchain(self: *Self) void {
     var win_width: c_int = undefined;
     var win_height: c_int = undefined;
-    check_sdl(c.SDL_GetWindowSize(self.window, &win_width, &win_height));
+    utils.checkSdl(c.SDL_GetWindowSize(self.window, &win_width, &win_height));
 
     // Create a swapchain
     const swapchain = vki.create_swapchain(self.allocator, .{
@@ -1495,7 +1495,7 @@ pub fn cleanup(self: *Self) void {
 }
 
 fn load_textures(self: *Self) void {
-    const lost_empire_image = texs.load_image_from_file(self, "assets/lost_empire-RGBA.png") catch @panic("Failed to load image");
+    const lost_empire_image = texs.load_image_from_file(Self, self, "assets/lost_empire-RGBA.png") catch @panic("Failed to load image");
     self.image_deletion_queue.append(VmaImageDeleter{ .image = lost_empire_image }) catch @panic("Out of memory");
     const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -1632,226 +1632,7 @@ fn upload_mesh(self: *Self, mesh: *Mesh) void {
     c.vmaDestroyBuffer(self.vma_allocator, staging_buffer.buffer, staging_buffer.allocation);
 }
 
-pub fn run(self: *Self) void {
-    var timer = std.time.Timer.start() catch @panic("Failed to start timer");
-    var delta: f32 = 0.016;
-
-    var quit = false;
-    var event: c.SDL_Event = undefined;
-    while (!quit) {
-        while (c.SDL_PollEvent(&event) != 0) {
-            if (event.type == c.SDL_EVENT_MOUSE_MOTION) {
-                self.mouse.x = event.motion.x;
-                self.mouse.y = event.motion.y;
-            }
-            const mouse = self.mouse;
-
-            _ = c.cImGui_ImplSDL3_ProcessEvent(&event);
-            if (event.type == c.SDL_EVENT_QUIT) {
-                quit = true;
-            } else if (self.is_game_window_active and self.isInGameView(mouse)) {
-                self.processGameEvent(event);
-            } else {
-                self.camera_input.x = 0;
-                self.camera_input.y = 0;
-                self.camera_input.z = 0;
-            }
-        }
-
-        if (self.camera_input.squared_norm() > (0.1 * 0.1)) {
-            const camera_delta = self.camera_input.normalized().mul(delta * 5.0);
-            self.camera_pos = Vec3.add(self.camera_pos, camera_delta);
-        }
-
-        {
-            c.cImGui_ImplVulkan_NewFrame();
-            c.cImGui_ImplSDL3_NewFrame();
-            c.ImGui_NewFrame();
-            if (self.imgui_demo_open) {
-                c.ImGui_ShowDemoWindow(&self.imgui_demo_open);
-            }
-
-            if (c.ImGui_BeginMainMenuBar()) {
-                if (c.ImGui_BeginMenu("File")) {
-                    if (c.ImGui_MenuItem("New")) {}
-                    if (c.ImGui_MenuItem("Open")) {}
-                    if (c.ImGui_MenuItem("Save")) {}
-                    if (c.ImGui_MenuItem("Quit")) {}
-                    c.ImGui_EndMenu();
-                }
-                if (c.ImGui_BeginMenu("Edit")) {
-                    if (c.ImGui_MenuItemEx("Undo", "CTRL+Z", false, true)) {}
-                    if (c.ImGui_MenuItemEx("Redo", "CTRL+Y", false, false)) {} // Disabled item
-                    c.ImGui_Separator();
-                    if (c.ImGui_MenuItemEx("Cut", "CTRL+X", false, true)) {}
-                    if (c.ImGui_MenuItemEx("Copy", "CTRL+C", false, true)) {}
-                    if (c.ImGui_MenuItemEx("Paste", "CTRL+V", false, true)) {}
-                    c.ImGui_EndMenu();
-                }
-                if (c.ImGui_BeginMenu("Help")) {
-                    _ = c.ImGui_MenuItemBoolPtr("ImGui Demo Window", null, &self.imgui_demo_open, true);
-                    c.ImGui_Separator();
-                    if (c.ImGui_MenuItem("About")) {}
-                    c.ImGui_EndMenu();
-                }
-                c.ImGui_SetCursorPosX((c.ImGui_GetCursorPosX() - (13 * 3)) + (window_extent.width / 2) - c.ImGui_GetCursorPosX());
-                if (c.ImGui_ImageButton("Play", if (self.play) self.stop_icon_ds else self.play_icon_ds, c.ImVec2{ .x = 13, .y = 13 })) {
-                    self.play = !self.play;
-                }
-                _ = c.ImGui_ImageButton("Pause", self.pause_icon_ds, c.ImVec2{ .x = 13, .y = 13 });
-                _ = c.ImGui_ImageButton("Next", self.fast_forward_icon_ds, c.ImVec2{ .x = 13, .y = 13 });
-                c.ImGui_EndMainMenuBar();
-            }
-
-            // We are using the ImGuiWindowFlags_NoDocking flag to make the parent window not dockable into,
-            // because it would be confusing to have two docking targets within each others.
-            var window_flags = c.ImGuiWindowFlags_MenuBar | c.ImGuiWindowFlags_NoDocking;
-
-            const viewport = c.ImGui_GetMainViewport();
-            c.ImGui_SetNextWindowPos(viewport.*.Pos, 0);
-            c.ImGui_SetNextWindowSize(viewport.*.Size, 0);
-            c.ImGui_SetNextWindowViewport(viewport.*.ID);
-            c.ImGui_PushStyleVar(c.ImGuiStyleVar_WindowRounding, 0);
-            c.ImGui_PushStyleVar(c.ImGuiStyleVar_WindowBorderSize, 0);
-            window_flags |= c.ImGuiWindowFlags_NoTitleBar | c.ImGuiWindowFlags_NoCollapse | c.ImGuiWindowFlags_NoResize | c.ImGuiWindowFlags_NoMove;
-            window_flags |= c.ImGuiWindowFlags_NoBringToFrontOnFocus | c.ImGuiWindowFlags_NoNavFocus;
-
-            // When using ImGuiDockNodeFlags_PassthruCentralNode, DockSpace() will render our background and handle the pass-thru hole, so we ask Begin() to not render a background.
-            if ((dockspace_flags & c.ImGuiDockNodeFlags_PassthruCentralNode) > 0) {
-                window_flags |= c.ImGuiWindowFlags_NoBackground;
-            }
-
-            // Important: note that we proceed even if Begin() returns false (aka window is collapsed).
-            // This is because we want to keep our DockSpace() active. If a DockSpace() is inactive,
-            // all active windows docked into it will lose their parent and become undocked.
-            // We cannot preserve the docking relationship between an active window and an inactive docking, otherwise
-            // any change of dockspace/settings would lead to windows being stuck in limbo and never being visible.
-            c.ImGui_PushStyleVarImVec2(c.ImGuiStyleVar_WindowPadding, c.ImVec2{ .x = 0, .y = 0 });
-            _ = c.ImGui_Begin("DockSpace", null, window_flags);
-            c.ImGui_PopStyleVar();
-            c.ImGui_PopStyleVarEx(2);
-
-            // DockSpace
-            const io = c.ImGui_GetIO();
-            if ((io.*.ConfigFlags & c.ImGuiConfigFlags_DockingEnable) > 0) {
-                var dockspace_id = c.ImGui_GetID("MyDockSpace");
-                _ = c.ImGui_DockSpaceEx(dockspace_id, c.ImVec2{ .x = 0, .y = 0 }, dockspace_flags, null);
-
-                if (self.first_time) {
-                    self.first_time = false;
-
-                    c.ImGui_DockBuilderRemoveNode(dockspace_id); // clear any previous layout
-                    _ = c.ImGui_DockBuilderAddNodeEx(dockspace_id, dockspace_flags | c.ImGuiDockNodeFlags_DockSpace);
-                    c.ImGui_DockBuilderSetNodeSize(dockspace_id, viewport.*.Size);
-
-                    // split the dockspace into 2 nodes -- DockBuilderSplitNode takes in the following args in the following order
-                    //   window ID to split, direction, fraction (between 0 and 1), the final two setting let's us choose which id we want (which ever one we DON'T set as NULL, will be returned by the function)
-                    //                                                              out_id_at_dir is the id of the node in the direction we specified earlier, out_id_at_opposite_dir is in the opposite direction
-                    const dock_id_left = c.ImGui_DockBuilderSplitNode(dockspace_id, c.ImGuiDir_Left, 0.2, null, &dockspace_id);
-                    const dock_id_down = c.ImGui_DockBuilderSplitNode(dockspace_id, c.ImGuiDir_Down, 0.25, null, &dockspace_id);
-
-                    // we now dock our windows into the docking node we made above
-                    c.ImGui_DockBuilderDockWindow("Assets", dock_id_down);
-                    c.ImGui_DockBuilderDockWindow("Hierarchy", dock_id_left);
-                    c.ImGui_DockBuilderFinish(dockspace_id);
-                }
-            }
-
-            c.ImGui_End();
-
-            _ = c.ImGui_Begin("Hierarchy", null, 0);
-            for (self.renderables.items) |r| {
-                var node_flags = c.ImGuiTreeNodeFlags_OpenOnArrow;
-                if (std.mem.eql(u8, std.mem.span(r.name), "triangle")) {
-                    node_flags = c.ImGuiTreeNodeFlags_Leaf;
-                }
-                if (c.ImGui_TreeNodeEx(r.name, node_flags)) {
-                    c.ImGui_TreePop();
-                }
-            }
-            c.ImGui_End();
-
-            _ = c.ImGui_Begin("Assets", null, 0);
-            c.ImGui_Text("TODO");
-            c.ImGui_End();
-
-            _ = c.ImGui_Begin("Properties", null, 0);
-            c.ImGui_Text("TODO");
-            c.ImGui_End();
-
-            _ = c.ImGui_Begin("Game", null, 0);
-            const old_is_game_window_focused = self.is_game_window_focused;
-            self.is_game_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
-            if (self.is_game_window_focused) {
-                if (!old_is_game_window_focused) {
-                    self.is_game_window_active = true;
-                } else if (self.isInGameView(c.ImGui_GetMousePos()) and c.ImGui_IsMouseClicked(c.ImGuiMouseButton_Left)) {
-                    self.is_game_window_active = true;
-                }
-            } else {
-                self.is_game_window_active = false;
-            }
-            const game_image = c.ImGui_GetWindowDrawList();
-            self.game_view_size = c.ImGui_GetWindowSize();
-            c.ImDrawList_AddCallback(game_image, extern struct {
-                fn f(dl: [*c]const c.ImDrawList, dc: [*c]const c.ImDrawCmd) callconv(.C) void {
-                    _ = dl;
-                    const me: *Self = @alignCast(@ptrCast(dc.*.UserCallbackData));
-                    const cmd = me.get_current_frame().main_command_buffer;
-                    const cr = dc.*.ClipRect;
-                    me.game_window_rect = cr;
-                    const w = cr.z - cr.x;
-                    const h = cr.w - cr.y;
-                    c.vkCmdSetScissor(cmd, 0, 1, &[_]c.VkRect2D{.{
-                        .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
-                        .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
-                    }});
-
-                    const vx = if (cr.x > 0) cr.x else cr.z - me.game_view_size.x;
-                    c.vkCmdSetViewport(cmd, 0, 1, &[_]c.VkViewport{.{
-                        .x = vx,
-                        .y = cr.y,
-                        .width = me.game_view_size.x,
-                        .height = me.game_view_size.y,
-                        .minDepth = 0.0,
-                        .maxDepth = 1.0,
-                    }});
-
-                    const aspect = me.game_view_size.x / me.game_view_size.y;
-                    me.draw_objects(cmd, me.renderables.items, aspect);
-
-                    c.vkCmdSetScissor(cmd, 0, 1, &[_]c.VkRect2D{.{
-                        .offset = .{ .x = 0, .y = 0 },
-                        .extent = window_extent,
-                    }});
-                }
-            }.f, self);
-            c.ImDrawList_AddCallback(game_image, c.ImDrawCallback_ResetRenderState, null);
-            c.ImGui_End();
-
-            c.ImGui_Render();
-        }
-
-        self.draw();
-
-        delta = @floatCast(@as(f64, @floatFromInt(timer.lap())) / 1_000_000_000.0);
-
-        const TitleDelay = struct {
-            var accumulator: f32 = 0.0;
-        };
-
-        TitleDelay.accumulator += delta;
-        if (TitleDelay.accumulator > 0.1) {
-            TitleDelay.accumulator = 0.0;
-            const fps = 1.0 / delta;
-            const new_title = std.fmt.allocPrintZ(self.allocator, "Vulkan - FPS: {d:6.3}, ms: {d:6.3}", .{ fps, delta * 1000.0 }) catch @panic("Out of memory");
-            defer self.allocator.free(new_title);
-            _ = c.SDL_SetWindowTitle(self.window, new_title.ptr);
-        }
-    }
-}
-
-fn processGameEvent(self: *Self, event: c.SDL_Event) void {
+pub fn processGameEvent(self: *Self, event: *c.SDL_Event) void {
     if (event.type == c.SDL_EVENT_KEY_DOWN) {
         switch (event.key.keysym.scancode) {
             c.SDL_SCANCODE_SPACE => {
@@ -1916,7 +1697,7 @@ fn get_current_frame(self: *Self) FrameData {
     return self.frames[@intCast(@mod(self.frame_number, FRAME_OVERLAP))];
 }
 
-fn draw(self: *Self) void {
+pub fn beginFrame(self: *Self) RenderCommand {
     // Wait until the GPU has finished rendering the last frame
     const timeout: u64 = 1_000_000_000; // 1 second in nanonesconds
     const frame = self.get_current_frame();
@@ -1927,8 +1708,8 @@ fn draw(self: *Self) void {
     var swapchain_image_index: u32 = undefined;
     check_vk(c.vkAcquireNextImageKHR(self.device, self.swapchain, timeout, frame.present_semaphore, VK_NULL_HANDLE, &swapchain_image_index)) catch @panic("Failed to acquire swapchain image");
 
-    current_image_idx = swapchain_image_index;
-    var cmd = frame.main_command_buffer;
+    self.current_image_idx = swapchain_image_index;
+    const cmd = frame.main_command_buffer;
 
     check_vk(c.vkResetCommandBuffer(cmd, 0)) catch @panic("Failed to reset command buffer");
 
@@ -1977,9 +1758,11 @@ fn draw(self: *Self) void {
         .extent = self.swapchain_extent,
     }});
 
-    // UI
-    c.cImGui_ImplVulkan_RenderDrawData(c.ImGui_GetDrawData(), cmd);
+    return cmd;
+}
 
+pub fn endFrame(self: *Self, cmd: RenderCommand) void {
+    const frame = self.get_current_frame();
     c.vkCmdEndRenderPass(cmd);
     check_vk(c.vkEndCommandBuffer(cmd)) catch @panic("Failed to end command buffer");
 
@@ -2002,14 +1785,14 @@ fn draw(self: *Self) void {
         .pWaitSemaphores = &frame.render_semaphore,
         .swapchainCount = 1,
         .pSwapchains = &self.swapchain,
-        .pImageIndices = &swapchain_image_index,
+        .pImageIndices = &self.current_image_idx,
     });
     check_vk(c.vkQueuePresentKHR(self.present_queue, &present_info)) catch @panic("Failed to present swapchain image");
 
     self.frame_number +%= 1;
 }
 
-fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject, aspect: f32) void {
+pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject, aspect: f32) void {
     const view = Mat4.translation(self.camera_pos);
     var proj = Mat4.perspective(std.math.degreesToRadians(70.0), aspect, 0.1, 200.0);
 
@@ -2206,7 +1989,7 @@ pub fn immediate_submit(self: *Self, submit_ctx: anytype) void {
 }
 
 fn create_imgui_texture(self: *Self, filepath: []const u8) c.VkDescriptorSet {
-    const img = texs.load_image_from_file(self, filepath) catch @panic("Failed to load image");
+    const img = texs.load_image_from_file(Self, self, filepath) catch @panic("Failed to load image");
     self.image_deletion_queue.append(VmaImageDeleter{ .image = img }) catch @panic("Out of memory");
 
     // Create the Image View
@@ -2248,27 +2031,7 @@ fn create_imgui_texture(self: *Self, filepath: []const u8) c.VkDescriptorSet {
     return c.cImGui_ImplVulkan_AddTexture(sampler, image_view, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
-fn isInGameView(self: *Self, pos: c.ImVec2) bool {
+pub fn isInGameView(self: *Self, pos: c.ImVec2) bool {
     return (pos.x > self.game_window_rect.x and pos.x < self.game_window_rect.z) and
         (pos.y > self.game_window_rect.y and pos.y < self.game_window_rect.w);
 }
-
-// Error checking for vulkan and SDL
-//
-
-fn check_sdl(res: c_int) void {
-    if (res != 0) {
-        log.err("Detected SDL error: {s}", .{c.SDL_GetError()});
-        @panic("SDL error");
-    }
-}
-
-fn check_sdl_bool(res: c.SDL_bool) void {
-    if (res != c.SDL_TRUE) {
-        log.err("Detected SDL error: {s}", .{c.SDL_GetError()});
-        @panic("SDL error");
-    }
-}
-
-var dockspace_flags: c.ImGuiDockNodeFlags = 0;
-var current_image_idx: u32 = 0;

@@ -1,23 +1,28 @@
 const std = @import("std");
-const c = @import("clibs.zig");
+// const edc = @import("v.zig");
 
-const vki = @import("vulkan_init.zig");
+const yume = @import("yume");
+const c = @import("clibs");
+const edc = @import("edclibs");
+
+const VulkanEngine = yume.VulkanEngine;
+
+const vki = yume.vki;
 const check_vk = vki.check_vk;
-const mesh_mod = @import("mesh.zig");
+const mesh_mod = yume.Mesh;
 const Mesh = mesh_mod.Mesh;
 
-const math3d = @import("math3d.zig");
+const math3d = yume.math3d;
 const Vec2 = math3d.Vec2;
 const Vec3 = math3d.Vec3;
 const Vec4 = math3d.Vec4;
 const Mat4 = math3d.Mat4;
 
-const texs = @import("textures.zig");
-const Texture = texs.Texture;
+const AllocatedBuffer = VulkanEngine.AllocatedBuffer;
+const AllocatedImage = VulkanEngine.AllocatedImage;
 
-const Engine = @import("VulkanEngine.zig");
-const AllocatedImage = @import("VulkanEngine.zig").AllocatedImage;
-const AllocatedBuffer = @import("VulkanEngine.zig").AllocatedBuffer;
+const texs = yume.textures;
+const Texture = texs.Texture;
 
 const log = std.log.scoped(.vulkan_engine);
 
@@ -37,6 +42,7 @@ const Material = struct {
 };
 
 const RenderObject = struct {
+    name: [*c]const u8,
     mesh: *Mesh,
     material: *Material,
     transform: Mat4,
@@ -78,8 +84,6 @@ const UploadContext = struct {
 };
 
 const FRAME_OVERLAP = 2;
-
-engine: Engine,
 
 // Data
 //
@@ -146,6 +150,22 @@ deletion_queue: std.ArrayList(VulkanDeleter) = undefined,
 buffer_deletion_queue: std.ArrayList(VmaBufferDeleter) = undefined,
 image_deletion_queue: std.ArrayList(VmaImageDeleter) = undefined,
 
+// imgui state
+play: bool = false,
+imgui_demo_open: bool = false,
+
+first_time: bool = true,
+game_view_size: edc.ImVec2 = std.mem.zeroInit(edc.ImVec2, .{}),
+mouse: edc.ImVec2 = std.mem.zeroInit(edc.ImVec2, .{}),
+game_window_rect: edc.ImVec4 = std.mem.zeroInit(edc.ImVec4, .{}),
+is_game_window_active: bool = false,
+is_game_window_focused: bool = false,
+
+play_icon_ds: c.VkDescriptorSet = undefined,
+pause_icon_ds: c.VkDescriptorSet = undefined,
+stop_icon_ds: c.VkDescriptorSet = undefined,
+fast_forward_icon_ds: c.VkDescriptorSet = undefined,
+
 pub const MeshPushConstants = struct {
     data: Vec4,
     render_matrix: Mat4,
@@ -207,7 +227,6 @@ pub fn init(a: std.mem.Allocator) Self {
     _ = c.SDL_ShowWindow(window);
 
     var engine = Self{
-        .engine = Engine.init(a),
         .window = window,
         .allocator = a,
         .deletion_queue = std.ArrayList(VulkanDeleter).init(a),
@@ -256,9 +275,9 @@ fn init_instance(self: *Self) void {
 
     // Instance creation and optional debug utilities
     const instance = vki.create_instance(std.heap.page_allocator, .{
-        .application_name = "VkGuide",
+        .application_name = "yume",
         .application_version = c.VK_MAKE_VERSION(0, 1, 0),
-        .engine_name = "VkGuide",
+        .engine_name = "yume",
         .engine_version = c.VK_MAKE_VERSION(0, 1, 0),
         .api_version = c.VK_MAKE_VERSION(1, 1, 0),
         .debug = true,
@@ -621,6 +640,11 @@ const PipelineBuilder = struct {
             .pAttachments = &self.color_blend_attachment_state,
         });
 
+        const dynamicState = c.VkPipelineDynamicStateCreateInfo{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+            .dynamicStateCount = 2,
+            .pDynamicStates = &[_]c.VkDynamicState{ c.VK_DYNAMIC_STATE_SCISSOR, c.VK_DYNAMIC_STATE_VIEWPORT },
+        };
         const pipeline_ci = std.mem.zeroInit(c.VkGraphicsPipelineCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
             .stageCount = @as(u32, @intCast(self.shader_stages.len)),
@@ -632,6 +656,7 @@ const PipelineBuilder = struct {
             .pMultisampleState = &self.multisample_state,
             .pColorBlendState = &color_blend_state,
             .pDepthStencilState = &self.depth_stencil_state,
+            .pDynamicState = &[_]c.VkPipelineDynamicStateCreateInfo{dynamicState},
             .layout = self.pipeline_layout,
             .renderPass = render_pass,
             .subpass = 0,
@@ -1123,6 +1148,7 @@ fn create_shader_module(self: *Self, code: []const u8) ?c.VkShaderModule {
 
 fn init_scene(self: *Self) void {
     const monkey = RenderObject{
+        .name = "monkey",
         .mesh = self.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
         .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
         .transform = Mat4.IDENTITY,
@@ -1201,6 +1227,7 @@ fn init_scene(self: *Self) void {
     c.vkUpdateDescriptorSets(self.device, 1, &write_descriptor_set, 0, null);
 
     const lost_empire = RenderObject{
+        .name = "lost_empire",
         .mesh = self.meshes.getPtr("lost_empire") orelse @panic("Failed to get triangle mesh"),
         .transform = Mat4.translation(Vec3.make(5.0, -10.0, 0.0)),
         .material = material,
@@ -1208,6 +1235,7 @@ fn init_scene(self: *Self) void {
     self.renderables.append(lost_empire) catch @panic("Out of memory");
 
     var x: i32 = -20;
+    var i: i32 = 0;
     while (x <= 20) : (x += 1) {
         var y: i32 = -20;
         while (y <= 20) : (y += 1) {
@@ -1215,7 +1243,9 @@ fn init_scene(self: *Self) void {
             const scale = Mat4.scale(Vec3.make(0.2, 0.2, 0.2));
             const transform = Mat4.mul(translation, scale);
 
+            i += 1;
             const tri = RenderObject{
+                .name = "triangle",
                 .mesh = self.meshes.getPtr("triangle") orelse @panic("Failed to get triangle mesh"),
                 .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
                 .transform = transform,
@@ -1285,27 +1315,133 @@ fn init_imgui(self: *Self) void {
     var imgui_pool: c.VkDescriptorPool = undefined;
     check_vk(c.vkCreateDescriptorPool(self.device, &pool_ci, vk_alloc_cbs, &imgui_pool)) catch @panic("Failed to create imgui descriptor pool");
 
-    _ = c.ImGui_CreateContext(null);
-    _ = c.cImGui_ImplSDL3_InitForVulkan(self.window);
+    _ = edc.ImGui_CreateContext(null);
+    _ = edc.cImGui_ImplSDL3_InitForVulkan(@ptrCast(self.window));
 
-    var init_info = std.mem.zeroInit(c.ImGui_ImplVulkan_InitInfo, .{
-        .Instance = self.instance,
-        .PhysicalDevice = self.physical_device,
-        .Device = self.device,
+    var init_info = std.mem.zeroInit(edc.ImGui_ImplVulkan_InitInfo, .{
+        .Instance = @as(edc.VkInstance, @ptrCast(self.instance)),
+        .PhysicalDevice = @as(edc.VkPhysicalDevice, @ptrCast(self.physical_device)),
+        .Device = @as(edc.VkDevice, @ptrCast(self.device)),
         .QueueFamily = self.graphics_queue_family,
-        .Queue = self.graphics_queue,
-        .DescriptorPool = imgui_pool,
+        .Queue = @as(edc.VkQueue, @ptrCast(self.graphics_queue)),
+        .DescriptorPool = @as(edc.VkDescriptorPool, @ptrCast(self.descriptor_pool)),
         .MinImageCount = FRAME_OVERLAP,
         .ImageCount = FRAME_OVERLAP,
         .MSAASamples = c.VK_SAMPLE_COUNT_1_BIT,
     });
 
-    _ = c.cImGui_ImplVulkan_Init(&init_info, self.render_pass);
-    _ = c.cImGui_ImplVulkan_CreateFontsTexture();
+    const io = edc.ImGui_GetIO();
+    _ = edc.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/roboto.ttf", 14, null, null);
+
+    _ = edc.cImGui_ImplVulkan_Init(&init_info, @ptrCast(self.render_pass));
+    _ = edc.cImGui_ImplVulkan_CreateFontsTexture();
+
+    self.play_icon_ds = self.create_imgui_texture("assets/icons/play.png");
+    self.pause_icon_ds = self.create_imgui_texture("assets/icons/pause.png");
+    self.stop_icon_ds = self.create_imgui_texture("assets/icons/stop.png");
+    self.fast_forward_icon_ds = self.create_imgui_texture("assets/icons/fast-forward.png");
 
     self.deletion_queue.append(VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool)) catch @panic("Out of memory");
 
-    c.ImGui_GetIO().*.ConfigFlags |= c.ImGuiConfigFlags_DockingEnable;
+    edc.ImGui_GetIO().*.ConfigFlags |= edc.ImGuiConfigFlags_DockingEnable;
+    edc.ImGui_GetIO().*.ConfigWindowsMoveFromTitleBarOnly = true;
+
+    const ImVec2 = struct {
+        fn f(x: f32, y: f32) edc.ImVec2 {
+            return edc.ImVec2{ .x = x, .y = y };
+        }
+    }.f;
+    const ImVec4 = struct {
+        fn f(x: f32, y: f32, z: f32, w: f32) edc.ImVec4 {
+            return edc.ImVec4{ .x = x, .y = y, .z = z, .w = w };
+        }
+    }.f;
+
+    const style = edc.ImGui_GetStyle();
+    style.*.Alpha = 1.0;
+    style.*.DisabledAlpha = 0.6000000238418579;
+    style.*.WindowPadding = ImVec2(8.0, 8.0);
+    style.*.WindowRounding = 0.0;
+    style.*.WindowBorderSize = 1.0;
+    style.*.WindowMinSize = ImVec2(32.0, 32.0);
+    style.*.WindowTitleAlign = ImVec2(0.0, 0.5);
+    style.*.WindowMenuButtonPosition = edc.ImGuiDir_Left;
+    style.*.ChildRounding = 0.0;
+    style.*.ChildBorderSize = 1.0;
+    style.*.PopupRounding = 0.0;
+    style.*.PopupBorderSize = 1.0;
+    style.*.FramePadding = ImVec2(4.0, 3.0);
+    style.*.FrameRounding = 0.0;
+    style.*.FrameBorderSize = 0.0;
+    style.*.ItemSpacing = ImVec2(8.0, 4.0);
+    style.*.ItemInnerSpacing = ImVec2(4.0, 4.0);
+    style.*.CellPadding = ImVec2(4.0, 2.0);
+    style.*.IndentSpacing = 21.0;
+    style.*.ColumnsMinSpacing = 6.0;
+    style.*.ScrollbarSize = 14.0;
+    style.*.ScrollbarRounding = 0.0;
+    style.*.GrabMinSize = 10.0;
+    style.*.GrabRounding = 0.0;
+    style.*.TabRounding = 0.0;
+    style.*.TabBorderSize = 0.0;
+    style.*.TabMinWidthForCloseButton = 0.0;
+    style.*.ColorButtonPosition = edc.ImGuiDir_Right;
+    style.*.ButtonTextAlign = ImVec2(0.5, 0.5);
+    style.*.SelectableTextAlign = ImVec2(0.0, 0.0);
+
+    style.*.Colors[edc.ImGuiCol_Text] = ImVec4(1.0, 1.0, 1.0, 1.0);
+    style.*.Colors[edc.ImGuiCol_TextDisabled] = ImVec4(0.5921568870544434, 0.5921568870544434, 0.5921568870544434, 1.0);
+    style.*.Colors[edc.ImGuiCol_WindowBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[edc.ImGuiCol_ChildBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[edc.ImGuiCol_PopupBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[edc.ImGuiCol_Border] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
+    style.*.Colors[edc.ImGuiCol_BorderShadow] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
+    style.*.Colors[edc.ImGuiCol_FrameBg] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
+    style.*.Colors[edc.ImGuiCol_FrameBgHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[edc.ImGuiCol_FrameBgActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[edc.ImGuiCol_TitleBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[edc.ImGuiCol_TitleBgActive] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[edc.ImGuiCol_TitleBgCollapsed] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[edc.ImGuiCol_MenuBarBg] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
+    style.*.Colors[edc.ImGuiCol_ScrollbarBg] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
+    style.*.Colors[edc.ImGuiCol_ScrollbarGrab] = ImVec4(0.321568638086319, 0.321568638086319, 0.3333333432674408, 1.0);
+    style.*.Colors[edc.ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.3529411852359772, 0.3529411852359772, 0.3725490272045135, 1.0);
+    style.*.Colors[edc.ImGuiCol_ScrollbarGrabActive] = ImVec4(0.3529411852359772, 0.3529411852359772, 0.3725490272045135, 1.0);
+    style.*.Colors[edc.ImGuiCol_CheckMark] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[edc.ImGuiCol_SliderGrab] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[edc.ImGuiCol_SliderGrabActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[edc.ImGuiCol_Button] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
+    style.*.Colors[edc.ImGuiCol_ButtonHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[edc.ImGuiCol_ButtonActive] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[edc.ImGuiCol_Header] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
+    style.*.Colors[edc.ImGuiCol_HeaderHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[edc.ImGuiCol_HeaderActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[edc.ImGuiCol_Separator] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
+    style.*.Colors[edc.ImGuiCol_SeparatorHovered] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
+    style.*.Colors[edc.ImGuiCol_SeparatorActive] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
+    style.*.Colors[edc.ImGuiCol_ResizeGrip] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[edc.ImGuiCol_ResizeGripHovered] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
+    style.*.Colors[edc.ImGuiCol_ResizeGripActive] = ImVec4(0.321568638086319, 0.321568638086319, 0.3333333432674408, 1.0);
+    style.*.Colors[edc.ImGuiCol_Tab] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[edc.ImGuiCol_TabHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[edc.ImGuiCol_TabActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[edc.ImGuiCol_TabUnfocused] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[edc.ImGuiCol_TabUnfocusedActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[edc.ImGuiCol_PlotLines] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[edc.ImGuiCol_PlotLinesHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[edc.ImGuiCol_PlotHistogram] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[edc.ImGuiCol_PlotHistogramHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
+    style.*.Colors[edc.ImGuiCol_TableHeaderBg] = ImVec4(0.1882352977991104, 0.1882352977991104, 0.2000000029802322, 1.0);
+    style.*.Colors[edc.ImGuiCol_TableBorderStrong] = ImVec4(0.3098039329051971, 0.3098039329051971, 0.3490196168422699, 1.0);
+    style.*.Colors[edc.ImGuiCol_TableBorderLight] = ImVec4(0.2274509817361832, 0.2274509817361832, 0.2470588237047195, 1.0);
+    style.*.Colors[edc.ImGuiCol_TableRowBg] = ImVec4(0.0, 0.0, 0.0, 0.0);
+    style.*.Colors[edc.ImGuiCol_TableRowBgAlt] = ImVec4(1.0, 1.0, 1.0, 0.05999999865889549);
+    style.*.Colors[edc.ImGuiCol_TextSelectedBg] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
+    style.*.Colors[edc.ImGuiCol_DragDropTarget] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[edc.ImGuiCol_NavHighlight] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
+    style.*.Colors[edc.ImGuiCol_NavWindowingHighlight] = ImVec4(1.0, 1.0, 1.0, 0.699999988079071);
+    style.*.Colors[edc.ImGuiCol_NavWindowingDimBg] = ImVec4(0.800000011920929, 0.800000011920929, 0.800000011920929, 0.2000000029802322);
+    style.*.Colors[edc.ImGuiCol_ModalWindowDimBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
 }
 
 pub fn cleanup(self: *Self) void {
@@ -1322,7 +1458,7 @@ pub fn cleanup(self: *Self) void {
     self.materials.deinit();
     self.renderables.deinit();
 
-    c.cImGui_ImplVulkan_Shutdown();
+    edc.cImGui_ImplVulkan_Shutdown();
 
     for (self.buffer_deletion_queue.items) |*entry| {
         entry.delete(self);
@@ -1358,13 +1494,13 @@ pub fn cleanup(self: *Self) void {
 }
 
 fn load_textures(self: *Self) void {
-    const lost_empire_image = texs.load_image_from_file_ed(self, "assets/lost_empire-RGBA.png") catch @panic("Failed to load image");
+    const lost_empire_image = texs.load_image_from_file(Self, self, "assets/lost_empire-RGBA.png") catch @panic("Failed to load image");
     self.image_deletion_queue.append(VmaImageDeleter{ .image = lost_empire_image }) catch @panic("Out of memory");
     const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
         .image = lost_empire_image.image,
-        .format = c.VK_FORMAT_R8G8B8A8_SRGB,
+        .format = c.VK_FORMAT_R8G8B8A8_UNORM,
         .components = .{
             .r = c.VK_COMPONENT_SWIZZLE_IDENTITY,
             .g = c.VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -1503,89 +1639,85 @@ pub fn run(self: *Self) void {
     var event: c.SDL_Event = undefined;
     while (!quit) {
         while (c.SDL_PollEvent(&event) != 0) {
-            const io = c.ImGui_GetIO();
+            if (event.type == c.SDL_EVENT_MOUSE_MOTION) {
+                self.mouse.x = event.motion.x;
+                self.mouse.y = event.motion.y;
+            }
+            const mouse = self.mouse;
+
+            _ = edc.cImGui_ImplSDL3_ProcessEvent(@ptrCast(&event));
             if (event.type == c.SDL_EVENT_QUIT) {
                 quit = true;
-            } else if (((event.type == c.SDL_EVENT_MOUSE_MOTION or event.type == c.SDL_EVENT_MOUSE_BUTTON_DOWN or event.type == c.SDL_EVENT_MOUSE_BUTTON_UP) and io.*.WantCaptureMouse) or ((event.type == c.SDL_EVENT_KEY_DOWN or event.type == c.SDL_EVENT_KEY_UP) and io.*.WantCaptureMouse)) {
-                _ = c.cImGui_ImplSDL3_ProcessEvent(&event);
-            } else if (event.type == c.SDL_EVENT_KEY_DOWN) {
-                switch (event.key.keysym.scancode) {
-                    c.SDL_SCANCODE_SPACE => {
-                        self.selected_shader = if (self.selected_shader == 1) 0 else 1;
-                    },
-                    c.SDL_SCANCODE_M => {
-                        self.selected_mesh = if (self.selected_mesh == 1) 0 else 1;
-                    },
-
-                    // WASD for camera
-                    c.SDL_SCANCODE_W => {
-                        self.camera_input.z = 1.0;
-                    },
-                    c.SDL_SCANCODE_S => {
-                        self.camera_input.z = -1.0;
-                    },
-                    c.SDL_SCANCODE_A => {
-                        self.camera_input.x = 1.0;
-                    },
-                    c.SDL_SCANCODE_D => {
-                        self.camera_input.x = -1.0;
-                    },
-                    c.SDL_SCANCODE_E => {
-                        self.camera_input.y = 1.0;
-                    },
-                    c.SDL_SCANCODE_Q => {
-                        self.camera_input.y = -1.0;
-                    },
-
-                    else => {},
-                }
-            } else if (event.type == c.SDL_EVENT_KEY_UP) {
-                switch (event.key.keysym.scancode) {
-                    c.SDL_SCANCODE_W => {
-                        self.camera_input.z = 0.0;
-                    },
-                    c.SDL_SCANCODE_S => {
-                        self.camera_input.z = 0.0;
-                    },
-                    c.SDL_SCANCODE_A => {
-                        self.camera_input.x = 0.0;
-                    },
-                    c.SDL_SCANCODE_D => {
-                        self.camera_input.x = 0.0;
-                    },
-                    c.SDL_SCANCODE_E => {
-                        self.camera_input.y = 0.0;
-                    },
-                    c.SDL_SCANCODE_Q => {
-                        self.camera_input.y = 0.0;
-                    },
-
-                    else => {},
-                }
+            } else if (self.is_game_window_active and self.isInGameView(mouse)) {
+                self.processGameEvent(event);
+            } else {
+                self.camera_input.x = 0;
+                self.camera_input.y = 0;
+                self.camera_input.z = 0;
             }
         }
 
+        if (self.camera_input.squared_norm() > (0.1 * 0.1)) {
+            const camera_delta = self.camera_input.normalized().mul(delta * 5.0);
+            self.camera_pos = Vec3.add(self.camera_pos, camera_delta);
+        }
+
         {
-            c.cImGui_ImplVulkan_NewFrame();
-            c.cImGui_ImplSDL3_NewFrame();
-            c.ImGui_NewFrame();
+            edc.cImGui_ImplVulkan_NewFrame();
+            edc.cImGui_ImplSDL3_NewFrame();
+            edc.ImGui_NewFrame();
+            if (self.imgui_demo_open) {
+                edc.ImGui_ShowDemoWindow(&self.imgui_demo_open);
+            }
+
+            if (edc.ImGui_BeginMainMenuBar()) {
+                if (edc.ImGui_BeginMenu("File")) {
+                    if (edc.ImGui_MenuItem("New")) {}
+                    if (edc.ImGui_MenuItem("Open")) {}
+                    if (edc.ImGui_MenuItem("Save")) {}
+                    if (edc.ImGui_MenuItem("Quit")) {}
+                    edc.ImGui_EndMenu();
+                }
+                if (edc.ImGui_BeginMenu("Edit")) {
+                    if (edc.ImGui_MenuItemEx("Undo", "CTRL+Z", false, true)) {}
+                    if (edc.ImGui_MenuItemEx("Redo", "CTRL+Y", false, false)) {} // Disabled item
+                    edc.ImGui_Separator();
+                    if (edc.ImGui_MenuItemEx("Cut", "CTRL+X", false, true)) {}
+                    if (edc.ImGui_MenuItemEx("Copy", "CTRL+C", false, true)) {}
+                    if (edc.ImGui_MenuItemEx("Paste", "CTRL+V", false, true)) {}
+                    edc.ImGui_EndMenu();
+                }
+                if (edc.ImGui_BeginMenu("Help")) {
+                    _ = edc.ImGui_MenuItemBoolPtr("ImGui Demo Window", null, &self.imgui_demo_open, true);
+                    edc.ImGui_Separator();
+                    if (edc.ImGui_MenuItem("About")) {}
+                    edc.ImGui_EndMenu();
+                }
+                edc.ImGui_SetCursorPosX((edc.ImGui_GetCursorPosX() - (13 * 3)) + (window_extent.width / 2) - edc.ImGui_GetCursorPosX());
+                if (edc.ImGui_ImageButton("Play", if (self.play) self.stop_icon_ds else self.play_icon_ds, edc.ImVec2{ .x = 13, .y = 13 })) {
+                    self.play = !self.play;
+                }
+                _ = edc.ImGui_ImageButton("Pause", self.pause_icon_ds, edc.ImVec2{ .x = 13, .y = 13 });
+                _ = edc.ImGui_ImageButton("Next", self.fast_forward_icon_ds, edc.ImVec2{ .x = 13, .y = 13 });
+                edc.ImGui_EndMainMenuBar();
+            }
 
             // We are using the ImGuiWindowFlags_NoDocking flag to make the parent window not dockable into,
             // because it would be confusing to have two docking targets within each others.
-            var window_flags = c.ImGuiWindowFlags_MenuBar | c.ImGuiWindowFlags_NoDocking;
+            var window_flags = edc.ImGuiWindowFlags_MenuBar | edc.ImGuiWindowFlags_NoDocking;
 
-            const viewport = c.ImGui_GetMainViewport();
-            c.ImGui_SetNextWindowPos(viewport.*.Pos, 0);
-            c.ImGui_SetNextWindowSize(viewport.*.Size, 0);
-            c.ImGui_SetNextWindowViewport(viewport.*.ID);
-            c.ImGui_PushStyleVar(c.ImGuiStyleVar_WindowRounding, 0);
-            c.ImGui_PushStyleVar(c.ImGuiStyleVar_WindowBorderSize, 0);
-            window_flags |= c.ImGuiWindowFlags_NoTitleBar | c.ImGuiWindowFlags_NoCollapse | c.ImGuiWindowFlags_NoResize | c.ImGuiWindowFlags_NoMove;
-            window_flags |= c.ImGuiWindowFlags_NoBringToFrontOnFocus | c.ImGuiWindowFlags_NoNavFocus;
+            const viewport = edc.ImGui_GetMainViewport();
+            edc.ImGui_SetNextWindowPos(viewport.*.Pos, 0);
+            edc.ImGui_SetNextWindowSize(viewport.*.Size, 0);
+            edc.ImGui_SetNextWindowViewport(viewport.*.ID);
+            edc.ImGui_PushStyleVar(edc.ImGuiStyleVar_WindowRounding, 0);
+            edc.ImGui_PushStyleVar(edc.ImGuiStyleVar_WindowBorderSize, 0);
+            window_flags |= edc.ImGuiWindowFlags_NoTitleBar | edc.ImGuiWindowFlags_NoCollapse | edc.ImGuiWindowFlags_NoResize | edc.ImGuiWindowFlags_NoMove;
+            window_flags |= edc.ImGuiWindowFlags_NoBringToFrontOnFocus | edc.ImGuiWindowFlags_NoNavFocus;
 
             // When using ImGuiDockNodeFlags_PassthruCentralNode, DockSpace() will render our background and handle the pass-thru hole, so we ask Begin() to not render a background.
-            if ((dockspace_flags & c.ImGuiDockNodeFlags_PassthruCentralNode) > 0) {
-                window_flags |= c.ImGuiWindowFlags_NoBackground;
+            if ((dockspace_flags & edc.ImGuiDockNodeFlags_PassthruCentralNode) > 0) {
+                window_flags |= edc.ImGuiWindowFlags_NoBackground;
             }
 
             // Important: note that we proceed even if Begin() returns false (aka window is collapsed).
@@ -1593,59 +1725,111 @@ pub fn run(self: *Self) void {
             // all active windows docked into it will lose their parent and become undocked.
             // We cannot preserve the docking relationship between an active window and an inactive docking, otherwise
             // any change of dockspace/settings would lead to windows being stuck in limbo and never being visible.
-            c.ImGui_PushStyleVarImVec2(c.ImGuiStyleVar_WindowPadding, c.ImVec2{ .x = 0, .y = 0 });
-            _ = c.ImGui_Begin("DockSpace", null, window_flags);
-            c.ImGui_PopStyleVar();
-            c.ImGui_PopStyleVarEx(2);
+            edc.ImGui_PushStyleVarImVec2(edc.ImGuiStyleVar_WindowPadding, edc.ImVec2{ .x = 0, .y = 0 });
+            _ = edc.ImGui_Begin("DockSpace", null, window_flags);
+            edc.ImGui_PopStyleVar();
+            edc.ImGui_PopStyleVarEx(2);
 
             // DockSpace
-            const io = c.ImGui_GetIO();
-            if ((io.*.ConfigFlags & c.ImGuiConfigFlags_DockingEnable) > 0) {
-                var dockspace_id = c.ImGui_GetID("MyDockSpace");
-                _ = c.ImGui_DockSpaceEx(dockspace_id, c.ImVec2{ .x = 0, .y = 0 }, dockspace_flags, null);
+            const io = edc.ImGui_GetIO();
+            if ((io.*.ConfigFlags & edc.ImGuiConfigFlags_DockingEnable) > 0) {
+                var dockspace_id = edc.ImGui_GetID("MyDockSpace");
+                _ = edc.ImGui_DockSpaceEx(dockspace_id, edc.ImVec2{ .x = 0, .y = 0 }, dockspace_flags, null);
 
-                if (first_time) {
-                    first_time = false;
+                if (self.first_time) {
+                    self.first_time = false;
 
-                    c.ImGui_DockBuilderRemoveNode(dockspace_id); // clear any previous layout
-                    _ = c.ImGui_DockBuilderAddNodeEx(dockspace_id, dockspace_flags | c.ImGuiDockNodeFlags_DockSpace);
-                    c.ImGui_DockBuilderSetNodeSize(dockspace_id, viewport.*.Size);
+                    edc.ImGui_DockBuilderRemoveNode(dockspace_id); // clear any previous layout
+                    _ = edc.ImGui_DockBuilderAddNodeEx(dockspace_id, dockspace_flags | edc.ImGuiDockNodeFlags_DockSpace);
+                    edc.ImGui_DockBuilderSetNodeSize(dockspace_id, viewport.*.Size);
 
                     // split the dockspace into 2 nodes -- DockBuilderSplitNode takes in the following args in the following order
                     //   window ID to split, direction, fraction (between 0 and 1), the final two setting let's us choose which id we want (which ever one we DON'T set as NULL, will be returned by the function)
                     //                                                              out_id_at_dir is the id of the node in the direction we specified earlier, out_id_at_opposite_dir is in the opposite direction
-                    const dock_id_left = c.ImGui_DockBuilderSplitNode(dockspace_id, c.ImGuiDir_Left, 0.2, null, &dockspace_id);
-                    const dock_id_down = c.ImGui_DockBuilderSplitNode(dockspace_id, c.ImGuiDir_Down, 0.25, null, &dockspace_id);
+                    const dock_id_left = edc.ImGui_DockBuilderSplitNode(dockspace_id, edc.ImGuiDir_Left, 0.2, null, &dockspace_id);
+                    const dock_id_down = edc.ImGui_DockBuilderSplitNode(dockspace_id, edc.ImGuiDir_Down, 0.25, null, &dockspace_id);
 
                     // we now dock our windows into the docking node we made above
-                    c.ImGui_DockBuilderDockWindow("Down", dock_id_down);
-                    c.ImGui_DockBuilderDockWindow("Left", dock_id_left);
-                    c.ImGui_DockBuilderFinish(dockspace_id);
+                    edc.ImGui_DockBuilderDockWindow("Assets", dock_id_down);
+                    edc.ImGui_DockBuilderDockWindow("Hierarchy", dock_id_left);
+                    edc.ImGui_DockBuilderFinish(dockspace_id);
                 }
             }
 
-            c.ImGui_End();
+            edc.ImGui_End();
 
-            _ = c.ImGui_Begin("Left", null, 0);
-            c.ImGui_Text("Hello, left!");
-            c.ImGui_End();
+            _ = edc.ImGui_Begin("Hierarchy", null, 0);
+            for (self.renderables.items) |r| {
+                var node_flags = edc.ImGuiTreeNodeFlags_OpenOnArrow;
+                if (std.mem.eql(u8, std.mem.span(r.name), "triangle")) {
+                    node_flags = edc.ImGuiTreeNodeFlags_Leaf;
+                }
+                if (edc.ImGui_TreeNodeEx(r.name, node_flags)) {
+                    edc.ImGui_TreePop();
+                }
+            }
+            edc.ImGui_End();
 
-            _ = c.ImGui_Begin("Down", null, 0);
-            c.ImGui_Text("Hello, down!");
-            c.ImGui_End();
+            _ = edc.ImGui_Begin("Assets", null, 0);
+            edc.ImGui_Text("TODO");
+            edc.ImGui_End();
 
-            _ = c.ImGui_Begin("Game", null, 0);
-            // const game_draw_list = c.ImGui_GetWindowDrawList();
-            // c.ImDrawList_AddCallback(game_draw_list, struct {
-            //     fn f(dl: *const c.ImDrawList, dc: *const c.ImDrawCmd) void {}
-            // }.f);
-            c.ImGui_End();
+            _ = edc.ImGui_Begin("Properties", null, 0);
+            edc.ImGui_Text("TODO");
+            edc.ImGui_End();
 
-            // var open = true;
-            // Imgui frame
-            // c.ImGui_ShowDemoWindow(&open);
+            _ = edc.ImGui_Begin("Game", null, 0);
+            const old_is_game_window_focused = self.is_game_window_focused;
+            self.is_game_window_focused = edc.ImGui_IsWindowFocused(edc.ImGuiFocusedFlags_None);
+            if (self.is_game_window_focused) {
+                if (!old_is_game_window_focused) {
+                    self.is_game_window_active = true;
+                } else if (self.isInGameView(edc.ImGui_GetMousePos()) and edc.ImGui_IsMouseClicked(edc.ImGuiMouseButton_Left)) {
+                    self.is_game_window_active = true;
+                }
+            } else {
+                self.is_game_window_active = false;
+            }
+            const game_image = edc.ImGui_GetWindowDrawList();
+            self.game_view_size = edc.ImGui_GetWindowSize();
+            edc.ImDrawList_AddCallback(game_image, extern struct {
+                fn f(dl: [*c]const edc.ImDrawList, dc: [*c]const edc.ImDrawCmd) callconv(.C) void {
+                    _ = dl;
+                    const me: *Self = @alignCast(@ptrCast(dc.*.UserCallbackData));
+                    const cmd = me.get_current_frame().main_command_buffer;
+                    const cr = dc.*.ClipRect;
+                    me.game_window_rect = cr;
+                    const w = cr.z - cr.x;
+                    const h = cr.w - cr.y;
+                    c.vkCmdSetScissor(cmd, 0, 1, &[_]c.VkRect2D{.{
+                        .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
+                        .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
+                    }});
 
-            c.ImGui_Render();
+                    const vx = if (cr.x > 0) cr.x else cr.z - me.game_view_size.x;
+                    c.vkCmdSetViewport(cmd, 0, 1, &[_]c.VkViewport{.{
+                        .x = vx,
+                        .y = cr.y,
+                        .width = me.game_view_size.x,
+                        .height = me.game_view_size.y,
+                        .minDepth = 0.0,
+                        .maxDepth = 1.0,
+                    }});
+
+                    const aspect = me.game_view_size.x / me.game_view_size.y;
+                    _ = aspect;
+                    // me.draw_objects(cmd, me.renderables.items, aspect);
+
+                    c.vkCmdSetScissor(cmd, 0, 1, &[_]c.VkRect2D{.{
+                        .offset = .{ .x = 0, .y = 0 },
+                        .extent = window_extent,
+                    }});
+                }
+            }.f, self);
+            edc.ImDrawList_AddCallback(game_image, edc.ImDrawCallback_ResetRenderState, null);
+            edc.ImGui_End();
+
+            edc.ImGui_Render();
         }
 
         self.draw();
@@ -1660,9 +1844,70 @@ pub fn run(self: *Self) void {
         if (TitleDelay.accumulator > 0.1) {
             TitleDelay.accumulator = 0.0;
             const fps = 1.0 / delta;
-            const new_title = std.fmt.allocPrintZ(self.allocator, "Vulkan - FPS: {d:6.3}, ms: {d:6.3}", .{ fps, delta * 1000.0 }) catch @panic("Out of memory");
+            const new_title = std.fmt.allocPrintZ(self.allocator, "Yume Editor - FPS: {d:6.3}, ms: {d:6.3}", .{ fps, delta * 1000.0 }) catch @panic("Out of memory");
             defer self.allocator.free(new_title);
             _ = c.SDL_SetWindowTitle(self.window, new_title.ptr);
+        }
+    }
+}
+
+fn processGameEvent(self: *Self, event: c.SDL_Event) void {
+    if (event.type == c.SDL_EVENT_KEY_DOWN) {
+        switch (event.key.keysym.scancode) {
+            c.SDL_SCANCODE_SPACE => {
+                self.selected_shader = if (self.selected_shader == 1) 0 else 1;
+            },
+            c.SDL_SCANCODE_M => {
+                self.selected_mesh = if (self.selected_mesh == 1) 0 else 1;
+            },
+
+            // WASD for camera
+            c.SDL_SCANCODE_W => {
+                self.camera_input.z = 1.0;
+            },
+            c.SDL_SCANCODE_S => {
+                self.camera_input.z = -1.0;
+            },
+            c.SDL_SCANCODE_A => {
+                self.camera_input.x = 1.0;
+            },
+            c.SDL_SCANCODE_D => {
+                self.camera_input.x = -1.0;
+            },
+            c.SDL_SCANCODE_E => {
+                self.camera_input.y = 1.0;
+            },
+            c.SDL_SCANCODE_Q => {
+                self.camera_input.y = -1.0;
+            },
+
+            else => {},
+        }
+    } else if (event.type == c.SDL_EVENT_KEY_UP) {
+        switch (event.key.keysym.scancode) {
+            c.SDL_SCANCODE_ESCAPE => {
+                self.is_game_window_active = false;
+            },
+            c.SDL_SCANCODE_W => {
+                self.camera_input.z = 0.0;
+            },
+            c.SDL_SCANCODE_S => {
+                self.camera_input.z = 0.0;
+            },
+            c.SDL_SCANCODE_A => {
+                self.camera_input.x = 0.0;
+            },
+            c.SDL_SCANCODE_D => {
+                self.camera_input.x = 0.0;
+            },
+            c.SDL_SCANCODE_E => {
+                self.camera_input.y = 0.0;
+            },
+            c.SDL_SCANCODE_Q => {
+                self.camera_input.y = 0.0;
+            },
+
+            else => {},
         }
     }
 }
@@ -1682,6 +1927,7 @@ fn draw(self: *Self) void {
     var swapchain_image_index: u32 = undefined;
     check_vk(c.vkAcquireNextImageKHR(self.device, self.swapchain, timeout, frame.present_semaphore, VK_NULL_HANDLE, &swapchain_image_index)) catch @panic("Failed to acquire swapchain image");
 
+    current_image_idx = swapchain_image_index;
     var cmd = frame.main_command_buffer;
 
     check_vk(c.vkResetCommandBuffer(cmd, 0)) catch @panic("Failed to reset command buffer");
@@ -1698,7 +1944,7 @@ fn draw(self: *Self) void {
     const color = math3d.abs(std.math.sin(@as(f32, @floatFromInt(self.frame_number)) / 120.0));
 
     const color_clear: c.VkClearValue = .{
-        .color = .{ .float32 = [_]f32{ 0.0, 0.0, color, 1.0 } },
+        .color = .{ .float32 = [_]f32{ color, 0.0, color, 1.0 } },
     };
 
     const depth_clear = c.VkClearValue{
@@ -1726,8 +1972,13 @@ fn draw(self: *Self) void {
     });
     c.vkCmdBeginRenderPass(cmd, &render_pass_begin_info, c.VK_SUBPASS_CONTENTS_INLINE);
 
+    c.vkCmdSetScissor(cmd, 0, 1, &[_]c.VkRect2D{.{
+        .offset = .{ .x = 0, .y = 0 },
+        .extent = self.swapchain_extent,
+    }});
+
     // UI
-    c.cImGui_ImplVulkan_RenderDrawData(c.ImGui_GetDrawData(), cmd);
+    edc.cImGui_ImplVulkan_RenderDrawData(edc.ImGui_GetDrawData(), @ptrCast(cmd));
 
     c.vkCmdEndRenderPass(cmd);
     check_vk(c.vkEndCommandBuffer(cmd)) catch @panic("Failed to end command buffer");
@@ -1866,6 +2117,54 @@ pub fn immediate_submit(self: *Self, submit_ctx: anytype) void {
     check_vk(c.vkResetCommandPool(self.device, self.upload_context.command_pool, 0)) catch @panic("Failed to reset command pool");
 }
 
+fn create_imgui_texture(self: *Self, filepath: []const u8) c.VkDescriptorSet {
+    const img = texs.load_image_from_file(Self, self, filepath) catch @panic("Failed to load image");
+    self.image_deletion_queue.append(VmaImageDeleter{ .image = img }) catch @panic("Out of memory");
+
+    // Create the Image View
+    var image_view: c.VkImageView = undefined;
+    {
+        const info = c.VkImageViewCreateInfo{
+            .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = img.image,
+            .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
+            .format = c.VK_FORMAT_R8G8B8A8_UNORM,
+            .subresourceRange = .{
+                .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+        };
+        check_vk(c.vkCreateImageView(self.device, &info, vk_alloc_cbs, &image_view)) catch @panic("Failed to create image view");
+    }
+    self.textures.put(filepath, Texture{ .image = img, .image_view = image_view }) catch @panic("OOM");
+    self.deletion_queue.append(VulkanDeleter.make(image_view, c.vkDestroyImageView)) catch @panic("OOM");
+    // Create Sampler
+    var sampler: c.VkSampler = undefined;
+    {
+        const sampler_info = c.VkSamplerCreateInfo{
+            .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .magFilter = c.VK_FILTER_LINEAR,
+            .minFilter = c.VK_FILTER_LINEAR,
+            .mipmapMode = c.VK_SAMPLER_MIPMAP_MODE_LINEAR,
+            .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT, // outside image bounds just use border color
+            .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .minLod = -1000,
+            .maxLod = 1000,
+            .maxAnisotropy = 1.0,
+        };
+        check_vk(c.vkCreateSampler(self.device, &sampler_info, vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
+    }
+    self.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("OOM");
+    return @ptrCast(edc.cImGui_ImplVulkan_AddTexture(@ptrCast(sampler), @ptrCast(image_view), c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+}
+
+fn isInGameView(self: *Self, pos: edc.ImVec2) bool {
+    return (pos.x > self.game_window_rect.x and pos.x < self.game_window_rect.z) and
+        (pos.y > self.game_window_rect.y and pos.y < self.game_window_rect.w);
+}
+
 // Error checking for vulkan and SDL
 //
 
@@ -1883,5 +2182,5 @@ fn check_sdl_bool(res: c.SDL_bool) void {
     }
 }
 
-var dockspace_flags = c.ImGuiDockNodeFlags_PassthruCentralNode;
-var first_time = true;
+var dockspace_flags: edc.ImGuiDockNodeFlags = 0;
+var current_image_idx: u32 = 0;

@@ -5,41 +5,80 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable(.{
-        .name = "yume",
-        .root_source_file = b.path("engine/main.zig"),
+    const yume = b.addModule("yume", .{
+        .root_source_file = b.path("engine/mod.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const engine_c_libs = b.addTranslateC(.{
+        .root_source_file = b.path("engine/clibs.c"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const editor_c_libs = b.addTranslateC(.{
+        .root_source_file = b.path("editor/edclibs.c"),
         .target = target,
         .optimize = optimize,
     });
 
     const vk_lib_name = if (target.result.os.tag == .windows) "vulkan-1" else "vulkan";
 
-    exe.linkSystemLibrary("SDL3");
-    exe.linkSystemLibrary(vk_lib_name);
-    exe.addLibraryPath(.{ .cwd_relative = "vendor/sdl3/lib" });
-    exe.addIncludePath(.{ .cwd_relative = "vendor/sdl3/include" });
+    yume.linkSystemLibrary("SDL3", .{});
+    yume.linkSystemLibrary(vk_lib_name, .{});
+    yume.addLibraryPath(.{ .cwd_relative = "vendor/sdl3/lib" });
     const env_map = try std.process.getEnvMap(b.allocator);
     if (env_map.get("VK_SDK_PATH")) |path| {
-        std.log.debug("WEQWEQWE {s}", .{path});
-        exe.addLibraryPath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/lib", .{path}) catch @panic("OOM") });
-        exe.addIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM") });
+        yume.addLibraryPath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/lib", .{path}) catch @panic("OOM") });
+        yume.addIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM") });
+        engine_c_libs.addIncludeDir(std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM"));
+        editor_c_libs.addIncludeDir(std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM"));
     }
-    exe.addCSourceFile(.{ .file = b.path("engine/vk_mem_alloc.cpp"), .flags = &.{""} });
-    exe.addIncludePath(b.path("vendor/vma/"));
-    exe.addIncludePath(b.path("vendor/stb/"));
-    exe.addIncludePath(b.path("vendor/imgui/"));
-    exe.addCSourceFile(.{ .file = b.path("engine/stb_image.c"), .flags = &.{""} });
+    yume.addCSourceFile(.{ .file = b.path("engine/vk_mem_alloc.cpp"), .flags = &.{""} });
+    yume.addCSourceFile(.{ .file = b.path("engine/stb_image.c"), .flags = &.{""} });
 
-    exe.linkLibCpp();
+    yume.addIncludePath(.{ .cwd_relative = "vendor/vma/" });
+    yume.addIncludePath(.{ .cwd_relative = "vendor/stb/" });
 
-    compile_all_shaders(b, exe);
+    engine_c_libs.addIncludeDir("vendor/sdl3/include");
+    engine_c_libs.addIncludeDir("vendor/vma/");
+    engine_c_libs.addIncludeDir("vendor/stb/");
+    const engine_c_mod = engine_c_libs.createModule();
+    yume.addImport("clibs", engine_c_mod);
 
-    b.installArtifact(exe);
+    compile_all_shaders(b, yume);
+
+    const editor = b.addExecutable(.{
+        .name = "yume editor",
+        .root_source_file = b.path("editor/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    editor_c_libs.addIncludeDir("vendor/sdl3/include");
+    editor_c_libs.addIncludeDir("vendor/vma/");
+    editor_c_libs.addIncludeDir("vendor/stb/");
+    editor_c_libs.addIncludeDir("vendor/imgui/");
+    engine_c_libs.addIncludeDir("vendor/imgui/");
+    editor.root_module.addImport("clibs", engine_c_mod);
+    editor.root_module.addImport("edclibs", editor_c_libs.createModule());
+
+    if (env_map.get("VK_SDK_PATH")) |path| {
+        editor.addIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM") });
+    }
+    editor.addIncludePath(.{ .cwd_relative = "vendor/sdl3/include" });
+    editor.addIncludePath(b.path("vendor/vma/"));
+    editor.addIncludePath(b.path("vendor/stb/"));
+    editor.addIncludePath(b.path("vendor/imgui/"));
+
+    editor.linkLibCpp();
+    editor.root_module.addImport("yume", yume);
+    compile_all_shaders(b, &editor.root_module);
+
+    b.installArtifact(editor);
     if (target.result.os.tag == .windows) {
         b.installBinFile("vendor/sdl3/lib/SDL3.dll", "SDL3.dll");
     } else {
         b.installBinFile("vendor/sdl3/lib/libSDL3.so", "libSDL3.so.0");
-        exe.root_module.addRPathSpecial("$ORIGIN");
+        editor.root_module.addRPathSpecial("$ORIGIN");
     }
 
     // Imgui (with cimgui and vulkan + sdl3 backends)
@@ -69,9 +108,9 @@ pub fn build(b: *std.Build) !void {
             "vendor/imgui/cimgui_impl_vulkan.cpp",
         },
     });
-    exe.linkLibrary(imgui_lib);
+    editor.linkLibrary(imgui_lib);
 
-    const run_cmd = b.addRunArtifact(exe);
+    const run_cmd = b.addRunArtifact(editor);
 
     run_cmd.step.dependOn(b.getInstallStep());
 
@@ -82,19 +121,19 @@ pub fn build(b: *std.Build) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const unit_tests = b.addTest(.{
-        .root_source_file = b.path("engine/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
+    // const unit_tests = b.addTest(.{
+    //     .root_source_file = b.path("editor/main.zig"),
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
 
-    const run_unit_tests = b.addRunArtifact(unit_tests);
+    // const run_unit_tests = b.addRunArtifact(unit_tests);
 
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_unit_tests.step);
+    // const test_step = b.step("test", "Run unit tests");
+    // test_step.dependOn(&run_unit_tests.step);
 }
 
-fn compile_all_shaders(b: *std.Build, exe: *std.Build.Step.Compile) void {
+fn compile_all_shaders(b: *std.Build, mod: *std.Build.Module) void {
     // This is a fix for a change between zig 0.11 and 0.12
 
     const shaders_dir = if (@hasDecl(@TypeOf(b.build_root.handle), "openIterableDir"))
@@ -111,13 +150,13 @@ fn compile_all_shaders(b: *std.Build, exe: *std.Build.Step.Compile) void {
                 const name = basename[0 .. basename.len - ext.len];
 
                 std.debug.print("Found shader file to compile: {s}. Compiling with name: {s}\n", .{ entry.name, name });
-                add_shader(b, exe, name);
+                add_shader(b, mod, name);
             }
         }
     }
 }
 
-fn add_shader(b: *std.Build, exe: *std.Build.Step.Compile, name: []const u8) void {
+fn add_shader(b: *std.Build, mod: *std.Build.Module, name: []const u8) void {
     const source = std.fmt.allocPrint(b.allocator, "shaders/{s}.glsl", .{name}) catch @panic("OOM");
     const outpath = std.fmt.allocPrint(b.allocator, "shaders/{s}.spv", .{name}) catch @panic("OOM");
 
@@ -127,5 +166,5 @@ fn add_shader(b: *std.Build, exe: *std.Build.Step.Compile, name: []const u8) voi
     const output = shader_compilation.addOutputFileArg(outpath);
     shader_compilation.addFileArg(b.path(source));
 
-    exe.root_module.addAnonymousImport(name, .{ .root_source_file = output });
+    mod.addAnonymousImport(name, .{ .root_source_file = output });
 }

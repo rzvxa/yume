@@ -1,5 +1,5 @@
 const std = @import("std");
-const c = @import("clibs.zig");
+const c = @import("clibs");
 
 const log = std.log.scoped(.vulkan_init);
 

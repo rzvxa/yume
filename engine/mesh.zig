@@ -1,7 +1,7 @@
 const std = @import("std");
 const AllocatedBuffer = @import("VulkanEngine.zig").AllocatedBuffer;
 const m3d = @import("math3d.zig");
-const c = @import("clibs.zig");
+const c = @import("clibs");
 
 const Vec2 = m3d.Vec2;
 const Vec3 = m3d.Vec3;
@@ -65,7 +65,7 @@ const obj_loader = @import("obj_loader.zig");
 
 pub fn load_from_obj(a: std.mem.Allocator, filepath: []const u8) Mesh {
     var obj_mesh = obj_loader.parse_file(a, filepath) catch |err| {
-        std.log.err("Failed to load obj file: {s}", .{ @errorName(err) });
+        std.log.err("Failed to load obj file: {s}", .{@errorName(err)});
         unreachable;
     };
     defer obj_mesh.deinit();
