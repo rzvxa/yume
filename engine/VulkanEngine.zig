@@ -1156,32 +1156,6 @@ fn init_scene(self: *Self) void {
     };
     self.renderables.append(monkey) catch @panic("Out of memory");
 
-    // const diorama = RenderObject {
-    //     .mesh = self.meshes.getPtr("diorama") orelse @panic("Failed to get diorama mesh"),
-    //     .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
-    //     .transform = Mat4.mul(
-    //         Mat4.mul(
-    //             m3d.translation(m3d.vec3(3.0, 1, 0)),
-    //             m3d.rotation(m3d.vec3(0, 1, 0), std.math.degreesToRadians(f32, -60)),
-    //         ),
-    //         m3d.scale(m3d.vec3(2.0, 2.0, 2.0))
-    //     ),
-    // };
-    // self.renderables.append(diorama) catch @panic("Out of memory");
-    //
-    // const body = RenderObject {
-    //     .mesh = self.meshes.getPtr("body") orelse @panic("Failed to get body mesh"),
-    //     .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
-    //     .transform = Mat4.mul(
-    //         Mat4.mul(
-    //             m3d.translation(m3d.vec3(-3.0, -0.5, 0)),
-    //             m3d.rotation(m3d.vec3(0, 1, 0), std.math.degreesToRadians(f32, 45)),
-    //         ),
-    //         m3d.scale(m3d.vec3(2.0, 2.0, 2.0))
-    //     ),
-    // };
-    // self.renderables.append(body) catch @panic("Out of memory");
-
     var material = self.materials.getPtr("textured_mesh") orelse @panic("Failed to get default mesh material");
 
     // Allocate descriptor set for signle-texture to use on the material
@@ -1555,14 +1529,6 @@ fn load_meshes(self: *Self) void {
     var monkey_mesh = mesh_mod.load_from_obj(self.allocator, "assets/suzanne.obj");
     self.upload_mesh(&monkey_mesh);
     self.meshes.put("monkey", monkey_mesh) catch @panic("Out of memory");
-
-    //var cube_diorama = mesh_mod.load_from_obj(self.allocator, "assets/cube_diorama.obj");
-    //self.upload_mesh(&cube_diorama);
-    //self.meshes.put("diorama", cube_diorama) catch @panic("Out of memory");
-
-    //var body = mesh_mod.load_from_obj(self.allocator, "assets/body_male_realistic.obj");
-    //self.upload_mesh(&body);
-    //self.meshes.put("body", body) catch @panic("Out of memory");
 
     var lost_empire = mesh_mod.load_from_obj(self.allocator, "assets/lost_empire.obj");
     self.upload_mesh(&lost_empire);
