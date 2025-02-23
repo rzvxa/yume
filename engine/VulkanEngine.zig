@@ -67,13 +67,13 @@ const FrameData = struct {
     object_descriptor_set: c.VkDescriptorSet = VK_NULL_HANDLE,
 };
 
-const GPUCameraData = struct {
+pub const GPUCameraData = struct {
     view: Mat4,
     proj: Mat4,
     view_proj: Mat4,
 };
 
-const GPUSceneData = struct {
+pub const GPUSceneData = struct {
     fog_color: Vec4,
     fog_distance: Vec4, // x = start, y = end
     ambient_color: Vec4,
@@ -91,7 +91,7 @@ const UploadContext = struct {
     command_buffer: c.VkCommandBuffer = VK_NULL_HANDLE,
 };
 
-const FRAME_OVERLAP = 2;
+pub const FRAME_OVERLAP = 2;
 
 // Data
 //
@@ -126,6 +126,8 @@ present_queue: c.VkQueue = VK_NULL_HANDLE,
 present_queue_family: u32 = undefined,
 
 render_pass: c.VkRenderPass = VK_NULL_HANDLE,
+no_clear_render_pass: c.VkRenderPass = VK_NULL_HANDLE,
+present_render_pass: c.VkRenderPass = VK_NULL_HANDLE,
 framebuffers: []c.VkFramebuffer = undefined,
 
 depth_image_view: c.VkImageView = VK_NULL_HANDLE,
@@ -162,11 +164,17 @@ image_deletion_queue: std.ArrayList(VmaImageDeleter) = undefined,
 current_image_idx: u32 = 0,
 
 first_time: bool = true,
-game_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
 mouse: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
+
+game_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
 game_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
 is_game_window_active: bool = false,
 is_game_window_focused: bool = false,
+
+scene_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
+scene_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
+is_scene_window_active: bool = false,
+is_scene_window_focused: bool = false,
 
 play_icon_ds: c.VkDescriptorSet = undefined,
 pause_icon_ds: c.VkDescriptorSet = undefined,
@@ -477,7 +485,7 @@ fn init_default_renderpass(self: *Self) void {
         .stencilLoadOp = c.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
         .stencilStoreOp = c.VK_ATTACHMENT_STORE_OP_DONT_CARE,
         .initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED,
-        .finalLayout = c.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .finalLayout = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
     });
 
     const color_attachment_ref = std.mem.zeroInit(c.VkAttachmentReference, .{
@@ -551,6 +559,126 @@ fn init_default_renderpass(self: *Self) void {
 
     check_vk(c.vkCreateRenderPass(self.device, &render_pass_create_info, vk_alloc_cbs, &self.render_pass)) catch @panic("Failed to create render pass");
     self.deletion_queue.append(VulkanDeleter.make(self.render_pass, c.vkDestroyRenderPass)) catch @panic("Out of memory");
+
+    // Color attachement
+    const no_clear_color_attachment = std.mem.zeroInit(c.VkAttachmentDescription, .{
+        .format = self.swapchain_format,
+        .samples = c.VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = c.VK_ATTACHMENT_LOAD_OP_LOAD,
+        .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = c.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = c.VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .finalLayout = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    });
+
+    const no_clear_color_attachment_ref = std.mem.zeroInit(c.VkAttachmentReference, .{
+        .attachment = 0,
+        .layout = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    });
+
+    // Depth attachment
+    const no_clear_depth_attachment = std.mem.zeroInit(c.VkAttachmentDescription, .{
+        .format = self.depth_format,
+        .samples = c.VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = c.VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = c.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = c.VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = c.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        .finalLayout = c.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    });
+
+    const no_clear_depth_attachement_ref = std.mem.zeroInit(c.VkAttachmentReference, .{
+        .attachment = 1,
+        .layout = c.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    });
+
+    // Subpass
+    const no_clear_subpass = std.mem.zeroInit(c.VkSubpassDescription, .{
+        .pipelineBindPoint = c.VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &no_clear_color_attachment_ref,
+        .pDepthStencilAttachment = &no_clear_depth_attachement_ref,
+    });
+
+    const no_clear_attachment_descriptions = [_]c.VkAttachmentDescription{
+        no_clear_color_attachment,
+        no_clear_depth_attachment,
+    };
+
+    const no_clear_render_pass_create_info = std.mem.zeroInit(c.VkRenderPassCreateInfo, .{
+        .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = @as(u32, @intCast(no_clear_attachment_descriptions.len)),
+        .pAttachments = no_clear_attachment_descriptions[0..].ptr,
+        .subpassCount = 1,
+        .pSubpasses = &no_clear_subpass,
+        .dependencyCount = @as(u32, @intCast(dependecies.len)),
+        .pDependencies = &dependecies[0],
+    });
+
+    check_vk(c.vkCreateRenderPass(self.device, &no_clear_render_pass_create_info, vk_alloc_cbs, &self.no_clear_render_pass)) catch @panic("Failed to create render pass");
+    self.deletion_queue.append(VulkanDeleter.make(self.no_clear_render_pass, c.vkDestroyRenderPass)) catch @panic("Out of memory");
+
+    // Color attachement
+    const present_color_attachment = std.mem.zeroInit(c.VkAttachmentDescription, .{
+        .format = self.swapchain_format,
+        .samples = c.VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = c.VK_ATTACHMENT_LOAD_OP_LOAD,
+        .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = c.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = c.VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .finalLayout = c.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    });
+
+    const present_color_attachment_ref = std.mem.zeroInit(c.VkAttachmentReference, .{
+        .attachment = 0,
+        .layout = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    });
+
+    // Depth attachment
+    const present_depth_attachment = std.mem.zeroInit(c.VkAttachmentDescription, .{
+        .format = self.depth_format,
+        .samples = c.VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = c.VK_ATTACHMENT_LOAD_OP_LOAD,
+        .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = c.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = c.VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = c.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        .finalLayout = c.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    });
+
+    const present_depth_attachement_ref = std.mem.zeroInit(c.VkAttachmentReference, .{
+        .attachment = 1,
+        .layout = c.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    });
+
+    // Subpass
+    const present_subpass = std.mem.zeroInit(c.VkSubpassDescription, .{
+        .pipelineBindPoint = c.VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &present_color_attachment_ref,
+        .pDepthStencilAttachment = &present_depth_attachement_ref,
+    });
+
+    const present_attachment_descriptions = [_]c.VkAttachmentDescription{
+        present_color_attachment,
+        present_depth_attachment,
+    };
+
+    const present_render_pass_create_info = std.mem.zeroInit(c.VkRenderPassCreateInfo, .{
+        .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = @as(u32, @intCast(present_attachment_descriptions.len)),
+        .pAttachments = present_attachment_descriptions[0..].ptr,
+        .subpassCount = 1,
+        .pSubpasses = &present_subpass,
+        .dependencyCount = @as(u32, @intCast(dependecies.len)),
+        .pDependencies = &dependecies[0],
+    });
+
+    check_vk(c.vkCreateRenderPass(self.device, &present_render_pass_create_info, vk_alloc_cbs, &self.present_render_pass)) catch @panic("Failed to create render pass");
+    self.deletion_queue.append(VulkanDeleter.make(self.present_render_pass, c.vkDestroyRenderPass)) catch @panic("Out of memory");
 
     log.info("Created render pass", .{});
 }
@@ -1148,13 +1276,13 @@ fn create_shader_module(self: *Self, code: []const u8) ?c.VkShaderModule {
 }
 
 fn init_scene(self: *Self) void {
-    const monkey = RenderObject{
-        .name = "monkey",
-        .mesh = self.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
-        .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
-        .transform = Mat4.IDENTITY,
-    };
-    self.renderables.append(monkey) catch @panic("Out of memory");
+    // const monkey = RenderObject{
+    //     .name = "monkey",
+    //     .mesh = self.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
+    //     .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
+    //     .transform = Mat4.IDENTITY,
+    // };
+    // self.renderables.append(monkey) catch @panic("Out of memory");
 
     var material = self.materials.getPtr("textured_mesh") orelse @panic("Failed to get default mesh material");
 
@@ -1209,26 +1337,26 @@ fn init_scene(self: *Self) void {
     };
     self.renderables.append(lost_empire) catch @panic("Out of memory");
 
-    var x: i32 = -20;
-    var i: i32 = 0;
-    while (x <= 20) : (x += 1) {
-        var y: i32 = -20;
-        while (y <= 20) : (y += 1) {
-            const translation = Mat4.translation(Vec3.make(@floatFromInt(x), 0.0, @floatFromInt(y)));
-            const scale = Mat4.scale(Vec3.make(0.2, 0.2, 0.2));
-            const transform = Mat4.mul(translation, scale);
-
-            i += 1;
-            const tri = RenderObject{
-                .name = "triangle",
-                .mesh = self.meshes.getPtr("triangle") orelse @panic("Failed to get triangle mesh"),
-                .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
-                .transform = transform,
-            };
-
-            self.renderables.append(tri) catch @panic("Out of memory");
-        }
-    }
+    // var x: i32 = -20;
+    // var i: i32 = 0;
+    // while (x <= 20) : (x += 1) {
+    //     var y: i32 = -20;
+    //     while (y <= 20) : (y += 1) {
+    //         const translation = Mat4.translation(Vec3.make(@floatFromInt(x), 0.0, @floatFromInt(y)));
+    //         const scale = Mat4.scale(Vec3.make(0.2, 0.2, 0.2));
+    //         const transform = Mat4.mul(translation, scale);
+    //
+    //         i += 1;
+    //         const tri = RenderObject{
+    //             .name = "triangle",
+    //             .mesh = self.meshes.getPtr("triangle") orelse @panic("Failed to get triangle mesh"),
+    //             .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
+    //             .transform = transform,
+    //         };
+    //
+    //         self.renderables.append(tri) catch @panic("Out of memory");
+    //     }
+    // }
 }
 
 fn init_imgui(self: *Self) void {
@@ -1634,6 +1762,7 @@ pub fn processGameEvent(self: *Self, event: *c.SDL_Event) void {
         switch (event.key.keysym.scancode) {
             c.SDL_SCANCODE_ESCAPE => {
                 self.is_game_window_active = false;
+                self.is_scene_window_active = false;
             },
             c.SDL_SCANCODE_W => {
                 self.camera_input.z = 0.0;
@@ -1758,7 +1887,69 @@ pub fn endFrame(self: *Self, cmd: RenderCommand) void {
     self.frame_number +%= 1;
 }
 
-pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject, aspect: f32) void {
+pub fn beginAdditiveRenderPass(self: *Self, cmd: RenderCommand) void {
+    const color_clear: c.VkClearValue = .{
+        .color = .{ .float32 = [_]f32{ 0, 0, 0, 0 } },
+    };
+
+    const depth_clear = c.VkClearValue{
+        .depthStencil = .{
+            .depth = 1.0,
+            .stencil = 1,
+        },
+    };
+
+    const clear_values = [_]c.VkClearValue{
+        color_clear,
+        depth_clear,
+    };
+    const render_pass_begin_info = std.mem.zeroInit(c.VkRenderPassBeginInfo, .{
+        .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = self.no_clear_render_pass,
+        .framebuffer = self.framebuffers[self.current_image_idx],
+        .renderArea = .{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = self.swapchain_extent,
+        },
+        .clearValueCount = @as(u32, @intCast(clear_values.len)),
+        .pClearValues = &clear_values[0],
+    });
+    c.vkCmdEndRenderPass(cmd);
+    c.vkCmdBeginRenderPass(cmd, &render_pass_begin_info, c.VK_SUBPASS_CONTENTS_INLINE);
+}
+
+pub fn beginPresentRenderPass(self: *Self, cmd: RenderCommand) void {
+    const color_clear: c.VkClearValue = .{
+        .color = .{ .float32 = [_]f32{ 0, 0, 0, 0 } },
+    };
+
+    const depth_clear = c.VkClearValue{
+        .depthStencil = .{
+            .depth = 1.0,
+            .stencil = 1,
+        },
+    };
+
+    const clear_values = [_]c.VkClearValue{
+        color_clear,
+        depth_clear,
+    };
+    const render_pass_begin_info = std.mem.zeroInit(c.VkRenderPassBeginInfo, .{
+        .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = self.present_render_pass,
+        .framebuffer = self.framebuffers[self.current_image_idx],
+        .renderArea = .{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = self.swapchain_extent,
+        },
+        .clearValueCount = @as(u32, @intCast(clear_values.len)),
+        .pClearValues = &clear_values[0],
+    });
+    c.vkCmdEndRenderPass(cmd);
+    c.vkCmdBeginRenderPass(cmd, &render_pass_begin_info, c.VK_SUBPASS_CONTENTS_INLINE);
+}
+
+pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject, aspect: f32, a: AllocatedBuffer, b: c.VkDescriptorSet) void {
     const view = Mat4.translation(self.camera_pos);
     var proj = Mat4.perspective(std.math.degreesToRadians(70.0), aspect, 0.1, 200.0);
 
@@ -1784,7 +1975,7 @@ pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject
     const scene_data_offset = scene_data_base_offset + padded_scene_data_size * frame_index;
 
     var data: ?*align(@alignOf(GPUCameraData)) anyopaque = undefined;
-    check_vk(c.vmaMapMemory(self.vma_allocator, self.camera_and_scene_buffer.allocation, &data)) catch @panic("Failed to map camera buffer");
+    check_vk(c.vmaMapMemory(self.vma_allocator, a.allocation, &data)) catch @panic("Failed to map camera buffer");
 
     const camera_data: *GPUCameraData = @ptrFromInt(@intFromPtr(data) + camera_data_offset);
     const scene_data: *GPUSceneData = @ptrFromInt(@intFromPtr(data) + scene_data_offset);
@@ -1792,7 +1983,7 @@ pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject
     const framed = @as(f32, @floatFromInt(self.frame_number)) / 120.0;
     scene_data.ambient_color = Vec3.make(@sin(framed), 0.0, @cos(framed)).to_point4();
 
-    c.vmaUnmapMemory(self.vma_allocator, self.camera_and_scene_buffer.allocation);
+    c.vmaUnmapMemory(self.vma_allocator, a.allocation);
 
     // NOTE: In this copy I do conversion. Now, this is generally unsafe as none
     // of the structures involved are c compatible (marked extern). However, we
@@ -1821,7 +2012,7 @@ pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject
                 @as(u32, @intCast(scene_data_offset)),
             };
 
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 0, 1, &self.camera_and_scene_set, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 0, 1, &b, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
 
             c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 1, 1, &self.get_current_frame().object_descriptor_set, 0, null);
         }
@@ -1879,7 +2070,7 @@ pub fn create_buffer(self: *Self, alloc_size: usize, usage: c.VkBufferUsageFlags
     return buffer;
 }
 
-fn pad_uniform_buffer_size(self: *Self, original_size: usize) usize {
+pub fn pad_uniform_buffer_size(self: *Self, original_size: usize) usize {
     const min_ubo_alignment = @as(usize, @intCast(self.physical_device_properties.limits.minUniformBufferOffsetAlignment));
     const aligned_size = (original_size + min_ubo_alignment - 1) & ~(min_ubo_alignment - 1);
     return aligned_size;
@@ -2000,4 +2191,9 @@ fn create_imgui_texture(self: *Self, filepath: []const u8) c.VkDescriptorSet {
 pub fn isInGameView(self: *Self, pos: c.ImVec2) bool {
     return (pos.x > self.game_window_rect.x and pos.x < self.game_window_rect.z) and
         (pos.y > self.game_window_rect.y and pos.y < self.game_window_rect.w);
+}
+
+pub fn isInSceneView(self: *Self, pos: c.ImVec2) bool {
+    return (pos.x > self.scene_window_rect.x and pos.x < self.scene_window_rect.z) and
+        (pos.y > self.scene_window_rect.y and pos.y < self.scene_window_rect.w);
 }

@@ -2,7 +2,14 @@ const c = @import("clibs");
 
 const std = @import("std");
 
+const check_vk = @import("yume").vki.check_vk;
+
 const GameApp = @import("yume").GameApp;
+const AllocatedBuffer = @import("yume").AllocatedBuffer;
+const FRAME_OVERLAP = @import("yume").FRAME_OVERLAP;
+const GPUCameraData = @import("yume").GPUCameraData;
+const GPUSceneData = @import("yume").GPUSceneData;
+const VmaBufferDeleter = @import("yume").VmaBufferDeleter;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -23,8 +30,68 @@ pub fn main() !void {
 
         dockspace_flags: c.ImGuiDockNodeFlags = 0,
 
-        pub fn init(_: *GameApp) @This() {
-            return @This(){};
+        editor_camera_and_scene_buffer: AllocatedBuffer = undefined,
+        editor_camera_and_scene_set: c.VkDescriptorSet = null,
+
+        pub fn init(ctx: *GameApp) @This() {
+            var ed = @This(){};
+            var eng = ctx.engine;
+
+            const camera_and_scene_buffer_size =
+                FRAME_OVERLAP * eng.pad_uniform_buffer_size(@sizeOf(GPUCameraData)) +
+                FRAME_OVERLAP * eng.pad_uniform_buffer_size(@sizeOf(GPUSceneData));
+            ed.editor_camera_and_scene_buffer = eng.create_buffer(camera_and_scene_buffer_size, c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, c.VMA_MEMORY_USAGE_CPU_TO_GPU);
+            eng.buffer_deletion_queue.append(VmaBufferDeleter{ .buffer = ed.editor_camera_and_scene_buffer }) catch @panic("Out of memory");
+
+            // Camera and scene descriptor set
+            const global_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
+                .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                .descriptorPool = eng.descriptor_pool,
+                .descriptorSetCount = 1,
+                .pSetLayouts = &eng.global_set_layout,
+            });
+
+            // Allocate a single set for multiple frame worth of camera and scene data
+            check_vk(c.vkAllocateDescriptorSets(eng.device, &global_set_alloc_info, &ed.editor_camera_and_scene_set)) catch @panic("Failed to allocate global descriptor set");
+
+            // editor Camera
+            const editor_camera_buffer_info = std.mem.zeroInit(c.VkDescriptorBufferInfo, .{
+                .buffer = ed.editor_camera_and_scene_buffer.buffer,
+                .range = @sizeOf(GPUCameraData),
+            });
+
+            const editor_camera_write = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
+                .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = ed.editor_camera_and_scene_set,
+                .dstBinding = 0,
+                .descriptorCount = 1,
+                .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                .pBufferInfo = &editor_camera_buffer_info,
+            });
+
+            // editor Scene parameters
+            const editor_scene_parameters_buffer_info = std.mem.zeroInit(c.VkDescriptorBufferInfo, .{
+                .buffer = ed.editor_camera_and_scene_buffer.buffer,
+                .range = @sizeOf(GPUSceneData),
+            });
+
+            const editor_scene_parameters_write = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
+                .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = ed.editor_camera_and_scene_set,
+                .dstBinding = 1,
+                .descriptorCount = 1,
+                .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                .pBufferInfo = &editor_scene_parameters_buffer_info,
+            });
+
+            const editor_camera_and_scene_writes = [_]c.VkWriteDescriptorSet{
+                editor_camera_write,
+                editor_scene_parameters_write,
+            };
+
+            c.vkUpdateDescriptorSets(eng.device, @as(u32, @intCast(editor_camera_and_scene_writes.len)), &editor_camera_and_scene_writes[0], 0, null);
+
+            return ed;
         }
 
         pub fn processEvent(_: *@This(), ctx: *GameApp, event: *c.SDL_Event) bool {
@@ -34,6 +101,8 @@ pub fn main() !void {
             if (event.type == c.SDL_EVENT_QUIT) {
                 return false;
             } else if (ctx.engine.is_game_window_active and ctx.engine.isInGameView(mouse)) {
+                ctx.engine.processGameEvent(event);
+            } else if (ctx.engine.is_scene_window_active and ctx.engine.isInSceneView(mouse)) {
                 ctx.engine.processGameEvent(event);
             } else {
                 ctx.engine.camera_input.x = 0;
@@ -178,16 +247,21 @@ pub fn main() !void {
             }
             const game_image = c.ImGui_GetWindowDrawList();
             ctx.engine.game_view_size = c.ImGui_GetWindowSize();
-            var frame_userdata = struct { app: *GameApp, cmd: GameApp.RenderCommand }{ .app = ctx, .cmd = cmd };
+            const DispatcherType = @This();
+            const FrameData = struct { app: *GameApp, cmd: GameApp.RenderCommand, d: *DispatcherType };
+            var frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .d = self };
             c.ImDrawList_AddCallback(game_image, extern struct {
                 fn f(dl: [*c]const c.ImDrawList, dc: [*c]const c.ImDrawCmd) callconv(.C) void {
                     _ = dl;
-                    const me: *struct { app: *GameApp, cmd: GameApp.RenderCommand } = @alignCast(@ptrCast(dc.*.UserCallbackData));
+                    const me: *FrameData = @alignCast(@ptrCast(dc.*.UserCallbackData));
                     // const cmd = me.get_current_frame().main_command_buffer;
                     const cr = dc.*.ClipRect;
                     me.app.engine.game_window_rect = cr;
                     const w = cr.z - cr.x;
                     const h = cr.w - cr.y;
+
+                    me.app.engine.beginAdditiveRenderPass(me.cmd);
+
                     c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
                         .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
                         .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
@@ -204,7 +278,8 @@ pub fn main() !void {
                     }});
 
                     const aspect = me.app.engine.game_view_size.x / me.app.engine.game_view_size.y;
-                    me.app.engine.draw_objects(me.cmd, me.app.engine.renderables.items, aspect);
+                    std.log.debug("draw eng", .{});
+                    me.app.engine.draw_objects(me.cmd, me.app.engine.renderables.items, aspect, me.app.engine.camera_and_scene_buffer, me.app.engine.camera_and_scene_set);
 
                     c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
                         .offset = .{ .x = 0, .y = 0 },
@@ -215,10 +290,64 @@ pub fn main() !void {
             c.ImDrawList_AddCallback(game_image, c.ImDrawCallback_ResetRenderState, null);
             c.ImGui_End();
 
+            _ = c.ImGui_Begin("Scene", null, 0);
+            const old_is_scene_window_focused = ctx.engine.is_scene_window_focused;
+            ctx.engine.is_scene_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
+            if (ctx.engine.is_scene_window_focused) {
+                if (!old_is_scene_window_focused) {
+                    ctx.engine.is_scene_window_active = true;
+                } else if (ctx.engine.isInSceneView(c.ImGui_GetMousePos()) and c.ImGui_IsMouseClicked(c.ImGuiMouseButton_Left)) {
+                    ctx.engine.is_scene_window_active = true;
+                }
+            } else {
+                ctx.engine.is_scene_window_active = false;
+            }
+            const editor_image = c.ImGui_GetWindowDrawList();
+            ctx.engine.scene_view_size = c.ImGui_GetWindowSize();
+
+            c.ImDrawList_AddCallback(editor_image, extern struct {
+                fn f(dl: [*c]const c.ImDrawList, dc: [*c]const c.ImDrawCmd) callconv(.C) void {
+                    _ = dl;
+                    const me: *FrameData = @alignCast(@ptrCast(dc.*.UserCallbackData));
+                    const cr = dc.*.ClipRect;
+                    me.app.engine.scene_window_rect = cr;
+                    const w = cr.z - cr.x;
+                    const h = cr.w - cr.y;
+
+                    me.app.engine.beginAdditiveRenderPass(me.cmd);
+                    c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
+                        .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
+                        .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
+                    }});
+
+                    const vx = if (cr.x > 0) cr.x else cr.z - me.app.engine.scene_view_size.x;
+                    c.vkCmdSetViewport(me.cmd, 0, 1, &[_]c.VkViewport{.{
+                        .x = vx,
+                        .y = cr.y,
+                        .width = me.app.engine.scene_view_size.x,
+                        .height = me.app.engine.scene_view_size.y,
+                        .minDepth = 0.0,
+                        .maxDepth = 1.0,
+                    }});
+
+                    const aspect = me.app.engine.scene_view_size.x / me.app.engine.scene_view_size.y;
+                    me.app.engine.draw_objects(me.cmd, me.app.engine.renderables.items, aspect, me.d.editor_camera_and_scene_buffer, me.d.editor_camera_and_scene_set);
+
+                    c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
+                        .offset = .{ .x = 0, .y = 0 },
+                        .extent = GameApp.window_extent,
+                    }});
+                }
+            }.f, &frame_userdata);
+            c.ImDrawList_AddCallback(editor_image, c.ImDrawCallback_ResetRenderState, null);
+            c.ImGui_End();
+
             c.ImGui_Render();
 
             // UI
             c.cImGui_ImplVulkan_RenderDrawData(c.ImGui_GetDrawData(), cmd);
+
+            ctx.engine.beginPresentRenderPass(cmd);
 
             ctx.engine.endFrame(cmd);
         }
