@@ -9,6 +9,7 @@ const Texture = textures.Texture;
 
 const GameApp = @import("yume").GameApp;
 const Vec3 = @import("yume").math3d.Vec3;
+const Mat4 = @import("yume").math3d.Mat4;
 const AllocatedBuffer = @import("yume").AllocatedBuffer;
 const FRAME_OVERLAP = @import("yume").FRAME_OVERLAP;
 const GPUCameraData = @import("yume").GPUCameraData;
@@ -28,8 +29,10 @@ dockspace_flags: c.ImGuiDockNodeFlags = 0,
 editor_camera_and_scene_buffer: AllocatedBuffer = undefined,
 editor_camera_and_scene_set: c.VkDescriptorSet = null,
 
-camera_pos: Vec3 = Vec3.make(5.0, -3.0, -10.0),
-camera_input: Vec3 = Vec3.make(5.0, -3.0, -10.0),
+camera_pos: Vec3 = Vec3.make(-5.0, 3.0, -10.0),
+camera_rot: Vec3 = Vec3.make(0, 0, 0),
+camera_input: Vec3 = Vec3.make(0, 0, 0),
+camera_input_rot: Vec3 = Vec3.make(0, 0, 0),
 
 game_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
 game_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
@@ -82,6 +85,9 @@ pub fn processEvent(self: *Self, ctx: *GameApp, event: *c.SDL_Event) bool {
         self.camera_input.x = 0;
         self.camera_input.y = 0;
         self.camera_input.z = 0;
+        self.camera_input_rot.x = 0;
+        self.camera_input_rot.y = 0;
+        self.camera_input_rot.z = 0;
     }
 
     return true;
@@ -98,16 +104,28 @@ fn processSceneEvent(self: *Self, event: *c.SDL_Event) void {
                 self.camera_input.z = -1.0;
             },
             c.SDL_SCANCODE_A => {
-                self.camera_input.x = 1.0;
+                self.camera_input.x = -1.0;
             },
             c.SDL_SCANCODE_D => {
-                self.camera_input.x = -1.0;
+                self.camera_input.x = 1.0;
             },
             c.SDL_SCANCODE_E => {
                 self.camera_input.y = 1.0;
             },
             c.SDL_SCANCODE_Q => {
                 self.camera_input.y = -1.0;
+            },
+            c.SDL_SCANCODE_J => {
+                self.camera_input_rot.y = -1.0;
+            },
+            c.SDL_SCANCODE_L => {
+                self.camera_input_rot.y = 1.0;
+            },
+            c.SDL_SCANCODE_K => {
+                self.camera_input_rot.x = 1.0;
+            },
+            c.SDL_SCANCODE_I => {
+                self.camera_input_rot.x = -1.0;
             },
 
             else => {},
@@ -132,6 +150,18 @@ fn processSceneEvent(self: *Self, event: *c.SDL_Event) void {
             c.SDL_SCANCODE_Q => {
                 self.camera_input.y = 0.0;
             },
+            c.SDL_SCANCODE_J => {
+                self.camera_input_rot.y = 0.0;
+            },
+            c.SDL_SCANCODE_L => {
+                self.camera_input_rot.y = 0.0;
+            },
+            c.SDL_SCANCODE_K => {
+                self.camera_input_rot.x = 0.0;
+            },
+            c.SDL_SCANCODE_I => {
+                self.camera_input_rot.x = 0.0;
+            },
 
             else => {},
         }
@@ -152,6 +182,10 @@ pub fn update(self: *Self, ctx: *GameApp) void {
     if (self.camera_input.squared_norm() > (0.1 * 0.1)) {
         const camera_delta = self.camera_input.normalized().mul(ctx.delta * 5.0);
         self.camera_pos = Vec3.add(self.camera_pos, camera_delta);
+    }
+    if (self.camera_input_rot.squared_norm() > (0.1 * 0.1)) {
+        const rot_delta = self.camera_input_rot.mul(ctx.delta * 1.0);
+        self.camera_rot = self.camera_rot.add(rot_delta);
     }
 }
 
@@ -314,6 +348,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
                 me.app.engine.camera_and_scene_buffer,
                 me.app.engine.camera_and_scene_set,
                 me.app.engine.camera_pos,
+                Vec3.ZERO,
             );
 
             c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
@@ -363,6 +398,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
                 me.d.editor_camera_and_scene_buffer,
                 me.d.editor_camera_and_scene_set,
                 me.d.camera_pos,
+                me.d.camera_rot,
             );
 
             c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{

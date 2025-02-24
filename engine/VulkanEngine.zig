@@ -1256,13 +1256,14 @@ fn create_shader_module(self: *Self, code: []const u8) ?c.VkShaderModule {
 }
 
 fn init_scene(self: *Self) void {
-    // const monkey = RenderObject{
-    //     .name = "monkey",
-    //     .mesh = self.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
-    //     .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
-    //     .transform = Mat4.IDENTITY,
-    // };
-    // self.renderables.append(monkey) catch @panic("Out of memory");
+    const monkey_transform = Mat4.translation(Vec3.make(-5, 3, 0));
+    const monkey = RenderObject{
+        .name = "monkey",
+        .mesh = self.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
+        .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
+        .transform = monkey_transform,
+    };
+    self.renderables.append(monkey) catch @panic("Out of memory");
 
     var material = self.materials.getPtr("textured_mesh") orelse @panic("Failed to get default mesh material");
 
@@ -1444,7 +1445,7 @@ fn load_meshes(self: *Self) void {
     self.upload_mesh(&triangle_mesh);
     self.meshes.put("triangle", triangle_mesh) catch @panic("Out of memory");
 
-    var monkey_mesh = mesh_mod.load_from_obj(self.allocator, "assets/builtin/suzanne.obj");
+    var monkey_mesh = mesh_mod.load_from_obj(self.allocator, "assets/builtin/u.obj");
     self.upload_mesh(&monkey_mesh);
     self.meshes.put("monkey", monkey_mesh) catch @panic("Out of memory");
 
@@ -1534,10 +1535,10 @@ pub fn processGameEvent(self: *Self, event: *c.SDL_Event) void {
                 self.camera_input.z = -1.0;
             },
             c.SDL_SCANCODE_A => {
-                self.camera_input.x = 1.0;
+                self.camera_input.x = -1.0;
             },
             c.SDL_SCANCODE_D => {
-                self.camera_input.x = -1.0;
+                self.camera_input.x = 1.0;
             },
             c.SDL_SCANCODE_E => {
                 self.camera_input.y = 1.0;
@@ -1735,8 +1736,14 @@ pub fn beginPresentRenderPass(self: *Self, cmd: RenderCommand) void {
     c.vkCmdBeginRenderPass(cmd, &render_pass_begin_info, c.VK_SUBPASS_CONTENTS_INLINE);
 }
 
-pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject, aspect: f32, ubo_buf: AllocatedBuffer, ubo_set: c.VkDescriptorSet, cam: Vec3) void {
-    const view = Mat4.translation(cam);
+pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject, aspect: f32, ubo_buf: AllocatedBuffer, ubo_set: c.VkDescriptorSet, cam: Vec3, rot: Vec3) void {
+    // Create rotation matrices for pitch (X), yaw (Y), and roll (Z)
+    const rot_x = Mat4.rotation(Vec3.make(1.0, 0.0, 0.0), rot.x);
+    const rot_y = Mat4.rotation(Vec3.make(0.0, 1.0, 0.0), rot.y);
+    const rot_z = Mat4.rotation(Vec3.make(0.0, 0.0, 1.0), rot.z);
+
+    const g = Vec3.make(-cam.x, -cam.y, cam.z);
+    const view = rot_x.mul(rot_y).mul(rot_z).mul(Mat4.translation(g));
     var proj = Mat4.perspective(std.math.degreesToRadians(70.0), aspect, 0.1, 200.0);
 
     proj.j.y *= -1.0;
