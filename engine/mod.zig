@@ -9,4 +9,6 @@ pub const AllocatedBuffer = VulkanEngine.AllocatedBuffer;
 pub const FRAME_OVERLAP = VulkanEngine.FRAME_OVERLAP;
 pub const GPUCameraData = VulkanEngine.GPUCameraData;
 pub const GPUSceneData = VulkanEngine.GPUSceneData;
+pub const VmaImageDeleter = VulkanEngine.VmaImageDeleter;
 pub const VmaBufferDeleter = VulkanEngine.VmaBufferDeleter;
+pub const VulkanDeleter = VulkanEngine.VulkanDeleter;

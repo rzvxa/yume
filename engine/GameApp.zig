@@ -83,8 +83,10 @@ pub fn run(self: *Self, comptime dispatcher: anytype) void {
             _ = c.SDL_SetWindowTitle(self.window, new_title.ptr);
         }
     }
+
+    d.deinit(self);
 }
 
-pub fn cleanup(self: *Self) void {
-    self.engine.cleanup();
+pub fn deinit(self: *Self) void {
+    self.engine.deinit();
 }

@@ -15,12 +15,6 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    const editor_c_libs = b.addTranslateC(.{
-        .root_source_file = b.path("editor/edclibs.c"),
-        .target = target,
-        .optimize = optimize,
-    });
-
     const vk_lib_name = if (target.result.os.tag == .windows) "vulkan-1" else "vulkan";
 
     yume.linkSystemLibrary("SDL3", .{});
@@ -31,7 +25,6 @@ pub fn build(b: *std.Build) !void {
         yume.addLibraryPath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/lib", .{path}) catch @panic("OOM") });
         yume.addIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM") });
         engine_c_libs.addIncludeDir(std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM"));
-        editor_c_libs.addIncludeDir(std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM"));
     }
     yume.addCSourceFile(.{ .file = b.path("engine/vk_mem_alloc.cpp"), .flags = &.{""} });
     yume.addCSourceFile(.{ .file = b.path("engine/stb_image.c"), .flags = &.{""} });
@@ -53,13 +46,8 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    editor_c_libs.addIncludeDir("vendor/sdl3/include");
-    editor_c_libs.addIncludeDir("vendor/vma/");
-    editor_c_libs.addIncludeDir("vendor/stb/");
-    editor_c_libs.addIncludeDir("vendor/imgui/");
     engine_c_libs.addIncludeDir("vendor/imgui/");
     editor.root_module.addImport("clibs", engine_c_mod);
-    editor.root_module.addImport("edclibs", editor_c_libs.createModule());
 
     if (env_map.get("VK_SDK_PATH")) |path| {
         editor.addIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM") });
@@ -108,6 +96,7 @@ pub fn build(b: *std.Build) !void {
             "vendor/imgui/cimgui_impl_vulkan.cpp",
         },
     });
+
     editor.linkLibrary(imgui_lib);
 
     const run_cmd = b.addRunArtifact(editor);

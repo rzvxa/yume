@@ -11,7 +11,7 @@ pub const Texture = struct {
     image_view: c.VkImageView,
 };
 
-pub fn load_image_from_file(comptime T: anytype, engine: *T, filepath: []const u8) !Engine.AllocatedImage {
+pub fn load_image_from_file(engine: *Engine, filepath: []const u8) !Engine.AllocatedImage {
     var width: c_int = undefined;
     var height: c_int = undefined;
     var channels: c_int = undefined;

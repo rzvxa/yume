@@ -28,7 +28,7 @@ const Self = @This();
 
 const VK_NULL_HANDLE = null;
 
-const vk_alloc_cbs: ?*c.VkAllocationCallbacks = null;
+pub const vk_alloc_cbs: ?*c.VkAllocationCallbacks = null;
 
 pub const RenderCommand = c.VkCommandBuffer;
 
@@ -160,26 +160,7 @@ deletion_queue: std.ArrayList(VulkanDeleter) = undefined,
 buffer_deletion_queue: std.ArrayList(VmaBufferDeleter) = undefined,
 image_deletion_queue: std.ArrayList(VmaImageDeleter) = undefined,
 
-// imgui state
 current_image_idx: u32 = 0,
-
-first_time: bool = true,
-mouse: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
-
-game_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
-game_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
-is_game_window_active: bool = false,
-is_game_window_focused: bool = false,
-
-scene_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
-scene_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
-is_scene_window_active: bool = false,
-is_scene_window_focused: bool = false,
-
-play_icon_ds: c.VkDescriptorSet = undefined,
-pause_icon_ds: c.VkDescriptorSet = undefined,
-stop_icon_ds: c.VkDescriptorSet = undefined,
-fast_forward_icon_ds: c.VkDescriptorSet = undefined,
 
 pub const MeshPushConstants = struct {
     data: Vec4,
@@ -194,7 +175,7 @@ pub const VulkanDeleter = struct {
         self.delete_fn(self, engine);
     }
 
-    fn make(object: anytype, func: anytype) VulkanDeleter {
+    pub fn make(object: anytype, func: anytype) VulkanDeleter {
         const T = @TypeOf(object);
         comptime {
             std.debug.assert(@typeInfo(T) == .Optional);
@@ -272,7 +253,6 @@ pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
     engine.load_textures();
     engine.load_meshes();
     engine.init_scene();
-    engine.init_imgui();
 
     return engine;
 }
@@ -1359,195 +1339,7 @@ fn init_scene(self: *Self) void {
     // }
 }
 
-fn init_imgui(self: *Self) void {
-    const pool_sizes = [_]c.VkDescriptorPoolSize{
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_SAMPLER,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
-            .descriptorCount = 1000,
-        },
-    };
-
-    const pool_ci = std.mem.zeroInit(c.VkDescriptorPoolCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .flags = c.VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-        .maxSets = 1000,
-        .poolSizeCount = @as(u32, @intCast(pool_sizes.len)),
-        .pPoolSizes = &pool_sizes[0],
-    });
-
-    var imgui_pool: c.VkDescriptorPool = undefined;
-    check_vk(c.vkCreateDescriptorPool(self.device, &pool_ci, vk_alloc_cbs, &imgui_pool)) catch @panic("Failed to create imgui descriptor pool");
-
-    _ = c.ImGui_CreateContext(null);
-    _ = c.cImGui_ImplSDL3_InitForVulkan(self.window);
-
-    var init_info = std.mem.zeroInit(c.ImGui_ImplVulkan_InitInfo, .{
-        .Instance = self.instance,
-        .PhysicalDevice = self.physical_device,
-        .Device = self.device,
-        .QueueFamily = self.graphics_queue_family,
-        .Queue = self.graphics_queue,
-        .DescriptorPool = imgui_pool,
-        .MinImageCount = FRAME_OVERLAP,
-        .ImageCount = FRAME_OVERLAP,
-        .MSAASamples = c.VK_SAMPLE_COUNT_1_BIT,
-    });
-
-    const io = c.ImGui_GetIO();
-    _ = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/roboto.ttf", 14, null, null);
-
-    _ = c.cImGui_ImplVulkan_Init(&init_info, self.render_pass);
-    _ = c.cImGui_ImplVulkan_CreateFontsTexture();
-
-    self.play_icon_ds = self.create_imgui_texture("assets/icons/play.png");
-    self.pause_icon_ds = self.create_imgui_texture("assets/icons/pause.png");
-    self.stop_icon_ds = self.create_imgui_texture("assets/icons/stop.png");
-    self.fast_forward_icon_ds = self.create_imgui_texture("assets/icons/fast-forward.png");
-
-    self.deletion_queue.append(VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool)) catch @panic("Out of memory");
-
-    c.ImGui_GetIO().*.ConfigFlags |= c.ImGuiConfigFlags_DockingEnable;
-    c.ImGui_GetIO().*.ConfigWindowsMoveFromTitleBarOnly = true;
-
-    const ImVec2 = struct {
-        fn f(x: f32, y: f32) c.ImVec2 {
-            return c.ImVec2{ .x = x, .y = y };
-        }
-    }.f;
-    const ImVec4 = struct {
-        fn f(x: f32, y: f32, z: f32, w: f32) c.ImVec4 {
-            return c.ImVec4{ .x = x, .y = y, .z = z, .w = w };
-        }
-    }.f;
-
-    const style = c.ImGui_GetStyle();
-    style.*.Alpha = 1.0;
-    style.*.DisabledAlpha = 0.6000000238418579;
-    style.*.WindowPadding = ImVec2(8.0, 8.0);
-    style.*.WindowRounding = 0.0;
-    style.*.WindowBorderSize = 1.0;
-    style.*.WindowMinSize = ImVec2(32.0, 32.0);
-    style.*.WindowTitleAlign = ImVec2(0.0, 0.5);
-    style.*.WindowMenuButtonPosition = c.ImGuiDir_Left;
-    style.*.ChildRounding = 0.0;
-    style.*.ChildBorderSize = 1.0;
-    style.*.PopupRounding = 0.0;
-    style.*.PopupBorderSize = 1.0;
-    style.*.FramePadding = ImVec2(4.0, 3.0);
-    style.*.FrameRounding = 0.0;
-    style.*.FrameBorderSize = 0.0;
-    style.*.ItemSpacing = ImVec2(8.0, 4.0);
-    style.*.ItemInnerSpacing = ImVec2(4.0, 4.0);
-    style.*.CellPadding = ImVec2(4.0, 2.0);
-    style.*.IndentSpacing = 21.0;
-    style.*.ColumnsMinSpacing = 6.0;
-    style.*.ScrollbarSize = 14.0;
-    style.*.ScrollbarRounding = 0.0;
-    style.*.GrabMinSize = 10.0;
-    style.*.GrabRounding = 0.0;
-    style.*.TabRounding = 0.0;
-    style.*.TabBorderSize = 0.0;
-    style.*.TabMinWidthForCloseButton = 0.0;
-    style.*.ColorButtonPosition = c.ImGuiDir_Right;
-    style.*.ButtonTextAlign = ImVec2(0.5, 0.5);
-    style.*.SelectableTextAlign = ImVec2(0.0, 0.0);
-
-    style.*.Colors[c.ImGuiCol_Text] = ImVec4(1.0, 1.0, 1.0, 1.0);
-    style.*.Colors[c.ImGuiCol_TextDisabled] = ImVec4(0.5921568870544434, 0.5921568870544434, 0.5921568870544434, 1.0);
-    style.*.Colors[c.ImGuiCol_WindowBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_ChildBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_PopupBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_Border] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
-    style.*.Colors[c.ImGuiCol_BorderShadow] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
-    style.*.Colors[c.ImGuiCol_FrameBg] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
-    style.*.Colors[c.ImGuiCol_FrameBgHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_FrameBgActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_TitleBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_TitleBgActive] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_TitleBgCollapsed] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_MenuBarBg] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
-    style.*.Colors[c.ImGuiCol_ScrollbarBg] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
-    style.*.Colors[c.ImGuiCol_ScrollbarGrab] = ImVec4(0.321568638086319, 0.321568638086319, 0.3333333432674408, 1.0);
-    style.*.Colors[c.ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.3529411852359772, 0.3529411852359772, 0.3725490272045135, 1.0);
-    style.*.Colors[c.ImGuiCol_ScrollbarGrabActive] = ImVec4(0.3529411852359772, 0.3529411852359772, 0.3725490272045135, 1.0);
-    style.*.Colors[c.ImGuiCol_CheckMark] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_SliderGrab] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_SliderGrabActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_Button] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
-    style.*.Colors[c.ImGuiCol_ButtonHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_ButtonActive] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_Header] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
-    style.*.Colors[c.ImGuiCol_HeaderHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_HeaderActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_Separator] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
-    style.*.Colors[c.ImGuiCol_SeparatorHovered] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
-    style.*.Colors[c.ImGuiCol_SeparatorActive] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
-    style.*.Colors[c.ImGuiCol_ResizeGrip] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_ResizeGripHovered] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
-    style.*.Colors[c.ImGuiCol_ResizeGripActive] = ImVec4(0.321568638086319, 0.321568638086319, 0.3333333432674408, 1.0);
-    style.*.Colors[c.ImGuiCol_Tab] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_TabHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_TabActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_TabUnfocused] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_TabUnfocusedActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_PlotLines] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_PlotLinesHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_PlotHistogram] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_PlotHistogramHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_TableHeaderBg] = ImVec4(0.1882352977991104, 0.1882352977991104, 0.2000000029802322, 1.0);
-    style.*.Colors[c.ImGuiCol_TableBorderStrong] = ImVec4(0.3098039329051971, 0.3098039329051971, 0.3490196168422699, 1.0);
-    style.*.Colors[c.ImGuiCol_TableBorderLight] = ImVec4(0.2274509817361832, 0.2274509817361832, 0.2470588237047195, 1.0);
-    style.*.Colors[c.ImGuiCol_TableRowBg] = ImVec4(0.0, 0.0, 0.0, 0.0);
-    style.*.Colors[c.ImGuiCol_TableRowBgAlt] = ImVec4(1.0, 1.0, 1.0, 0.05999999865889549);
-    style.*.Colors[c.ImGuiCol_TextSelectedBg] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_DragDropTarget] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_NavHighlight] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_NavWindowingHighlight] = ImVec4(1.0, 1.0, 1.0, 0.699999988079071);
-    style.*.Colors[c.ImGuiCol_NavWindowingDimBg] = ImVec4(0.800000011920929, 0.800000011920929, 0.800000011920929, 0.2000000029802322);
-    style.*.Colors[c.ImGuiCol_ModalWindowDimBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-}
-
-pub fn cleanup(self: *Self) void {
+pub fn deinit(self: *Self) void {
     check_vk(c.vkDeviceWaitIdle(self.device)) catch @panic("Failed to wait for device idle");
 
     // TODO: this is a horrible way to keep track of the meshes to free. Quick and dirty hack.
@@ -1560,8 +1352,6 @@ pub fn cleanup(self: *Self) void {
     self.meshes.deinit();
     self.materials.deinit();
     self.renderables.deinit();
-
-    c.cImGui_ImplVulkan_Shutdown();
 
     for (self.buffer_deletion_queue.items) |*entry| {
         entry.delete(self);
@@ -1597,7 +1387,7 @@ pub fn cleanup(self: *Self) void {
 }
 
 fn load_textures(self: *Self) void {
-    const lost_empire_image = texs.load_image_from_file(Self, self, "assets/lost_empire-RGBA.png") catch @panic("Failed to load image");
+    const lost_empire_image = texs.load_image_from_file(self, "assets/builtin/lost_empire-RGBA.png") catch @panic("Failed to load image");
     self.image_deletion_queue.append(VmaImageDeleter{ .image = lost_empire_image }) catch @panic("Out of memory");
     const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -1654,11 +1444,11 @@ fn load_meshes(self: *Self) void {
     self.upload_mesh(&triangle_mesh);
     self.meshes.put("triangle", triangle_mesh) catch @panic("Out of memory");
 
-    var monkey_mesh = mesh_mod.load_from_obj(self.allocator, "assets/suzanne.obj");
+    var monkey_mesh = mesh_mod.load_from_obj(self.allocator, "assets/builtin/suzanne.obj");
     self.upload_mesh(&monkey_mesh);
     self.meshes.put("monkey", monkey_mesh) catch @panic("Out of memory");
 
-    var lost_empire = mesh_mod.load_from_obj(self.allocator, "assets/lost_empire.obj");
+    var lost_empire = mesh_mod.load_from_obj(self.allocator, "assets/builtin/lost_empire.obj");
     self.upload_mesh(&lost_empire);
     self.meshes.put("lost_empire", lost_empire) catch @panic("Out of memory");
 }
@@ -1760,10 +1550,6 @@ pub fn processGameEvent(self: *Self, event: *c.SDL_Event) void {
         }
     } else if (event.type == c.SDL_EVENT_KEY_UP) {
         switch (event.key.keysym.scancode) {
-            c.SDL_SCANCODE_ESCAPE => {
-                self.is_game_window_active = false;
-                self.is_scene_window_active = false;
-            },
             c.SDL_SCANCODE_W => {
                 self.camera_input.z = 0.0;
             },
@@ -1949,8 +1735,8 @@ pub fn beginPresentRenderPass(self: *Self, cmd: RenderCommand) void {
     c.vkCmdBeginRenderPass(cmd, &render_pass_begin_info, c.VK_SUBPASS_CONTENTS_INLINE);
 }
 
-pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject, aspect: f32, a: AllocatedBuffer, b: c.VkDescriptorSet) void {
-    const view = Mat4.translation(self.camera_pos);
+pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject, aspect: f32, ubo_buf: AllocatedBuffer, ubo_set: c.VkDescriptorSet, cam: Vec3) void {
+    const view = Mat4.translation(cam);
     var proj = Mat4.perspective(std.math.degreesToRadians(70.0), aspect, 0.1, 200.0);
 
     proj.j.y *= -1.0;
@@ -1975,7 +1761,7 @@ pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject
     const scene_data_offset = scene_data_base_offset + padded_scene_data_size * frame_index;
 
     var data: ?*align(@alignOf(GPUCameraData)) anyopaque = undefined;
-    check_vk(c.vmaMapMemory(self.vma_allocator, a.allocation, &data)) catch @panic("Failed to map camera buffer");
+    check_vk(c.vmaMapMemory(self.vma_allocator, ubo_buf.allocation, &data)) catch @panic("Failed to map camera buffer");
 
     const camera_data: *GPUCameraData = @ptrFromInt(@intFromPtr(data) + camera_data_offset);
     const scene_data: *GPUSceneData = @ptrFromInt(@intFromPtr(data) + scene_data_offset);
@@ -1983,7 +1769,7 @@ pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject
     const framed = @as(f32, @floatFromInt(self.frame_number)) / 120.0;
     scene_data.ambient_color = Vec3.make(@sin(framed), 0.0, @cos(framed)).to_point4();
 
-    c.vmaUnmapMemory(self.vma_allocator, a.allocation);
+    c.vmaUnmapMemory(self.vma_allocator, ubo_buf.allocation);
 
     // NOTE: In this copy I do conversion. Now, this is generally unsafe as none
     // of the structures involved are c compatible (marked extern). However, we
@@ -2012,7 +1798,7 @@ pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject
                 @as(u32, @intCast(scene_data_offset)),
             };
 
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 0, 1, &b, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 0, 1, &ubo_set, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
 
             c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 1, 1, &self.get_current_frame().object_descriptor_set, 0, null);
         }
@@ -2143,57 +1929,4 @@ pub fn immediate_submit(self: *Self, submit_ctx: anytype) void {
     check_vk(c.vkResetFences(self.device, 1, &self.upload_context.upload_fence)) catch @panic("Failed to reset upload fence");
 
     check_vk(c.vkResetCommandPool(self.device, self.upload_context.command_pool, 0)) catch @panic("Failed to reset command pool");
-}
-
-fn create_imgui_texture(self: *Self, filepath: []const u8) c.VkDescriptorSet {
-    const img = texs.load_image_from_file(Self, self, filepath) catch @panic("Failed to load image");
-    self.image_deletion_queue.append(VmaImageDeleter{ .image = img }) catch @panic("Out of memory");
-
-    // Create the Image View
-    var image_view: c.VkImageView = undefined;
-    {
-        const info = c.VkImageViewCreateInfo{
-            .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = img.image,
-            .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
-            .format = c.VK_FORMAT_R8G8B8A8_UNORM,
-            .subresourceRange = .{
-                .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-        };
-        check_vk(c.vkCreateImageView(self.device, &info, vk_alloc_cbs, &image_view)) catch @panic("Failed to create image view");
-    }
-    self.textures.put(filepath, Texture{ .image = img, .image_view = image_view }) catch @panic("OOM");
-    self.deletion_queue.append(VulkanDeleter.make(image_view, c.vkDestroyImageView)) catch @panic("OOM");
-    // Create Sampler
-    var sampler: c.VkSampler = undefined;
-    {
-        const sampler_info = c.VkSamplerCreateInfo{
-            .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-            .magFilter = c.VK_FILTER_LINEAR,
-            .minFilter = c.VK_FILTER_LINEAR,
-            .mipmapMode = c.VK_SAMPLER_MIPMAP_MODE_LINEAR,
-            .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT, // outside image bounds just use border color
-            .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            .minLod = -1000,
-            .maxLod = 1000,
-            .maxAnisotropy = 1.0,
-        };
-        check_vk(c.vkCreateSampler(self.device, &sampler_info, vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
-    }
-    self.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("OOM");
-    return c.cImGui_ImplVulkan_AddTexture(sampler, image_view, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-}
-
-pub fn isInGameView(self: *Self, pos: c.ImVec2) bool {
-    return (pos.x > self.game_window_rect.x and pos.x < self.game_window_rect.z) and
-        (pos.y > self.game_window_rect.y and pos.y < self.game_window_rect.w);
-}
-
-pub fn isInSceneView(self: *Self, pos: c.ImVec2) bool {
-    return (pos.x > self.scene_window_rect.x and pos.x < self.scene_window_rect.z) and
-        (pos.y > self.scene_window_rect.y and pos.y < self.scene_window_rect.w);
 }
