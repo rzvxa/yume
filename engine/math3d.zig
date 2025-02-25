@@ -125,11 +125,16 @@ pub const Vec4 = extern struct {
     }
 };
 
-pub const Mat4 = extern struct {
-    i: Vec4,
-    j: Vec4,
-    k: Vec4,
-    t: Vec4,
+pub const Mat4 = extern union {
+    named: extern struct {
+        i: Vec4,
+        j: Vec4,
+        k: Vec4,
+        t: Vec4,
+    },
+    unnamed: [4][4]f32,
+    values: [16]f32,
+    vec4: [4]Vec4,
 
     const Self = @This();
 
@@ -141,7 +146,7 @@ pub const Mat4 = extern struct {
     );
 
     pub inline fn make(i: Vec4, j: Vec4, k: Vec4, t: Vec4) Self {
-        return .{ .i = i, .j = j, .k = k, .t = t };
+        return .{ .vec4 = .{ i, j, k, t } };
     }
 
     pub inline fn scalar(n: f32) Self {
@@ -166,28 +171,28 @@ pub const Mat4 = extern struct {
     pub fn mul(ma: Self, mb: Self) Self {
         return make(
             Vec4.make(
-                ma.i.x * mb.i.x + ma.j.x * mb.i.y + ma.k.x * mb.i.z + ma.t.x * mb.i.w,
-                ma.i.y * mb.i.x + ma.j.y * mb.i.y + ma.k.y * mb.i.z + ma.t.y * mb.i.w,
-                ma.i.z * mb.i.x + ma.j.z * mb.i.y + ma.k.z * mb.i.z + ma.t.z * mb.i.w,
-                ma.i.w * mb.i.x + ma.j.w * mb.i.y + ma.k.w * mb.i.z + ma.t.w * mb.i.w,
+                ma.named.i.x * mb.named.i.x + ma.named.j.x * mb.named.i.y + ma.named.k.x * mb.named.i.z + ma.named.t.x * mb.named.i.w,
+                ma.named.i.y * mb.named.i.x + ma.named.j.y * mb.named.i.y + ma.named.k.y * mb.named.i.z + ma.named.t.y * mb.named.i.w,
+                ma.named.i.z * mb.named.i.x + ma.named.j.z * mb.named.i.y + ma.named.k.z * mb.named.i.z + ma.named.t.z * mb.named.i.w,
+                ma.named.i.w * mb.named.i.x + ma.named.j.w * mb.named.i.y + ma.named.k.w * mb.named.i.z + ma.named.t.w * mb.named.i.w,
             ),
             Vec4.make(
-                ma.i.x * mb.j.x + ma.j.x * mb.j.y + ma.k.x * mb.j.z + ma.t.x * mb.j.w,
-                ma.i.y * mb.j.x + ma.j.y * mb.j.y + ma.k.y * mb.j.z + ma.t.y * mb.j.w,
-                ma.i.z * mb.j.x + ma.j.z * mb.j.y + ma.k.z * mb.j.z + ma.t.z * mb.j.w,
-                ma.i.w * mb.j.x + ma.j.w * mb.j.y + ma.k.w * mb.j.z + ma.t.w * mb.j.w,
+                ma.named.i.x * mb.named.j.x + ma.named.j.x * mb.named.j.y + ma.named.k.x * mb.named.j.z + ma.named.t.x * mb.named.j.w,
+                ma.named.i.y * mb.named.j.x + ma.named.j.y * mb.named.j.y + ma.named.k.y * mb.named.j.z + ma.named.t.y * mb.named.j.w,
+                ma.named.i.z * mb.named.j.x + ma.named.j.z * mb.named.j.y + ma.named.k.z * mb.named.j.z + ma.named.t.z * mb.named.j.w,
+                ma.named.i.w * mb.named.j.x + ma.named.j.w * mb.named.j.y + ma.named.k.w * mb.named.j.z + ma.named.t.w * mb.named.j.w,
             ),
             Vec4.make(
-                ma.i.x * mb.k.x + ma.j.x * mb.k.y + ma.k.x * mb.k.z + ma.t.x * mb.k.w,
-                ma.i.y * mb.k.x + ma.j.y * mb.k.y + ma.k.y * mb.k.z + ma.t.y * mb.k.w,
-                ma.i.z * mb.k.x + ma.j.z * mb.k.y + ma.k.z * mb.k.z + ma.t.z * mb.k.w,
-                ma.i.w * mb.k.x + ma.j.w * mb.k.y + ma.k.w * mb.k.z + ma.t.w * mb.k.w,
+                ma.named.i.x * mb.named.k.x + ma.named.j.x * mb.named.k.y + ma.named.k.x * mb.named.k.z + ma.named.t.x * mb.named.k.w,
+                ma.named.i.y * mb.named.k.x + ma.named.j.y * mb.named.k.y + ma.named.k.y * mb.named.k.z + ma.named.t.y * mb.named.k.w,
+                ma.named.i.z * mb.named.k.x + ma.named.j.z * mb.named.k.y + ma.named.k.z * mb.named.k.z + ma.named.t.z * mb.named.k.w,
+                ma.named.i.w * mb.named.k.x + ma.named.j.w * mb.named.k.y + ma.named.k.w * mb.named.k.z + ma.named.t.w * mb.named.k.w,
             ),
             Vec4.make(
-                ma.i.x * mb.t.x + ma.j.x * mb.t.y + ma.k.x * mb.t.z + ma.t.x * mb.t.w,
-                ma.i.y * mb.t.x + ma.j.y * mb.t.y + ma.k.y * mb.t.z + ma.t.y * mb.t.w,
-                ma.i.z * mb.t.x + ma.j.z * mb.t.y + ma.k.z * mb.t.z + ma.t.z * mb.t.w,
-                ma.i.w * mb.t.x + ma.j.w * mb.t.y + ma.k.w * mb.t.z + ma.t.w * mb.t.w,
+                ma.named.i.x * mb.named.t.x + ma.named.j.x * mb.named.t.y + ma.named.k.x * mb.named.t.z + ma.named.t.x * mb.named.t.w,
+                ma.named.i.y * mb.named.t.x + ma.named.j.y * mb.named.t.y + ma.named.k.y * mb.named.t.z + ma.named.t.y * mb.named.t.w,
+                ma.named.i.z * mb.named.t.x + ma.named.j.z * mb.named.t.y + ma.named.k.z * mb.named.t.z + ma.named.t.z * mb.named.t.w,
+                ma.named.i.w * mb.named.t.x + ma.named.j.w * mb.named.t.y + ma.named.k.w * mb.named.t.z + ma.named.t.w * mb.named.t.w,
             ),
         );
     }
@@ -268,88 +273,69 @@ pub const Mat4 = extern struct {
         );
     }
 
-    pub fn viewDirection(position: Vec3, direction: Vec3, up: Vec3) Mat4 {
-        const w = direction.normalized();
-        const u = w.cross(up).normalized();
-        const v = w.cross(u);
-
-        var mat = Mat4.scalar(1);
-        mat.i.x = u.x;
-        mat.j.x = u.y;
-        mat.k.x = u.z;
-        mat.i.y = v.x;
-        mat.j.y = v.y;
-        mat.k.y = v.z;
-        mat.i.z = w.x;
-        mat.j.z = w.y;
-        mat.k.z = w.z;
-        mat.t.x = -u.dot(position);
-        mat.t.y = -v.dot(position);
-        mat.t.z = -w.dot(position);
-        return mat;
+    // calculate the determinant of the given matrix
+    pub fn determinant(m: Mat4) f32 {
+        var det: f32 = 0;
+        for (0..3) |r| {
+            det = det + (m.unnamed[0][r] *
+                (m.unnamed[1][(r + 1) % 3] * m.unnamed[2][(r + 2) % 3] -
+                m.unnamed[1][(r + 2) % 3] * m.unnamed[2][(r + 1) % 3]));
+        }
+        return det;
     }
 
-    pub fn viewTarget(position: Vec3, target: Vec3, up: Vec3) Mat4 {
-        const direction = target.sub(position);
-        // TODO
-        // assert(!glm::all(glm::lessThan(glm::abs(direction), glm::vec3(std::numeric_limits<float>::epsilon()))));
-        return Self.viewDirection(position, direction, up);
-    }
+    // Inverts this matrix, returns an error if determinant is zero.
+    // a zero matrix instead.
+    pub fn invert(self: Mat4) error{DeterminantZero}!Mat4 {
+        // based on http://www.euclideanspace.com/maths/algebra/matrix/functions/inverse/fourD/index.htm
+        const n11 = self.values[0];
+        const n21 = self.values[1];
+        const n31 = self.values[2];
+        const n41 = self.values[3];
+        const n12 = self.values[4];
+        const n22 = self.values[5];
+        const n32 = self.values[6];
+        const n42 = self.values[7];
+        const n13 = self.values[8];
+        const n23 = self.values[9];
+        const n33 = self.values[10];
+        const n43 = self.values[11];
+        const n14 = self.values[12];
+        const n24 = self.values[13];
+        const n34 = self.values[14];
+        const n44 = self.values[15];
 
-    pub fn viewYXZ(position: Vec3, rot: Vec3) Mat4 {
-        const c3 = @cos(rot.z);
-        const s3 = @sin(rot.z);
-        const c2 = @cos(rot.x);
-        const s2 = @sin(rot.x);
-        const c1 = @cos(rot.y);
-        const s1 = @sin(rot.y);
-        const u = Vec3.make((c1 * c3 + s1 * s2 * s3), (c2 * s3), (c1 * s2 * s3 - c3 * s1));
-        const v = Vec3.make((c3 * s1 * s2 - c1 * s3), (c2 * c3), (c1 * c3 * s2 + s1 * s3));
-        const w = Vec3.make((c2 * s1), (-s2), (c1 * c2));
+        const t11 = n23 * n34 * n42 - n24 * n33 * n42 + n24 * n32 * n43 - n22 * n34 * n43 - n23 * n32 * n44 + n22 * n33 * n44;
+        const t12 = n14 * n33 * n42 - n13 * n34 * n42 - n14 * n32 * n43 + n12 * n34 * n43 + n13 * n32 * n44 - n12 * n33 * n44;
+        const t13 = n13 * n24 * n42 - n14 * n23 * n42 + n14 * n22 * n43 - n12 * n24 * n43 - n13 * n22 * n44 + n12 * n23 * n44;
+        const t14 = n14 * n23 * n32 - n13 * n24 * n32 - n14 * n22 * n33 + n12 * n24 * n33 + n13 * n22 * n34 - n12 * n23 * n34;
 
-        var mat = Mat4.scalar(1);
-        mat.i.x = u.x;
-        mat.j.x = u.y;
-        mat.k.x = u.z;
-        mat.i.y = v.x;
-        mat.j.y = v.y;
-        mat.k.y = v.z;
-        mat.i.z = w.x;
-        mat.j.z = w.y;
-        mat.k.z = w.z;
-        mat.t.x = -u.dot(position);
-        mat.t.y = -v.dot(position);
-        mat.t.z = -w.dot(position);
-        return mat;
-    }
+        const det = n11 * t11 + n21 * t12 + n31 * t13 + n41 * t14;
 
-    pub fn viewXYZ(position: Vec3, rot: Vec3) Mat4 {
-        const c1 = @cos(rot.x); // Pitch
-        const s1 = @sin(rot.x);
-        const c2 = @cos(rot.y); // Yaw
-        const s2 = @sin(rot.y);
-        const c3 = @cos(rot.z); // Roll
-        const s3 = @sin(rot.z);
+        if (det == 0) return error.DeterminantZero;
 
-        // Basis vectors using XYZ order (Pitch-Yaw-Roll)
-        const u = Vec3.make((c2 * c3), (c1 * s3 + s1 * s2 * c3), (s1 * s3 - c1 * s2 * c3));
-        const v = Vec3.make((-c2 * s3), (c1 * c3 - s1 * s2 * s3), (s1 * c3 + c1 * s2 * s3));
-        const w = Vec3.make((s2), (-s1 * c2), (c1 * c2));
+        const det_inv = 1 / det;
 
-        var mat = Mat4.scalar(1);
-        mat.i.x = u.x;
-        mat.j.x = u.y;
-        mat.k.x = u.z;
-        mat.i.y = v.x;
-        mat.j.y = v.y;
-        mat.k.y = v.z;
-        mat.i.z = w.x;
-        mat.j.z = w.y;
-        mat.k.z = w.z;
-        mat.t.x = -u.dot(position);
-        mat.t.y = -v.dot(position);
-        mat.t.z = -w.dot(position);
+        return .{
+            t11 * det_inv,
+            (n24 * n33 * n41 - n23 * n34 * n41 - n24 * n31 * n43 + n21 * n34 * n43 + n23 * n31 * n44 - n21 * n33 * n44) * det_inv,
+            (n22 * n34 * n41 - n24 * n32 * n41 + n24 * n31 * n42 - n21 * n34 * n42 - n22 * n31 * n44 + n21 * n32 * n44) * det_inv,
+            (n23 * n32 * n41 - n22 * n33 * n41 - n23 * n31 * n42 + n21 * n33 * n42 + n22 * n31 * n43 - n21 * n32 * n43) * det_inv,
 
-        return mat;
+            t12 * det_inv,
+            (n13 * n34 * n41 - n14 * n33 * n41 + n14 * n31 * n43 - n11 * n34 * n43 - n13 * n31 * n44 + n11 * n33 * n44) * det_inv,
+            (n14 * n32 * n41 - n12 * n34 * n41 - n14 * n31 * n42 + n11 * n34 * n42 + n12 * n31 * n44 - n11 * n32 * n44) * det_inv,
+            (n12 * n33 * n41 - n13 * n32 * n41 + n13 * n31 * n42 - n11 * n33 * n42 - n12 * n31 * n43 + n11 * n32 * n43) * det_inv,
+
+            t13 * det_inv,
+            (n14 * n23 * n41 - n13 * n24 * n41 - n14 * n21 * n43 + n11 * n24 * n43 + n13 * n21 * n44 - n11 * n23 * n44) * det_inv,
+            (n12 * n24 * n41 - n14 * n22 * n41 + n14 * n21 * n42 - n11 * n24 * n42 - n12 * n21 * n44 + n11 * n22 * n44) * det_inv,
+            (n13 * n22 * n41 - n12 * n23 * n41 - n13 * n21 * n42 + n11 * n23 * n42 + n12 * n21 * n43 - n11 * n22 * n43) * det_inv,
+
+            t14 * det_inv,
+            (n13 * n24 * n31 - n14 * n23 * n31 + n14 * n21 * n33 - n11 * n24 * n33 - n13 * n21 * n34 + n11 * n23 * n34) * det_inv,
+            (n14 * n22 * n31 - n12 * n24 * n31 - n14 * n21 * n32 + n11 * n24 * n32 + n12 * n21 * n34 - n11 * n22 * n34) * det_inv,
+            (n12 * n23 * n31 - n13 * n22 * n31 + n13 * n21 * n32 - n11 * n23 * n32 - n12 * n21 * n33 + n11 * n22 * n33) * det_inv,
+        };
     }
 };

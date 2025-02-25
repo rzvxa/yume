@@ -349,7 +349,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             }});
 
             const aspect = me.d.game_view_size.x / me.d.game_view_size.y;
-            me.app.engine.main_camera.updateTransformation(
+            me.app.engine.main_camera.updateMatrices(
                 me.app.engine.camera_pos,
                 Vec3.ZERO,
                 aspect,
@@ -402,7 +402,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             }});
 
             const aspect = me.d.scene_view_size.x / me.d.scene_view_size.y;
-            me.d.camera.updateTransformation(me.d.camera_pos, me.d.camera_rot, aspect);
+            me.d.camera.updateMatrices(me.d.camera_pos, me.d.camera_rot, aspect);
             me.app.engine.drawObjects(
                 me.cmd,
                 me.app.engine.renderables.items,

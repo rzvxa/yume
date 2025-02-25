@@ -27,13 +27,98 @@ pub fn makePerspectiveCamera(opts: PerspectiveOptions) Self {
     return Self{ .opts = .{ .perspective = opts } };
 }
 
-pub fn updateTransformation(self: *Self, pos: Vec3, rot: Vec3, aspect: f32) void {
+pub fn updateMatrices(self: *Self, pos: Vec3, rot: Vec3, aspect: f32) void {
     switch (self.opts) {
-        .perspective => self.updatePerspectiveTransformation(pos, rot, aspect),
+        .perspective => self.updatePerspectiveMatrices(pos, rot, aspect),
     }
 }
 
-inline fn updatePerspectiveTransformation(self: *Self, pos: Vec3, rot: Vec3, aspect: f32) void {
+pub fn viewDirection(position: Vec3, direction: Vec3, up: Vec3) Mat4 {
+    const w = direction.normalized();
+    const u = w.cross(up).normalized();
+    const v = w.cross(u);
+
+    var mat = Mat4.scalar(1);
+    mat.i.x = u.x;
+    mat.j.x = u.y;
+    mat.k.x = u.z;
+    mat.i.y = v.x;
+    mat.j.y = v.y;
+    mat.k.y = v.z;
+    mat.i.z = w.x;
+    mat.j.z = w.y;
+    mat.k.z = w.z;
+    mat.t.x = -u.dot(position);
+    mat.t.y = -v.dot(position);
+    mat.t.z = -w.dot(position);
+    return mat;
+}
+
+pub fn viewTarget(position: Vec3, target: Vec3, up: Vec3) Mat4 {
+    const direction = target.sub(position);
+    // TODO
+    // assert(!glm::all(glm::lessThan(glm::abs(direction), glm::vec3(std::numeric_limits<float>::epsilon()))));
+    return Self.viewDirection(position, direction, up);
+}
+
+pub fn viewYXZ(position: Vec3, rot: Vec3) Mat4 {
+    const c3 = @cos(rot.z);
+    const s3 = @sin(rot.z);
+    const c2 = @cos(rot.x);
+    const s2 = @sin(rot.x);
+    const c1 = @cos(rot.y);
+    const s1 = @sin(rot.y);
+    const u = Vec3.make((c1 * c3 + s1 * s2 * s3), (c2 * s3), (c1 * s2 * s3 - c3 * s1));
+    const v = Vec3.make((c3 * s1 * s2 - c1 * s3), (c2 * c3), (c1 * c3 * s2 + s1 * s3));
+    const w = Vec3.make((c2 * s1), (-s2), (c1 * c2));
+
+    var mat = Mat4.scalar(1);
+    mat.i.x = u.x;
+    mat.j.x = u.y;
+    mat.k.x = u.z;
+    mat.i.y = v.x;
+    mat.j.y = v.y;
+    mat.k.y = v.z;
+    mat.i.z = w.x;
+    mat.j.z = w.y;
+    mat.k.z = w.z;
+    mat.t.x = -u.dot(position);
+    mat.t.y = -v.dot(position);
+    mat.t.z = -w.dot(position);
+    return mat;
+}
+
+pub fn viewXYZ(position: Vec3, rot: Vec3) Mat4 {
+    const c1 = @cos(rot.x); // Pitch
+    const s1 = @sin(rot.x);
+    const c2 = @cos(rot.y); // Yaw
+    const s2 = @sin(rot.y);
+    const c3 = @cos(rot.z); // Roll
+    const s3 = @sin(rot.z);
+
+    // Basis vectors using XYZ order (Pitch-Yaw-Roll)
+    const u = Vec3.make((c2 * c3), (c1 * s3 + s1 * s2 * c3), (s1 * s3 - c1 * s2 * c3));
+    const v = Vec3.make((-c2 * s3), (c1 * c3 - s1 * s2 * s3), (s1 * c3 + c1 * s2 * s3));
+    const w = Vec3.make((s2), (-s1 * c2), (c1 * c2));
+
+    var mat = Mat4.scalar(1);
+    mat.i.x = u.x;
+    mat.j.x = u.y;
+    mat.k.x = u.z;
+    mat.i.y = v.x;
+    mat.j.y = v.y;
+    mat.k.y = v.z;
+    mat.i.z = w.x;
+    mat.j.z = w.y;
+    mat.k.z = w.z;
+    mat.t.x = -u.dot(position);
+    mat.t.y = -v.dot(position);
+    mat.t.z = -w.dot(position);
+
+    return mat;
+}
+
+inline fn updatePerspectiveMatrices(self: *Self, pos: Vec3, rot: Vec3, aspect: f32) void {
     self.updatePerspectiveView(pos, rot);
     self.updatePerspectiveProjection(aspect);
     self.updatePerspectiveViewProjection();
@@ -52,7 +137,7 @@ inline fn updatePerspectiveView(self: *Self, pos: Vec3, rot: Vec3) void {
 inline fn updatePerspectiveProjection(self: *Self, aspect: f32) void {
     const opts = self.opts.perspective;
     self.projection = Mat4.perspective(opts.fovy_rad, aspect, opts.near, opts.far);
-    self.projection.j.y *= -1.0;
+    self.projection.unnamed[1][1] *= -1.0;
 }
 
 inline fn updatePerspectiveViewProjection(self: *Self) void {
