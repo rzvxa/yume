@@ -12,3 +12,5 @@ pub const GPUSceneData = VulkanEngine.GPUSceneData;
 pub const VmaImageDeleter = VulkanEngine.VmaImageDeleter;
 pub const VmaBufferDeleter = VulkanEngine.VmaBufferDeleter;
 pub const VulkanDeleter = VulkanEngine.VulkanDeleter;
+
+pub const Camera = @import("Camera.zig");

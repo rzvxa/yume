@@ -7,6 +7,8 @@ const check_vk = @import("yume").vki.check_vk;
 const textures = @import("yume").textures;
 const Texture = textures.Texture;
 
+const Camera = @import("yume").Camera;
+
 const GameApp = @import("yume").GameApp;
 const Vec3 = @import("yume").math3d.Vec3;
 const Mat4 = @import("yume").math3d.Mat4;
@@ -33,6 +35,12 @@ camera_pos: Vec3 = Vec3.make(-5.0, 3.0, -10.0),
 camera_rot: Vec3 = Vec3.make(0, 0, 0),
 camera_input: Vec3 = Vec3.make(0, 0, 0),
 camera_input_rot: Vec3 = Vec3.make(0, 0, 0),
+
+camera: Camera = Camera.makePerspectiveCamera(.{
+    .fovy_rad = std.math.degreesToRadians(70.0),
+    .far = 200,
+    .near = 0.1,
+}),
 
 game_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
 game_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
@@ -341,14 +349,17 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             }});
 
             const aspect = me.d.game_view_size.x / me.d.game_view_size.y;
-            me.app.engine.draw_objects(
-                me.cmd,
-                me.app.engine.renderables.items,
-                aspect,
-                me.app.engine.camera_and_scene_buffer,
-                me.app.engine.camera_and_scene_set,
+            me.app.engine.main_camera.updateTransformation(
                 me.app.engine.camera_pos,
                 Vec3.ZERO,
+                aspect,
+            );
+            me.app.engine.drawObjects(
+                me.cmd,
+                me.app.engine.renderables.items,
+                me.app.engine.camera_and_scene_buffer,
+                me.app.engine.camera_and_scene_set,
+                &me.app.engine.main_camera,
             );
 
             c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
@@ -391,14 +402,13 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             }});
 
             const aspect = me.d.scene_view_size.x / me.d.scene_view_size.y;
-            me.app.engine.draw_objects(
+            me.d.camera.updateTransformation(me.d.camera_pos, me.d.camera_rot, aspect);
+            me.app.engine.drawObjects(
                 me.cmd,
                 me.app.engine.renderables.items,
-                aspect,
                 me.d.editor_camera_and_scene_buffer,
                 me.d.editor_camera_and_scene_set,
-                me.d.camera_pos,
-                me.d.camera_rot,
+                &me.d.camera,
             );
 
             c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
@@ -422,9 +432,13 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
 
 fn init_descriptors(self: *Self, engine: *Engine) void {
     const camera_and_scene_buffer_size =
-        FRAME_OVERLAP * engine.pad_uniform_buffer_size(@sizeOf(GPUCameraData)) +
-        FRAME_OVERLAP * engine.pad_uniform_buffer_size(@sizeOf(GPUSceneData));
-    self.editor_camera_and_scene_buffer = engine.create_buffer(camera_and_scene_buffer_size, c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, c.VMA_MEMORY_USAGE_CPU_TO_GPU);
+        FRAME_OVERLAP * engine.padUniformBufferSize(@sizeOf(GPUCameraData)) +
+        FRAME_OVERLAP * engine.padUniformBufferSize(@sizeOf(GPUSceneData));
+    self.editor_camera_and_scene_buffer = engine.createBuffer(
+        camera_and_scene_buffer_size,
+        c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        c.VMA_MEMORY_USAGE_CPU_TO_GPU,
+    );
     engine.buffer_deletion_queue.append(VmaBufferDeleter{ .buffer = self.editor_camera_and_scene_buffer }) catch @panic("Out of memory");
 
     // Camera and scene descriptor set

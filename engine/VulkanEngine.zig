@@ -16,6 +16,7 @@ const Vec4 = math3d.Vec4;
 const Mat4 = math3d.Mat4;
 
 const context = @import("context.zig");
+const Camera = @import("Camera.zig");
 
 const texs = @import("textures.zig");
 const Texture = texs.Texture;
@@ -71,6 +72,14 @@ pub const GPUCameraData = struct {
     view: Mat4,
     proj: Mat4,
     view_proj: Mat4,
+
+    fn fromCamera(cam: *Camera) GPUCameraData {
+        return GPUCameraData{
+            .view = cam.view,
+            .proj = cam.projection,
+            .view_proj = cam.view_projection,
+        };
+    }
 };
 
 pub const GPUSceneData = struct {
@@ -156,6 +165,12 @@ textures: std.StringHashMap(Texture),
 camera_pos: Vec3 = Vec3.make(0.0, -3.0, -10.0),
 camera_input: Vec3 = Vec3.make(0.0, 0.0, 0.0),
 
+main_camera: Camera = Camera.makePerspectiveCamera(.{
+    .fovy_rad = std.math.degreesToRadians(70.0),
+    .far = 200,
+    .near = 0.1,
+}),
+
 deletion_queue: std.ArrayList(VulkanDeleter) = undefined,
 buffer_deletion_queue: std.ArrayList(VmaBufferDeleter) = undefined,
 image_deletion_queue: std.ArrayList(VmaImageDeleter) = undefined,
@@ -190,11 +205,11 @@ pub const VulkanDeleter = struct {
         return VulkanDeleter{
             .object = object,
             .delete_fn = struct {
-                fn destroy_impl(entry: *VulkanDeleter, self: *Self) void {
+                fn f(entry: *VulkanDeleter, self: *Self) void {
                     const obj: @TypeOf(object) = @ptrCast(entry.object);
                     func(self.device, obj, vk_alloc_cbs);
                 }
-            }.destroy_impl,
+            }.f,
         };
     }
 };
@@ -228,12 +243,12 @@ pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
         .textures = std.StringHashMap(Texture).init(a),
     };
 
-    engine.init_instance();
+    engine.initInstance();
 
     // Create the window surface
     utils.checkSdlBool(c.SDL_Vulkan_CreateSurface(window, engine.instance, vk_alloc_cbs, &engine.surface));
 
-    engine.init_device();
+    engine.initDevice();
 
     // Create a VMA allocator
     const allocator_ci = std.mem.zeroInit(c.VmaAllocatorCreateInfo, .{
@@ -243,21 +258,21 @@ pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
     });
     check_vk(c.vmaCreateAllocator(&allocator_ci, &engine.vma_allocator)) catch @panic("Failed to create VMA allocator");
 
-    engine.init_swapchain();
-    engine.init_commands();
-    engine.init_default_renderpass();
-    engine.init_framebuffers();
-    engine.init_sync_structures();
-    engine.init_descriptors();
-    engine.init_pipelines();
-    engine.load_textures();
-    engine.load_meshes();
-    engine.init_scene();
+    engine.initSwapchain();
+    engine.initCommands();
+    engine.initDefaultRenderpass();
+    engine.initFramebuffers();
+    engine.initSyncStructures();
+    engine.initDescriptors();
+    engine.initPipelines();
+    engine.loadTextures();
+    engine.loadMeshes();
+    engine.initScene();
 
     return engine;
 }
 
-fn init_instance(self: *Self) void {
+fn initInstance(self: *Self) void {
     var sdl_required_extension_count: u32 = undefined;
     const sdl_extensions = c.SDL_Vulkan_GetInstanceExtensions(&sdl_required_extension_count);
     const sdl_extension_slice = sdl_extensions[0..sdl_required_extension_count];
@@ -280,7 +295,7 @@ fn init_instance(self: *Self) void {
     self.debug_messenger = instance.debug_messenger;
 }
 
-fn init_device(self: *Self) void {
+fn initDevice(self: *Self) void {
     // Physical device selection
     const required_device_extensions: []const [*c]const u8 = &.{
         "VK_KHR_swapchain",
@@ -322,7 +337,7 @@ fn init_device(self: *Self) void {
     self.present_queue = device.present_queue;
 }
 
-fn init_swapchain(self: *Self) void {
+fn initSwapchain(self: *Self) void {
     var win_width: c_int = undefined;
     var win_height: c_int = undefined;
     utils.checkSdl(c.SDL_GetWindowSize(self.window, &win_width, &win_height));
@@ -406,7 +421,7 @@ fn init_swapchain(self: *Self) void {
     log.info("Created depth image", .{});
 }
 
-fn init_commands(self: *Self) void {
+fn initCommands(self: *Self) void {
     // Create a command pool
     const command_pool_ci = std.mem.zeroInit(c.VkCommandPoolCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -455,7 +470,7 @@ fn init_commands(self: *Self) void {
     check_vk(c.vkAllocateCommandBuffers(self.device, &upload_command_buffer_ai, &self.upload_context.command_buffer)) catch @panic("Failed to allocate upload command buffer");
 }
 
-fn init_default_renderpass(self: *Self) void {
+fn initDefaultRenderpass(self: *Self) void {
     // Color attachement
     const color_attachment = std.mem.zeroInit(c.VkAttachmentDescription, .{
         .format = self.swapchain_format,
@@ -663,7 +678,7 @@ fn init_default_renderpass(self: *Self) void {
     log.info("Created render pass", .{});
 }
 
-fn init_framebuffers(self: *Self) void {
+fn initFramebuffers(self: *Self) void {
     var framebuffer_ci = std.mem.zeroInit(c.VkFramebufferCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
         .renderPass = self.render_pass,
@@ -688,7 +703,7 @@ fn init_framebuffers(self: *Self) void {
     log.info("Created {} framebuffers", .{self.framebuffers.len});
 }
 
-fn init_sync_structures(self: *Self) void {
+fn initSyncStructures(self: *Self) void {
     const semaphore_ci = std.mem.zeroInit(c.VkSemaphoreCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
     });
@@ -782,15 +797,15 @@ const PipelineBuilder = struct {
     }
 };
 
-fn init_pipelines(self: *Self) void {
+fn initPipelines(self: *Self) void {
     // NOTE: we are currently destroying the shader modules as soon as we are done
     // creating the pipeline. This is not great if we needed the modules for multiple pipelines.
     // Howver, for the sake of simplicity, we are doing it this way for now.
     const red_vert_code align(4) = @embedFile("triangle.vert").*;
     const red_frag_code align(4) = @embedFile("triangle.frag").*;
-    const red_vert_module = create_shader_module(self, &red_vert_code) orelse VK_NULL_HANDLE;
+    const red_vert_module = createShaderModule(self, &red_vert_code) orelse VK_NULL_HANDLE;
     defer c.vkDestroyShaderModule(self.device, red_vert_module, vk_alloc_cbs);
-    const red_frag_module = create_shader_module(self, &red_frag_code) orelse VK_NULL_HANDLE;
+    const red_frag_module = createShaderModule(self, &red_frag_code) orelse VK_NULL_HANDLE;
     defer c.vkDestroyShaderModule(self.device, red_frag_module, vk_alloc_cbs);
 
     if (red_vert_module != VK_NULL_HANDLE) log.info("Vert module loaded successfully", .{});
@@ -891,13 +906,13 @@ fn init_pipelines(self: *Self) void {
         log.info("Created red triangle pipeline", .{});
     }
 
-    _ = self.create_material(red_triangle_pipeline, triangle_pipeline_layout, "red_triangle_mat");
+    _ = self.createMaterial(red_triangle_pipeline, triangle_pipeline_layout, "red_triangle_mat");
 
     const rgb_vert_code align(4) = @embedFile("colored_triangle.vert").*;
     const rgb_frag_code align(4) = @embedFile("colored_triangle.frag").*;
-    const rgb_vert_module = create_shader_module(self, &rgb_vert_code) orelse VK_NULL_HANDLE;
+    const rgb_vert_module = createShaderModule(self, &rgb_vert_code) orelse VK_NULL_HANDLE;
     defer c.vkDestroyShaderModule(self.device, rgb_vert_module, vk_alloc_cbs);
-    const rgb_frag_module = create_shader_module(self, &rgb_frag_code) orelse VK_NULL_HANDLE;
+    const rgb_frag_module = createShaderModule(self, &rgb_frag_code) orelse VK_NULL_HANDLE;
     defer c.vkDestroyShaderModule(self.device, rgb_frag_module, vk_alloc_cbs);
 
     if (rgb_vert_module != VK_NULL_HANDLE) log.info("Vert module loaded successfully", .{});
@@ -914,7 +929,7 @@ fn init_pipelines(self: *Self) void {
         log.info("Created rgb triangle pipeline", .{});
     }
 
-    _ = self.create_material(rgb_triangle_pipeline, triangle_pipeline_layout, "rgb_triangle_mat");
+    _ = self.createMaterial(rgb_triangle_pipeline, triangle_pipeline_layout, "rgb_triangle_mat");
 
     // Create pipeline for meshes
     const vertex_descritpion = mesh_mod.Vertex.vertex_input_description;
@@ -925,14 +940,14 @@ fn init_pipelines(self: *Self) void {
     pipeline_builder.vertex_input_state.vertexBindingDescriptionCount = @as(u32, @intCast(vertex_descritpion.bindings.len));
 
     const tri_mesh_vert_code align(4) = @embedFile("tri_mesh.vert").*;
-    const tri_mesh_vert_module = create_shader_module(self, &tri_mesh_vert_code) orelse VK_NULL_HANDLE;
+    const tri_mesh_vert_module = createShaderModule(self, &tri_mesh_vert_code) orelse VK_NULL_HANDLE;
     defer c.vkDestroyShaderModule(self.device, tri_mesh_vert_module, vk_alloc_cbs);
 
     if (tri_mesh_vert_module != VK_NULL_HANDLE) log.info("Tri-mesh vert module loaded successfully", .{});
 
     // Default lit shader
     const default_lit_frag_code align(4) = @embedFile("default_lit.frag").*;
-    const default_lit_frag_module = create_shader_module(self, &default_lit_frag_code) orelse VK_NULL_HANDLE;
+    const default_lit_frag_module = createShaderModule(self, &default_lit_frag_code) orelse VK_NULL_HANDLE;
     defer c.vkDestroyShaderModule(self.device, default_lit_frag_module, vk_alloc_cbs);
 
     if (default_lit_frag_module != VK_NULL_HANDLE) log.info("Default lit frag module loaded successfully", .{});
@@ -974,7 +989,7 @@ fn init_pipelines(self: *Self) void {
         log.info("Created mesh pipeline", .{});
     }
 
-    _ = self.create_material(mesh_pipeline, mesh_pipeline_layout, "default_mesh");
+    _ = self.createMaterial(mesh_pipeline, mesh_pipeline_layout, "default_mesh");
 
     // Textured mesh shader
     var textured_pipe_layout_ci = mesh_pipeline_layout_ci;
@@ -991,18 +1006,18 @@ fn init_pipelines(self: *Self) void {
     self.deletion_queue.append(VulkanDeleter.make(textured_pipe_layout, c.vkDestroyPipelineLayout)) catch @panic("Out of memory");
 
     const textured_lit_frag_code align(4) = @embedFile("textured_lit.frag").*;
-    const textured_lit_frag = create_shader_module(self, &textured_lit_frag_code) orelse VK_NULL_HANDLE;
+    const textured_lit_frag = createShaderModule(self, &textured_lit_frag_code) orelse VK_NULL_HANDLE;
     defer c.vkDestroyShaderModule(self.device, textured_lit_frag, vk_alloc_cbs);
 
     pipeline_builder.shader_stages[1].module = textured_lit_frag;
     pipeline_builder.pipeline_layout = textured_pipe_layout;
     const textured_mesh_pipeline = pipeline_builder.build(self.device, self.render_pass);
 
-    _ = self.create_material(textured_mesh_pipeline, textured_pipe_layout, "textured_mesh");
+    _ = self.createMaterial(textured_mesh_pipeline, textured_pipe_layout, "textured_mesh");
     self.deletion_queue.append(VulkanDeleter.make(textured_mesh_pipeline, c.vkDestroyPipeline)) catch @panic("Out of memory");
 }
 
-fn init_descriptors(self: *Self) void {
+fn initDescriptors(self: *Self) void {
     // Descriptor pool
     const pool_sizes = [_]c.VkDescriptorPoolSize{
         .{
@@ -1103,10 +1118,10 @@ fn init_descriptors(self: *Self) void {
     // Scene and camera (per-frame) in a single buffer
     // Only one buffer and we get multiple offset of of it
     const camera_and_scene_buffer_size =
-        FRAME_OVERLAP * self.pad_uniform_buffer_size(@sizeOf(GPUCameraData)) +
-        FRAME_OVERLAP * self.pad_uniform_buffer_size(@sizeOf(GPUSceneData));
+        FRAME_OVERLAP * self.padUniformBufferSize(@sizeOf(GPUCameraData)) +
+        FRAME_OVERLAP * self.padUniformBufferSize(@sizeOf(GPUSceneData));
 
-    self.camera_and_scene_buffer = self.create_buffer(camera_and_scene_buffer_size, c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, c.VMA_MEMORY_USAGE_CPU_TO_GPU);
+    self.camera_and_scene_buffer = self.createBuffer(camera_and_scene_buffer_size, c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, c.VMA_MEMORY_USAGE_CPU_TO_GPU);
     self.buffer_deletion_queue.append(VmaBufferDeleter{ .buffer = self.camera_and_scene_buffer }) catch @panic("Out of memory");
 
     // Camera and scene descriptor set
@@ -1198,7 +1213,11 @@ fn init_descriptors(self: *Self) void {
 
         // Object buffer
         const MAX_OBJECTS = 10000;
-        self.frames[i].object_buffer = self.create_buffer(MAX_OBJECTS * @sizeOf(GPUObjectData), c.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, c.VMA_MEMORY_USAGE_CPU_TO_GPU);
+        self.frames[i].object_buffer = self.createBuffer(
+            MAX_OBJECTS * @sizeOf(GPUObjectData),
+            c.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            c.VMA_MEMORY_USAGE_CPU_TO_GPU,
+        );
         self.buffer_deletion_queue.append(VmaBufferDeleter{ .buffer = self.frames[i].object_buffer }) catch @panic("Out of memory");
 
         // ======================================================================
@@ -1231,7 +1250,7 @@ fn init_descriptors(self: *Self) void {
     }
 }
 
-fn create_shader_module(self: *Self, code: []const u8) ?c.VkShaderModule {
+fn createShaderModule(self: *Self, code: []const u8) ?c.VkShaderModule {
     // NOTE: This being a better language than C/C++, means we don´t need to load
     // the SPIR-V code from a file, we can just embed it as an array of bytes.
     // To reflect the different behaviour from the original code, we also changed
@@ -1255,7 +1274,7 @@ fn create_shader_module(self: *Self, code: []const u8) ?c.VkShaderModule {
     return shader_module;
 }
 
-fn init_scene(self: *Self) void {
+fn initScene(self: *Self) void {
     const monkey_transform = Mat4.translation(Vec3.make(-5, 3, 0));
     const monkey = RenderObject{
         .name = "monkey",
@@ -1387,7 +1406,7 @@ pub fn deinit(self: *Self) void {
     c.SDL_DestroyWindow(self.window);
 }
 
-fn load_textures(self: *Self) void {
+fn loadTextures(self: *Self) void {
     const lost_empire_image = texs.load_image_from_file(self, "assets/builtin/lost_empire-RGBA.png") catch @panic("Failed to load image");
     self.image_deletion_queue.append(VmaImageDeleter{ .image = lost_empire_image }) catch @panic("Out of memory");
     const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
@@ -1421,7 +1440,7 @@ fn load_textures(self: *Self) void {
     self.textures.put("empire_diffuse", lost_empire) catch @panic("Out of memory");
 }
 
-fn load_meshes(self: *Self) void {
+fn loadMeshes(self: *Self) void {
     const vertices = [_]mesh_mod.Vertex{ .{
         .position = Vec3.make(1.0, 1.0, 0.0),
         .normal = undefined,
@@ -1442,19 +1461,19 @@ fn load_meshes(self: *Self) void {
     var triangle_mesh = Mesh{
         .vertices = self.allocator.dupe(mesh_mod.Vertex, vertices[0..]) catch @panic("Out of memory"),
     };
-    self.upload_mesh(&triangle_mesh);
+    self.uploadMesh(&triangle_mesh);
     self.meshes.put("triangle", triangle_mesh) catch @panic("Out of memory");
 
-    var monkey_mesh = mesh_mod.load_from_obj(self.allocator, "assets/builtin/u.obj");
-    self.upload_mesh(&monkey_mesh);
+    var monkey_mesh = mesh_mod.load_from_obj2(self.allocator, "assets/builtin/u.obj");
+    self.uploadMesh(&monkey_mesh);
     self.meshes.put("monkey", monkey_mesh) catch @panic("Out of memory");
 
     var lost_empire = mesh_mod.load_from_obj(self.allocator, "assets/builtin/lost_empire.obj");
-    self.upload_mesh(&lost_empire);
+    self.uploadMesh(&lost_empire);
     self.meshes.put("lost_empire", lost_empire) catch @panic("Out of memory");
 }
 
-fn upload_mesh(self: *Self, mesh: *Mesh) void {
+fn uploadMesh(self: *Self, mesh: *Mesh) void {
     // Create a cpu buffer for staging
     const staging_buffer_ci = std.mem.zeroInit(c.VkBufferCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -1496,7 +1515,7 @@ fn upload_mesh(self: *Self, mesh: *Mesh) void {
 
     // Now we can copy immediate the content of the staging buffer to the gpu
     // only memory.
-    self.immediate_submit(struct {
+    self.immediateSubmit(struct {
         mesh_buffer: c.VkBuffer,
         staging_buffer: c.VkBuffer,
         size: usize,
@@ -1575,14 +1594,14 @@ pub fn processGameEvent(self: *Self, event: *c.SDL_Event) void {
     }
 }
 
-fn get_current_frame(self: *Self) FrameData {
+fn getCurrentFrame(self: *Self) FrameData {
     return self.frames[@intCast(@mod(self.frame_number, FRAME_OVERLAP))];
 }
 
 pub fn beginFrame(self: *Self) RenderCommand {
     // Wait until the GPU has finished rendering the last frame
     const timeout: u64 = 1_000_000_000; // 1 second in nanonesconds
-    const frame = self.get_current_frame();
+    const frame = self.getCurrentFrame();
 
     check_vk(c.vkWaitForFences(self.device, 1, &frame.render_fence, c.VK_TRUE, timeout)) catch @panic("Failed to wait for render fence");
     check_vk(c.vkResetFences(self.device, 1, &frame.render_fence)) catch @panic("Failed to reset render fence");
@@ -1604,7 +1623,7 @@ pub fn beginFrame(self: *Self) RenderCommand {
 
     // Make a claer color that changes with each frame (120*pi frame period)
     // 0.11 and 0.12 fix for change in fabs
-    const color = math3d.abs(std.math.sin(@as(f32, @floatFromInt(self.frame_number)) / 120.0));
+    const color = @abs(std.math.sin(@as(f32, @floatFromInt(self.frame_number)) / 120.0));
 
     const color_clear: c.VkClearValue = .{
         .color = .{ .float32 = [_]f32{ color, 0.0, color, 1.0 } },
@@ -1644,7 +1663,7 @@ pub fn beginFrame(self: *Self) RenderCommand {
 }
 
 pub fn endFrame(self: *Self, cmd: RenderCommand) void {
-    const frame = self.get_current_frame();
+    const frame = self.getCurrentFrame();
     c.vkCmdEndRenderPass(cmd);
     check_vk(c.vkEndCommandBuffer(cmd)) catch @panic("Failed to end command buffer");
 
@@ -1736,33 +1755,25 @@ pub fn beginPresentRenderPass(self: *Self, cmd: RenderCommand) void {
     c.vkCmdBeginRenderPass(cmd, &render_pass_begin_info, c.VK_SUBPASS_CONTENTS_INLINE);
 }
 
-pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject, aspect: f32, ubo_buf: AllocatedBuffer, ubo_set: c.VkDescriptorSet, cam: Vec3, rot: Vec3) void {
-    // Create rotation matrices for pitch (X), yaw (Y), and roll (Z)
-    const rot_x = Mat4.rotation(Vec3.make(1.0, 0.0, 0.0), rot.x);
-    const rot_y = Mat4.rotation(Vec3.make(0.0, 1.0, 0.0), rot.y);
-    const rot_z = Mat4.rotation(Vec3.make(0.0, 0.0, 1.0), rot.z);
-
-    const g = Vec3.make(-cam.x, -cam.y, cam.z);
-    const view = rot_x.mul(rot_y).mul(rot_z).mul(Mat4.translation(g));
-    var proj = Mat4.perspective(std.math.degreesToRadians(70.0), aspect, 0.1, 200.0);
-
-    proj.j.y *= -1.0;
-
+pub fn drawObjects(
+    self: *Self,
+    cmd: c.VkCommandBuffer,
+    objects: []RenderObject,
+    ubo_buf: AllocatedBuffer,
+    ubo_set: c.VkDescriptorSet,
+    cam: *Camera,
+) void {
     // Create and bind the camera buffer
-    const curr_camera_data = GPUCameraData{
-        .view = view,
-        .proj = proj,
-        .view_proj = proj.mul(view),
-    };
+    const curr_camera_data = GPUCameraData.fromCamera(cam);
 
     const frame_index: usize = @intCast(@mod(self.frame_number, FRAME_OVERLAP));
 
     // TODO: meta function that deals with alignment and copying of data with
     // map/unmap. We now have two versions, one for a single pointer to struct
     // and one for array/slices (used to copy mesh vertices).
-    const padded_camera_data_size = self.pad_uniform_buffer_size(@sizeOf(GPUCameraData));
+    const padded_camera_data_size = self.padUniformBufferSize(@sizeOf(GPUCameraData));
     const scene_data_base_offset = padded_camera_data_size * FRAME_OVERLAP;
-    const padded_scene_data_size = self.pad_uniform_buffer_size(@sizeOf(GPUSceneData));
+    const padded_scene_data_size = self.padUniformBufferSize(@sizeOf(GPUSceneData));
 
     const camera_data_offset = padded_camera_data_size * frame_index;
     const scene_data_offset = scene_data_base_offset + padded_scene_data_size * frame_index;
@@ -1774,7 +1785,7 @@ pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject
     const scene_data: *GPUSceneData = @ptrFromInt(@intFromPtr(data) + scene_data_offset);
     camera_data.* = curr_camera_data;
     const framed = @as(f32, @floatFromInt(self.frame_number)) / 120.0;
-    scene_data.ambient_color = Vec3.make(@sin(framed), 0.0, @cos(framed)).to_point4();
+    scene_data.ambient_color = Vec3.make(@sin(framed), 0.0, @cos(framed)).to_vec4(1);
 
     c.vmaUnmapMemory(self.vma_allocator, ubo_buf.allocation);
 
@@ -1785,14 +1796,14 @@ pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject
     // we can more easily pass them back and forth from C and do those kind of
     // conversions.
     var object_data: ?*align(@alignOf(GPUObjectData)) anyopaque = undefined;
-    check_vk(c.vmaMapMemory(self.vma_allocator, self.get_current_frame().object_buffer.allocation, &object_data)) catch @panic("Failed to map object buffer");
+    check_vk(c.vmaMapMemory(self.vma_allocator, self.getCurrentFrame().object_buffer.allocation, &object_data)) catch @panic("Failed to map object buffer");
     var object_data_arr: [*]GPUObjectData = @ptrCast(object_data orelse unreachable);
     for (objects, 0..) |object, index| {
         object_data_arr[index] = GPUObjectData{
             .model_matrix = object.transform,
         };
     }
-    c.vmaUnmapMemory(self.vma_allocator, self.get_current_frame().object_buffer.allocation);
+    c.vmaUnmapMemory(self.vma_allocator, self.getCurrentFrame().object_buffer.allocation);
 
     for (objects, 0..) |object, index| {
         if (index == 0 or object.material != objects[index - 1].material) {
@@ -1807,7 +1818,7 @@ pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject
 
             c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 0, 1, &ubo_set, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
 
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 1, 1, &self.get_current_frame().object_descriptor_set, 0, null);
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 1, 1, &self.getCurrentFrame().object_descriptor_set, 0, null);
         }
 
         if (object.material.texture_set != VK_NULL_HANDLE) {
@@ -1830,7 +1841,7 @@ pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject
     }
 }
 
-fn create_material(self: *Self, pipeline: c.VkPipeline, pipeline_layout: c.VkPipelineLayout, name: []const u8) *Material {
+fn createMaterial(self: *Self, pipeline: c.VkPipeline, pipeline_layout: c.VkPipelineLayout, name: []const u8) *Material {
     self.materials.put(name, Material{
         .pipeline = pipeline,
         .pipeline_layout = pipeline_layout,
@@ -1838,15 +1849,15 @@ fn create_material(self: *Self, pipeline: c.VkPipeline, pipeline_layout: c.VkPip
     return self.materials.getPtr(name) orelse unreachable;
 }
 
-fn get_material(self: *Self, name: []const u8) ?*Material {
+fn getMaterial(self: *Self, name: []const u8) ?*Material {
     return self.material.getPtr(name);
 }
 
-fn get_mesh(self: *Self, name: []const u8) ?*Mesh {
+fn getMesh(self: *Self, name: []const u8) ?*Mesh {
     return self.meshes.getPtr(name);
 }
 
-pub fn create_buffer(self: *Self, alloc_size: usize, usage: c.VkBufferUsageFlags, memory_usage: c.VmaMemoryUsage) AllocatedBuffer {
+pub fn createBuffer(self: *Self, alloc_size: usize, usage: c.VkBufferUsageFlags, memory_usage: c.VmaMemoryUsage) AllocatedBuffer {
     const buffer_ci = std.mem.zeroInit(c.VkBufferCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = alloc_size,
@@ -1863,13 +1874,13 @@ pub fn create_buffer(self: *Self, alloc_size: usize, usage: c.VkBufferUsageFlags
     return buffer;
 }
 
-pub fn pad_uniform_buffer_size(self: *Self, original_size: usize) usize {
+pub fn padUniformBufferSize(self: *Self, original_size: usize) usize {
     const min_ubo_alignment = @as(usize, @intCast(self.physical_device_properties.limits.minUniformBufferOffsetAlignment));
     const aligned_size = (original_size + min_ubo_alignment - 1) & ~(min_ubo_alignment - 1);
     return aligned_size;
 }
 
-pub fn immediate_submit(self: *Self, submit_ctx: anytype) void {
+pub fn immediateSubmit(self: *Self, submit_ctx: anytype) void {
     // Check the context is good
     comptime {
         var Context = @TypeOf(submit_ctx);

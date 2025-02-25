@@ -10,11 +10,30 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+
     const engine_c_libs = b.addTranslateC(.{
         .root_source_file = b.path("engine/clibs.c"),
         .target = target,
         .optimize = optimize,
     });
+    engine_c_libs.addIncludeDir("vendor/ufbx/");
+    engine_c_libs.addIncludeDir("vendor/sdl3/include");
+    engine_c_libs.addIncludeDir("vendor/vma/");
+    engine_c_libs.addIncludeDir("vendor/stb/");
+
+    const ufbx_lib = b.addStaticLibrary(.{
+        .name = "ufbx",
+        .target = target,
+        .optimize = optimize,
+    });
+    ufbx_lib.addIncludePath(b.path("vendor/ufbx/"));
+    ufbx_lib.linkLibC();
+    ufbx_lib.addCSourceFiles(.{
+        .files = &.{
+            "vendor/ufbx/ufbx.c",
+        },
+    });
+
     const vk_lib_name = if (target.result.os.tag == .windows) "vulkan-1" else "vulkan";
 
     yume.linkSystemLibrary("SDL3", .{});
@@ -32,9 +51,8 @@ pub fn build(b: *std.Build) !void {
     yume.addIncludePath(.{ .cwd_relative = "vendor/vma/" });
     yume.addIncludePath(.{ .cwd_relative = "vendor/stb/" });
 
-    engine_c_libs.addIncludeDir("vendor/sdl3/include");
-    engine_c_libs.addIncludeDir("vendor/vma/");
-    engine_c_libs.addIncludeDir("vendor/stb/");
+    yume.linkLibrary(ufbx_lib);
+
     const engine_c_mod = engine_c_libs.createModule();
     yume.addImport("clibs", engine_c_mod);
 
