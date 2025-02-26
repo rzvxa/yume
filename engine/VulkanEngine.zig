@@ -1785,7 +1785,7 @@ pub fn drawObjects(
     const scene_data: *GPUSceneData = @ptrFromInt(@intFromPtr(data) + scene_data_offset);
     camera_data.* = curr_camera_data;
     const framed = @as(f32, @floatFromInt(self.frame_number)) / 120.0;
-    scene_data.ambient_color = Vec3.make(@sin(framed), 0.0, @cos(framed)).to_vec4(1);
+    scene_data.ambient_color = Vec3.make(@sin(framed), 0.0, @cos(framed)).toVec4(1);
 
     c.vmaUnmapMemory(self.vma_allocator, ubo_buf.allocation);
 

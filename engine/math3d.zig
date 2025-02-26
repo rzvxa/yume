@@ -10,7 +10,7 @@ pub const Vec2 = extern struct {
         return .{ .x = x, .y = y };
     }
 
-    pub inline fn to_vec3(self: Vec2, z: f32) Vec3 {
+    pub inline fn toVec3(self: Vec2, z: f32) Vec3 {
         return .{ .x = self.x, .y = self.y, .z = z };
     }
 };
@@ -28,15 +28,15 @@ pub const Vec3 = extern struct {
         return .{ .x = x, .y = y, .z = z };
     }
 
-    pub inline fn to_vec4(self: Self, w: f32) Vec4 {
+    pub inline fn toVec4(self: Self, w: f32) Vec4 {
         return Vec4.make(self.x, self.y, self.z, w);
     }
 
-    pub inline fn squared_norm(self: Self) f32 {
+    pub inline fn squaredLen(self: Self) f32 {
         return self.x * self.x + self.y * self.y + self.z * self.z;
     }
 
-    pub fn norm(self: Self) f32 {
+    pub inline fn len(self: Self) f32 {
         return @sqrt(self.x * self.x + self.y * self.y + self.z * self.z);
     }
 
@@ -48,17 +48,28 @@ pub const Vec3 = extern struct {
         return make(self.x - other.x, self.y - other.y, self.z - other.z);
     }
 
-    pub inline fn mul(self: Self, other: f32) Self {
+    // this method doesn't exists mathematically but is a convenient name for a operation,
+    // we are multiplying components of 2 vectors
+    pub inline fn mul(self: Self, other: Self) Self {
+        return make(self.x * other.x, self.y * other.y, self.z * other.z);
+    }
+
+    pub inline fn mulf(self: Self, other: f32) Self {
         return make(self.x * other, self.y * other, self.z * other);
     }
 
-    pub inline fn div(self: Self, other: f32) Self {
+    // this method doesn't exists mathematically but is a convenient name for a operation,
+    // we are dividing components of 2 vectors
+    pub inline fn div(self: Self, other: Self) Self {
+        return make(self.x / other.x, self.y / other.x, self.z / other.x);
+    }
+
+    pub inline fn divf(self: Self, other: f32) Self {
         return make(self.x / other, self.y / other, self.z / other);
     }
 
     pub inline fn normalized(self: Self) Self {
-        const len = self.norm();
-        return self.div(len);
+        return self.divf(self.len());
     }
 
     pub inline fn dot(a: Self, b: Self) f32 {
@@ -113,10 +124,10 @@ pub const Vec4 = extern struct {
     }
 
     pub fn nomalized(self: Self) Self {
-        return self.to_vec3().normalized().to_vec4(self.w);
+        return self.toVec3().normalized().toVec4(self.w);
     }
 
-    pub fn to_vec3(self: Self) Vec3 {
+    pub fn toVec3(self: Self) Vec3 {
         return Vec3.make(self.x, self.y, self.z);
     }
 
@@ -138,12 +149,12 @@ pub const Mat4 = extern union {
 
     const Self = @This();
 
-    pub const IDENTITY: Mat4 = make(
-        Vec4.make(1.0, 0.0, 0.0, 0.0),
-        Vec4.make(0.0, 1.0, 0.0, 0.0),
-        Vec4.make(0.0, 0.0, 1.0, 0.0),
-        Vec4.make(0.0, 0.0, 0.0, 1.0),
-    );
+    pub const IDENTITY: Mat4 = .{ .values = .{
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    } };
 
     pub inline fn make(i: Vec4, j: Vec4, k: Vec4, t: Vec4) Self {
         return .{ .vec4 = .{ i, j, k, t } };
@@ -203,7 +214,7 @@ pub const Mat4 = extern union {
             Vec4.make(1.0, 0.0, 0.0, 0.0),
             Vec4.make(0.0, 1.0, 0.0, 0.0),
             Vec4.make(0.0, 0.0, 1.0, 0.0),
-            v.to_vec4(1),
+            v.toVec4(1),
         );
     }
 
@@ -213,7 +224,7 @@ pub const Mat4 = extern union {
             self.i,
             self.j,
             self.k,
-            self.t.add(v.to_vec4(0)),
+            self.t.add(v.toVec4(0)),
         );
     }
 
@@ -238,12 +249,12 @@ pub const Mat4 = extern union {
         const s = @sin(angle_rad);
         const t = 1.0 - c;
 
-        const sqr_norm = axis.squared_norm();
+        const sqr_norm = axis.squaredLen();
         if (sqr_norm == 0.0) {
             return Mat4.IDENTITY;
         } else if (@abs(sqr_norm - 1.0) > 0.0001) {
             const norm = @sqrt(sqr_norm);
-            return rotation(axis.div(norm), angle_rad);
+            return rotation(axis.divf(norm), angle_rad);
         }
 
         const x = axis.x;

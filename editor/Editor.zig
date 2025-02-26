@@ -36,6 +36,7 @@ camera_rot: Vec3 = Vec3.make(0, 0, 0),
 camera_input: Vec3 = Vec3.make(0, 0, 0),
 camera_input_rot: Vec3 = Vec3.make(0, 0, 0),
 
+camera_view_inv: Mat4 = Mat4.IDENTITY,
 camera: Camera = Camera.makePerspectiveCamera(.{
     .fovy_rad = std.math.degreesToRadians(70.0),
     .far = 200,
@@ -187,12 +188,12 @@ fn isInSceneView(self: *Self, pos: c.ImVec2) bool {
 }
 
 pub fn update(self: *Self, ctx: *GameApp) void {
-    if (self.camera_input.squared_norm() > (0.1 * 0.1)) {
-        const camera_delta = self.camera_input.normalized().mul(ctx.delta * 5.0);
+    if (self.camera_input.squaredLen() > (0.1 * 0.1)) {
+        const camera_delta = self.camera_input.normalized().mulf(ctx.delta * 5.0);
         self.camera_pos = Vec3.add(self.camera_pos, camera_delta);
     }
-    if (self.camera_input_rot.squared_norm() > (0.1 * 0.1)) {
-        const rot_delta = self.camera_input_rot.mul(ctx.delta * 1.0);
+    if (self.camera_input_rot.squaredLen() > (0.1 * 0.1)) {
+        const rot_delta = self.camera_input_rot.mulf(ctx.delta * 1.0);
         self.camera_rot = self.camera_rot.add(rot_delta);
     }
 }

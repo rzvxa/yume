@@ -56,8 +56,8 @@ pub fn run(self: *Self, comptime dispatcher: anytype) void {
             quit = !d.processEvent(self, &event);
         }
 
-        if (self.engine.camera_input.squared_norm() > (0.1 * 0.1)) {
-            const camera_delta = self.engine.camera_input.normalized().mul(self.delta * 5.0);
+        if (self.engine.camera_input.squaredLen() > (0.1 * 0.1)) {
+            const camera_delta = self.engine.camera_input.normalized().mulf(self.delta * 5.0);
             self.engine.camera_pos = Vec3.add(self.engine.camera_pos, camera_delta);
         }
 
