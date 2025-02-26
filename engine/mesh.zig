@@ -6,6 +6,7 @@ const m3d = @import("math3d.zig");
 
 const Vec2 = m3d.Vec2;
 const Vec3 = m3d.Vec3;
+const Mat4 = m3d.Mat4;
 
 pub const VertexInputDescription = struct {
     bindings: []const c.VkVertexInputBindingDescription,
@@ -57,21 +58,68 @@ pub const Vertex = struct {
     };
 };
 
+pub const BoundingBox = struct {
+    const Self = @This();
+    mins: Vec3,
+    maxs: Vec3,
+
+    pub fn accumulate(self: *Self, pos: Vec3) void {
+        self.mins.x = @min(self.mins.x, pos.x);
+        self.mins.y = @min(self.mins.y, pos.y);
+        self.mins.z = @min(self.mins.z, pos.z);
+
+        self.maxs.x = @max(self.maxs.x, pos.x);
+        self.maxs.y = @max(self.maxs.y, pos.y);
+        self.maxs.z = @max(self.maxs.z, pos.z);
+    }
+
+    pub inline fn translate(self: Self, mat: Mat4) Self {
+        return .{
+            .mins = mat.translate(self.mins),
+            .maxs = mat.translate(self.maxs),
+        };
+    }
+};
+
 pub const Mesh = struct {
     vertices: []Vertex,
+    bounds: BoundingBox,
     vertex_buffer: AllocatedBuffer = undefined,
 };
 
 const obj_loader = @import("obj_loader.zig");
 
-pub fn load_from_obj(a: std.mem.Allocator, filepath: []const u8) Mesh {
-    var obj_mesh = obj_loader.parse_file(a, filepath) catch |err| {
+pub fn load_from_obj(allocator: std.mem.Allocator, filepath: []const u8) Mesh {
+    var obj_mesh = obj_loader.parse_file(allocator, filepath) catch |err| {
         std.log.err("Failed to load obj file: {s}", .{@errorName(err)});
         unreachable;
     };
     defer obj_mesh.deinit();
 
-    var vertices = std.ArrayList(Vertex).init(a);
+    var vb = struct {
+        vertices: std.ArrayList(Vertex),
+        bounds: BoundingBox,
+
+        fn builder(a: std.mem.Allocator) @This() {
+            return .{
+                .vertices = std.ArrayList(Vertex).init(a),
+                .bounds = .{
+                    .mins = Vec3.scalar(std.math.floatMax(f32)),
+                    .maxs = Vec3.scalar(std.math.floatMin(f32)),
+                },
+            };
+        }
+
+        // get (len - n)'th element
+        fn getFromEnd(self: *@This(), n: usize) Vertex {
+            return self.vertices.items[self.vertices.items.len - n];
+        }
+
+        fn append(self: *@This(), vert: Vertex) void {
+            self.bounds.accumulate(vert.position);
+            self.vertices.append(vert) catch @panic("OOM");
+        }
+    }.builder(allocator);
 
     for (obj_mesh.objects) |object| {
         var index_count: usize = 0;
@@ -95,13 +143,13 @@ pub fn load_from_obj(a: std.mem.Allocator, filepath: []const u8) Mesh {
 
                 // Triangulate the polygon
                 if (vx_index > 2) {
-                    const v0 = vertices.items[vertices.items.len - 3];
-                    const v1 = vertices.items[vertices.items.len - 1];
-                    vertices.append(v0) catch @panic("OOM");
-                    vertices.append(v1) catch @panic("OOM");
+                    const v0 = vb.getFromEnd(3);
+                    const v1 = vb.getFromEnd(1);
+                    vb.append(v0);
+                    vb.append(v1);
                 }
 
-                vertices.append(vx) catch @panic("OOM");
+                vb.append(vx);
 
                 index_count += 1;
             }
@@ -109,7 +157,8 @@ pub fn load_from_obj(a: std.mem.Allocator, filepath: []const u8) Mesh {
     }
 
     return Mesh{
-        .vertices = vertices.toOwnedSlice() catch @panic("Failed to make owned slice"),
+        .vertices = vb.vertices.toOwnedSlice() catch @panic("Failed to make owned slice"),
+        .bounds = vb.bounds,
     };
 }
 

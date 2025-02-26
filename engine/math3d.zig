@@ -10,6 +10,10 @@ pub const Vec2 = extern struct {
         return .{ .x = x, .y = y };
     }
 
+    pub inline fn scalar(n: f32) Vec2 {
+        return .{ .x = n, .y = n };
+    }
+
     pub inline fn toVec3(self: Vec2, z: f32) Vec3 {
         return .{ .x = self.x, .y = self.y, .z = z };
     }
@@ -28,8 +32,8 @@ pub const Vec3 = extern struct {
         return .{ .x = x, .y = y, .z = z };
     }
 
-    pub inline fn toVec4(self: Self, w: f32) Vec4 {
-        return Vec4.make(self.x, self.y, self.z, w);
+    pub inline fn scalar(n: f32) Self {
+        return make(n, n, n);
     }
 
     pub inline fn squaredLen(self: Self) f32 {
@@ -82,6 +86,14 @@ pub const Vec3 = extern struct {
             a.z * b.x - a.x * b.z,
             a.x * b.y - a.y * b.x,
         );
+    }
+
+    pub inline fn toVec4(self: Self, w: f32) Vec4 {
+        return Vec4.make(self.x, self.y, self.z, w);
+    }
+
+    pub inline fn toArray(self: Self) [3]f32 {
+        return @as(*const [3]f32, @ptrCast(self)).*;
     }
 };
 

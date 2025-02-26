@@ -8,6 +8,7 @@ const vki = @import("vulkan_init.zig");
 const check_vk = vki.check_vk;
 const mesh_mod = @import("mesh.zig");
 const Mesh = mesh_mod.Mesh;
+const BoundingBox = mesh_mod.BoundingBox;
 
 const math3d = @import("math3d.zig");
 const Vec2 = math3d.Vec2;
@@ -55,6 +56,10 @@ const RenderObject = struct {
     mesh: *Mesh,
     material: *Material,
     transform: Mat4,
+
+    pub fn worldBounds(self: *@This()) BoundingBox {
+        return self.mesh.bounds.translate(self.transform);
+    }
 };
 
 const FrameData = struct {
@@ -1441,29 +1446,6 @@ fn loadTextures(self: *Self) void {
 }
 
 fn loadMeshes(self: *Self) void {
-    const vertices = [_]mesh_mod.Vertex{ .{
-        .position = Vec3.make(1.0, 1.0, 0.0),
-        .normal = undefined,
-        .color = Vec3.make(0.0, 1.0, 0.0),
-        .uv = Vec2.make(1.0, 1.0),
-    }, .{
-        .position = Vec3.make(-1.0, 1.0, 0.0),
-        .normal = undefined,
-        .color = Vec3.make(0.0, 1.0, 0.0),
-        .uv = Vec2.make(0.0, 1.0),
-    }, .{
-        .position = Vec3.make(0.0, -1.0, 0.0),
-        .normal = undefined,
-        .color = Vec3.make(0.0, 1.0, 0.0),
-        .uv = Vec2.make(0.5, 0.0),
-    } };
-
-    var triangle_mesh = Mesh{
-        .vertices = self.allocator.dupe(mesh_mod.Vertex, vertices[0..]) catch @panic("Out of memory"),
-    };
-    self.uploadMesh(&triangle_mesh);
-    self.meshes.put("triangle", triangle_mesh) catch @panic("Out of memory");
-
     var monkey_mesh = mesh_mod.load_from_obj2(self.allocator, "assets/builtin/u.obj");
     self.uploadMesh(&monkey_mesh);
     self.meshes.put("monkey", monkey_mesh) catch @panic("Out of memory");
