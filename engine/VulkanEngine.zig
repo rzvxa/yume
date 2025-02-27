@@ -57,7 +57,7 @@ const RenderObject = struct {
     material: *Material,
     transform: Mat4,
 
-    pub fn worldBounds(self: *@This()) BoundingBox {
+    pub fn worldBounds(self: *const @This()) BoundingBox {
         return self.mesh.bounds.translate(self.transform);
     }
 };

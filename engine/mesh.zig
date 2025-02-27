@@ -73,10 +73,10 @@ pub const BoundingBox = struct {
         self.maxs.z = @max(self.maxs.z, pos.z);
     }
 
-    pub inline fn translate(self: Self, mat: Mat4) Self {
+    pub fn translate(self: Self, mat: Mat4) Self {
         return .{
-            .mins = mat.translate(self.mins),
-            .maxs = mat.translate(self.maxs),
+            .mins = mat.mulVec3(self.mins),
+            .maxs = mat.mulVec3(self.maxs),
         };
     }
 };

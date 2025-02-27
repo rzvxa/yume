@@ -135,6 +135,16 @@ pub const Vec4 = extern struct {
         );
     }
 
+    pub fn mulMat4(self: Self, mat: Mat4) Mat4 {
+        const m = mat.unnamed;
+        return make(
+            self.x * m[0][0] + self.y * m[0][1] + self.z * m[0][2] + self.w * m[0][3],
+            self.x * m[1][0] + self.y * m[1][1] + self.z * m[1][2] + self.w * m[1][3],
+            self.x * m[2][0] + self.y * m[2][1] + self.z * m[2][2] + self.w * m[2][3],
+            self.x * m[3][0] + self.y * m[3][1] + self.z * m[3][2] + self.w * m[3][3],
+        );
+    }
+
     pub fn nomalized(self: Self) Self {
         return self.toVec3().normalized().toVec4(self.w);
     }
@@ -220,6 +230,21 @@ pub const Mat4 = extern union {
         );
     }
 
+    pub fn mulVec4(self: Self, v: Vec4) Vec4 {
+        const m = self.unnamed;
+        return Vec4.make(
+            v.x * m[0][0] + v.y * m[1][0] + v.z * m[2][0] + v.w * m[3][0],
+            v.x * m[0][1] + v.y * m[1][1] + v.z * m[2][1] + v.w * m[3][1],
+            v.x * m[0][2] + v.y * m[1][2] + v.z * m[2][2] + v.w * m[3][2],
+            v.x * m[0][3] + v.y * m[1][3] + v.z * m[2][3] + v.w * m[3][3],
+        );
+    }
+
+    pub inline fn mulVec3(self: Self, v: Vec3) Vec3 {
+        const r = self.mulVec4(v.toVec4(1));
+        return Vec3.make(r.x / r.w, r.y / r.w, r.z / r.w);
+    }
+
     /// Create a translation matrix
     pub fn translation(v: Vec3) Mat4 {
         return make(
@@ -233,10 +258,10 @@ pub const Mat4 = extern union {
     /// Returns a new matrix obtained by translating the input one.
     pub fn translate(self: Self, v: Vec3) Self {
         return make(
-            self.i,
-            self.j,
-            self.k,
-            self.t.add(v.toVec4(0)),
+            self.named.i,
+            self.named.j,
+            self.named.k,
+            self.named.t.add(v.toVec4(0)),
         );
     }
 

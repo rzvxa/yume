@@ -419,6 +419,54 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         }
     }.f, &frame_userdata);
     c.ImDrawList_AddCallback(editor_image, c.ImDrawCallback_ResetRenderState, null);
+
+    const r = ctx.engine.renderables.items[0];
+    const bounds = r.worldBounds();
+    const view_proj = self.camera.view_projection;
+    const screenWidth = self.scene_view_size.x;
+    const screenHeight = self.scene_view_size.y;
+    const x_off = self.scene_window_rect.x;
+    const y_off = self.scene_window_rect.y;
+
+    const points = [8]Vec3{
+        Vec3{ .x = bounds.mins.x, .y = bounds.mins.y, .z = bounds.mins.z },
+        Vec3{ .x = bounds.maxs.x, .y = bounds.mins.y, .z = bounds.mins.z },
+        Vec3{ .x = bounds.mins.x, .y = bounds.maxs.y, .z = bounds.mins.z },
+        Vec3{ .x = bounds.maxs.x, .y = bounds.maxs.y, .z = bounds.mins.z },
+        Vec3{ .x = bounds.mins.x, .y = bounds.mins.y, .z = bounds.maxs.z },
+        Vec3{ .x = bounds.maxs.x, .y = bounds.mins.y, .z = bounds.maxs.z },
+        Vec3{ .x = bounds.mins.x, .y = bounds.maxs.y, .z = bounds.maxs.z },
+        Vec3{ .x = bounds.maxs.x, .y = bounds.maxs.y, .z = bounds.maxs.z },
+    };
+    const edges = [_][2]Vec3{
+        .{ points[0], points[1] },
+        .{ points[0], points[2] },
+        .{ points[0], points[4] },
+        .{ points[1], points[3] },
+        .{ points[1], points[5] },
+        .{ points[2], points[3] },
+        .{ points[2], points[6] },
+        .{ points[3], points[7] },
+        .{ points[4], points[5] },
+        .{ points[4], points[6] },
+        .{ points[5], points[7] },
+        .{ points[6], points[7] },
+    };
+    const red = c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 1, .y = 0, .z = 0, .w = 1 });
+    for (edges) |edge| {
+        const a = view_proj.mulVec3(edge[0]);
+        const b = view_proj.mulVec3(edge[1]);
+        const ax = (a.x + 1) * 0.5 * screenWidth;
+        const ay = (a.y + 1) * 0.5 * screenHeight;
+        const bx = (b.x + 1) * 0.5 * screenWidth;
+        const by = (b.y + 1) * 0.5 * screenHeight;
+        c.ImDrawList_AddLine(
+            editor_image,
+            c.ImVec2{ .x = ax + x_off, .y = ay + y_off },
+            c.ImVec2{ .x = bx + x_off, .y = by + y_off },
+            red,
+        );
+    }
     c.ImGui_End();
 
     c.ImGui_Render();
