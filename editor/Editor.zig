@@ -120,7 +120,7 @@ pub fn update(self: *Self, ctx: *GameApp) void {
     input.z += if (self.inputs.isKeyDown(ScanCode.S)) -1 else 0;
     input.x += if (self.inputs.isKeyDown(ScanCode.A)) -1 else 0;
     input.x += if (self.inputs.isKeyDown(ScanCode.D)) 1 else 0;
-    input.x += if (self.inputs.isKeyDown(ScanCode.E)) 1 else 0;
+    input.y += if (self.inputs.isKeyDown(ScanCode.E)) 1 else 0;
     input.y += if (self.inputs.isKeyDown(ScanCode.Q)) -1 else 0;
     input_rot.y += if (self.inputs.isKeyDown(ScanCode.J)) -1 else 0;
     input_rot.y += if (self.inputs.isKeyDown(ScanCode.L)) 1 else 0;
@@ -396,6 +396,12 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
 
     const r = ctx.engine.renderables.items[0];
     gizmo.drawBoundingBox(r.worldBounds()) catch @panic("error");
+    const components = r.transform.decomposeComponents();
+    gizmo.manipulate(
+        components.translation,
+        Vec3.ZERO,
+        components.scale,
+    ) catch @panic("error");
 
     gizmo.endFrame();
     c.ImGui_End();

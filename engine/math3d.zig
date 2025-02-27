@@ -163,7 +163,27 @@ pub const Vec4 = extern struct {
     }
 };
 
+pub const Quat = extern struct {
+    const Self = @This();
+
+    x: f32,
+    y: f32,
+    z: f32,
+    w: f32,
+
+    pub const IDENTITY: Self = make(1, 0, 0, 0);
+
+    pub inline fn make(x: f32, y: f32, z: f32, w: f32) Self {
+        return .{ .x = x, .y = y, .z = z, .w = w };
+    }
+};
+
 pub const Mat4 = extern union {
+    pub const Mat4Components = struct {
+        translation: Vec3,
+        rotation: Quat,
+        scale: Vec3,
+    };
     named: extern struct {
         i: Vec4,
         j: Vec4,
@@ -176,7 +196,7 @@ pub const Mat4 = extern union {
 
     const Self = @This();
 
-    pub const IDENTITY: Mat4 = .{ .values = .{
+    pub const IDENTITY: Self = .{ .values = .{
         1.0, 0.0, 0.0, 0.0,
         0.0, 1.0, 0.0, 0.0,
         0.0, 0.0, 1.0, 0.0,
@@ -337,9 +357,8 @@ pub const Mat4 = extern union {
         return det;
     }
 
-    // Inverts this matrix, returns an error if determinant is zero.
-    // a zero matrix instead.
-    pub fn invert(self: Mat4) error{DeterminantZero}!Mat4 {
+    // Returns the inverse matrix. It will return an error if determinant is zero.
+    pub fn inverse(self: Mat4) error{DeterminantZero}!Mat4 {
         // based on http://www.euclideanspace.com/maths/algebra/matrix/functions/inverse/fourD/index.htm
         const n11 = self.values[0];
         const n21 = self.values[1];
@@ -369,7 +388,7 @@ pub const Mat4 = extern union {
 
         const det_inv = 1 / det;
 
-        return .{
+        return .{ .values = .{
             t11 * det_inv,
             (n24 * n33 * n41 - n23 * n34 * n41 - n24 * n31 * n43 + n21 * n34 * n43 + n23 * n31 * n44 - n21 * n33 * n44) * det_inv,
             (n22 * n34 * n41 - n24 * n32 * n41 + n24 * n31 * n42 - n21 * n34 * n42 - n22 * n31 * n44 + n21 * n32 * n44) * det_inv,
@@ -389,7 +408,33 @@ pub const Mat4 = extern union {
             (n13 * n24 * n31 - n14 * n23 * n31 + n14 * n21 * n33 - n11 * n24 * n33 - n13 * n21 * n34 + n11 * n23 * n34) * det_inv,
             (n14 * n22 * n31 - n12 * n24 * n31 - n14 * n21 * n32 + n11 * n24 * n32 + n12 * n21 * n34 - n11 * n22 * n34) * det_inv,
             (n12 * n23 * n31 - n13 * n22 * n31 + n13 * n21 * n32 - n11 * n23 * n32 - n12 * n21 * n33 + n11 * n22 * n33) * det_inv,
-        };
+        } };
+    }
+
+    pub fn decomposeComponents(self: Self) Mat4Components {
+        const t = Vec3.make(
+            self.unnamed[3][0],
+            self.unnamed[3][1],
+            self.unnamed[3][2],
+        );
+
+        const sx = Vec3.make(
+            self.unnamed[0][0],
+            self.unnamed[1][0],
+            self.unnamed[2][0],
+        ).len();
+        const sy = Vec3.make(
+            self.unnamed[0][1],
+            self.unnamed[1][1],
+            self.unnamed[2][1],
+        ).len();
+        const sz = Vec3.make(
+            self.unnamed[0][2],
+            self.unnamed[1][2],
+            self.unnamed[2][2],
+        ).len();
+        const s = Vec3.make(sx, sy, sz);
+        return .{ .translation = t, .rotation = Quat.IDENTITY, .scale = s };
     }
 };
 

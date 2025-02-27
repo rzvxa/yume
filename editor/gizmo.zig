@@ -13,6 +13,7 @@ const BoundingBox = @import("yume").Mesh.BoundingBox;
 
 const GizmoContext = struct {
     inframe: bool = false,
+    color: c.ImU32 = undefined,
     drawlist: [*c]c.ImDrawList = undefined,
     view_projection: Mat4 = Mat4.IDENTITY,
     viewport: Rect = std.mem.zeroes(Rect),
@@ -27,6 +28,7 @@ pub fn newFrame(drawlist: [*c]c.ImDrawList, view_projection: Mat4, viewport: Rec
     context.drawlist = drawlist;
     context.view_projection = view_projection;
     context.viewport = viewport;
+    context.color = black();
     context.inframe = true;
 }
 
@@ -61,15 +63,145 @@ pub fn drawBoundingBox(bounds: BoundingBox) DrawError!void {
         .{ points[6], points[7] },
     };
 
-    const red = c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 1, .y = 0, .z = 0, .w = 1 });
     for (edges) |edge| {
         c.ImDrawList_AddLine(
             context.drawlist,
             toScreenPoint(edge[0]),
             toScreenPoint(edge[1]),
-            red,
+            red(),
         );
     }
+}
+
+fn pixelSize(n: f32) f32 {
+    const a = c.ImVec2{ .x = 0, .y = 0 };
+    const b = c.ImVec2{ .x = n, .y = 0 };
+    const aworld = toWorldPosition(a);
+    const bworld = toWorldPosition(b);
+    const diff = bworld.sub(aworld);
+    return diff.len();
+}
+
+pub fn drawArrow(from: Vec3, to: Vec3, thickness: f32, head_size: f32) DrawError!void {
+    const color = context.color;
+
+    // Calculate the direction vector
+    const direction = to.sub(from).normalized();
+    const screen_to = toScreenPoint(to.sub(direction.mulf(head_size)));
+
+    const n = pixelSize(thickness);
+    const head = head_size / n;
+
+    std.log.debug("n: {d} / {d} = {d}\n", .{ head_size, n, head });
+
+    // Draw the main arrow line
+    c.ImDrawList_AddLineEx(context.drawlist, toScreenPoint(from), screen_to, color, thickness);
+
+    // Create a basis for the perpendicular vector
+    const upVector = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 };
+    var perpendicular = direction.cross(upVector);
+    if (perpendicular.squaredLen() < 1e-6) {
+        perpendicular = direction.cross(Vec3{ .x = 1.0, .y = 0.0, .z = 0.0 });
+    }
+    perpendicular = perpendicular.normalized().mulf(head * 0.5);
+
+    // Ensure the arrowhead is visible by making it a pyramid
+    const right = perpendicular;
+    const up = direction.cross(right).normalized().mulf(head * 0.5);
+
+    const base1 = to.sub(direction.mulf(head_size)).add(right).add(up);
+    const base2 = to.sub(direction.mulf(head_size)).add(right).sub(up);
+    const base3 = to.sub(direction.mulf(head_size)).sub(right).sub(up);
+    const base4 = to.sub(direction.mulf(head_size)).sub(right).add(up);
+    const arrowTip = to;
+
+    // Draw the 4 triangles to form the pyramid arrowhead
+    c.ImDrawList_AddTriangleFilled(
+        context.drawlist,
+        toScreenPoint(base1),
+        toScreenPoint(base2),
+        toScreenPoint(arrowTip),
+        color,
+    );
+    c.ImDrawList_AddTriangleFilled(
+        context.drawlist,
+        toScreenPoint(base2),
+        toScreenPoint(base3),
+        toScreenPoint(arrowTip),
+        color,
+    );
+    c.ImDrawList_AddTriangleFilled(
+        context.drawlist,
+        toScreenPoint(base3),
+        toScreenPoint(base4),
+        toScreenPoint(arrowTip),
+        color,
+    );
+    c.ImDrawList_AddTriangleFilled(
+        context.drawlist,
+        toScreenPoint(base4),
+        toScreenPoint(base1),
+        toScreenPoint(arrowTip),
+        color,
+    );
+}
+
+pub fn manipulate(pos: Vec3, rot: Vec3, scale: Vec3) DrawError!void {
+    const x_end = pos.add(Vec3.make(0.5, 0, 0));
+    const y_end = pos.add(Vec3.make(0, 0.5, 0));
+    const z_end = pos.add(Vec3.make(0, 0, 0.5));
+
+    const thickness = 5;
+    // const outline_thickness = 1;
+
+    const col = context.color;
+    context.color = red();
+    try drawArrow(pos, x_end, thickness, 0.5 * 0.4);
+    context.color = green();
+    try drawArrow(pos, y_end, thickness, 0.5 * 0.4);
+    context.color = blue();
+    try drawArrow(pos, z_end, thickness, 0.5 * 0.4);
+    context.color = col;
+
+    // c.ImDrawList_AddLineEx(context.drawlist, toScreenPoint(pos), toScreenPoint(x_end), black(), thickness + outline_thickness);
+    // c.ImDrawList_AddLineEx(context.drawlist, toScreenPoint(pos), toScreenPoint(y_end), black(), thickness + outline_thickness);
+    // c.ImDrawList_AddLineEx(context.drawlist, toScreenPoint(pos), toScreenPoint(z_end), black(), thickness + outline_thickness);
+    // c.ImDrawList_AddTriangleFilled(
+    //     context.drawlist,
+    //     toScreenPoint(x_end.add(Vec3.make(0, 0.085, 0))),
+    //     toScreenPoint(x_end.sub(Vec3.make(0, 0.085, 0))),
+    //     toScreenPoint(x_end.add(Vec3.make(0.205, 0, 0))),
+    //     black(),
+    // );
+    // c.ImDrawList_AddTriangleFilled(
+    //     context.drawlist,
+    //     toScreenPoint(x_end.add(Vec3.make(0, 0.08, 0))),
+    //     toScreenPoint(x_end.sub(Vec3.make(0, 0.08, 0))),
+    //     toScreenPoint(x_end.add(Vec3.make(0.2, 0, 0))),
+    //     red(),
+    // );
+    // c.ImDrawList_AddLineEx(context.drawlist, toScreenPoint(pos), toScreenPoint(x_end), red(), thickness);
+    // c.ImDrawList_AddLineEx(context.drawlist, toScreenPoint(pos), toScreenPoint(y_end), green(), thickness);
+    // c.ImDrawList_AddLineEx(context.drawlist, toScreenPoint(pos), toScreenPoint(z_end), blue(), thickness);
+    _ = rot;
+    _ = scale;
+}
+
+fn toWorldPosition(screen_point: c.ImVec2) Vec3 {
+    var ndc_x = (screen_point.x - context.viewport.x) / context.viewport.width;
+    var ndc_y = (screen_point.y - context.viewport.y) / context.viewport.height;
+
+    // Convert screen coordinates to NDC
+    ndc_x = ndc_x * 2 - 1;
+    ndc_y = ndc_y * 2 - 1;
+
+    const ndc = Vec3.make(ndc_x, ndc_y, 1);
+
+    // Apply the inverse of the view-projection matrix
+    const inverse_view_projection = context.view_projection.inverse() catch Mat4.IDENTITY;
+    const world_position = inverse_view_projection.mulVec3(ndc);
+
+    return world_position;
 }
 
 fn toScreenPoint(vec: Vec3) c.ImVec2 {
@@ -92,3 +224,19 @@ fn drawSanityCheck(g: *const GizmoContext) DrawError!void {
 }
 
 pub const DrawError = error{NotInAFrame};
+
+fn black() c.ImU32 {
+    return c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0, .y = 0, .z = 0, .w = 1 });
+}
+
+fn red() c.ImU32 {
+    return c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 1, .y = 0, .z = 0, .w = 1 });
+}
+
+fn green() c.ImU32 {
+    return c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0, .y = 1, .z = 0, .w = 1 });
+}
+
+fn blue() c.ImU32 {
+    return c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0, .y = 0, .z = 1, .w = 1 });
+}
