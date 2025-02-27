@@ -110,8 +110,6 @@ pub const FRAME_OVERLAP = 2;
 // Data
 //
 frame_number: i32 = 0,
-selected_shader: i32 = 0,
-selected_mesh: i32 = 0,
 
 window: *c.SDL_Window = undefined,
 
@@ -1516,64 +1514,6 @@ fn uploadMesh(self: *Self, mesh: *Mesh) void {
 
     // We can free the staging buffer at this point.
     c.vmaDestroyBuffer(self.vma_allocator, staging_buffer.buffer, staging_buffer.allocation);
-}
-
-pub fn processGameEvent(self: *Self, event: *c.SDL_Event) void {
-    if (event.type == c.SDL_EVENT_KEY_DOWN) {
-        switch (event.key.keysym.scancode) {
-            c.SDL_SCANCODE_SPACE => {
-                self.selected_shader = if (self.selected_shader == 1) 0 else 1;
-            },
-            c.SDL_SCANCODE_M => {
-                self.selected_mesh = if (self.selected_mesh == 1) 0 else 1;
-            },
-
-            // WASD for camera
-            c.SDL_SCANCODE_W => {
-                self.camera_input.z = 1.0;
-            },
-            c.SDL_SCANCODE_S => {
-                self.camera_input.z = -1.0;
-            },
-            c.SDL_SCANCODE_A => {
-                self.camera_input.x = -1.0;
-            },
-            c.SDL_SCANCODE_D => {
-                self.camera_input.x = 1.0;
-            },
-            c.SDL_SCANCODE_E => {
-                self.camera_input.y = 1.0;
-            },
-            c.SDL_SCANCODE_Q => {
-                self.camera_input.y = -1.0;
-            },
-
-            else => {},
-        }
-    } else if (event.type == c.SDL_EVENT_KEY_UP) {
-        switch (event.key.keysym.scancode) {
-            c.SDL_SCANCODE_W => {
-                self.camera_input.z = 0.0;
-            },
-            c.SDL_SCANCODE_S => {
-                self.camera_input.z = 0.0;
-            },
-            c.SDL_SCANCODE_A => {
-                self.camera_input.x = 0.0;
-            },
-            c.SDL_SCANCODE_D => {
-                self.camera_input.x = 0.0;
-            },
-            c.SDL_SCANCODE_E => {
-                self.camera_input.y = 0.0;
-            },
-            c.SDL_SCANCODE_Q => {
-                self.camera_input.y = 0.0;
-            },
-
-            else => {},
-        }
-    }
 }
 
 fn getCurrentFrame(self: *Self) FrameData {

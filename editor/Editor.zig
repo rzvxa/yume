@@ -2,15 +2,20 @@ const c = @import("clibs");
 
 const std = @import("std");
 
+const gizmo = @import("gizmo.zig");
+
 const check_vk = @import("yume").vki.check_vk;
 
 const textures = @import("yume").textures;
 const Texture = textures.Texture;
 
 const Camera = @import("yume").Camera;
+const ScanCode = @import("yume").inputs.ScanCode;
+const InputsContext = @import("yume").inputs.InputContext;
 
 const GameApp = @import("yume").GameApp;
 const Vec3 = @import("yume").math3d.Vec3;
+const Vec4 = @import("yume").math3d.Vec4;
 const Mat4 = @import("yume").math3d.Mat4;
 const AllocatedBuffer = @import("yume").AllocatedBuffer;
 const FRAME_OVERLAP = @import("yume").FRAME_OVERLAP;
@@ -22,6 +27,8 @@ const VulkanDeleter = @import("yume").VulkanDeleter;
 
 const Engine = @import("yume").VulkanEngine;
 const Self = @This();
+
+inputs: InputsContext = .{},
 
 play: bool = false,
 imgui_demo_open: bool = false,
@@ -72,6 +79,10 @@ pub fn deinit(_: *Self, ctx: *GameApp) void {
     c.cImGui_ImplVulkan_Shutdown();
 }
 
+pub fn newFrame(self: *Self, _: *GameApp) void {
+    self.inputs.clear();
+}
+
 pub fn processEvent(self: *Self, ctx: *GameApp, event: *c.SDL_Event) bool {
     _ = c.cImGui_ImplSDL3_ProcessEvent(event);
     switch (event.type) {
@@ -84,97 +95,12 @@ pub fn processEvent(self: *Self, ctx: *GameApp, event: *c.SDL_Event) bool {
         else => {},
     }
     if (self.is_game_window_focused) {
-        ctx.engine.processGameEvent(event);
+        ctx.inputs.push(event);
     } else if (self.is_scene_window_focused) {
-        self.processSceneEvent(event);
-    } else {
-        ctx.engine.camera_input.x = 0;
-        ctx.engine.camera_input.y = 0;
-        ctx.engine.camera_input.z = 0;
-        self.camera_input.x = 0;
-        self.camera_input.y = 0;
-        self.camera_input.z = 0;
-        self.camera_input_rot.x = 0;
-        self.camera_input_rot.y = 0;
-        self.camera_input_rot.z = 0;
+        self.inputs.push(event);
     }
 
     return true;
-}
-
-fn processSceneEvent(self: *Self, event: *c.SDL_Event) void {
-    if (event.type == c.SDL_EVENT_KEY_DOWN) {
-        switch (event.key.keysym.scancode) {
-            // WASD for camera
-            c.SDL_SCANCODE_W => {
-                self.camera_input.z = 1.0;
-            },
-            c.SDL_SCANCODE_S => {
-                self.camera_input.z = -1.0;
-            },
-            c.SDL_SCANCODE_A => {
-                self.camera_input.x = -1.0;
-            },
-            c.SDL_SCANCODE_D => {
-                self.camera_input.x = 1.0;
-            },
-            c.SDL_SCANCODE_E => {
-                self.camera_input.y = 1.0;
-            },
-            c.SDL_SCANCODE_Q => {
-                self.camera_input.y = -1.0;
-            },
-            c.SDL_SCANCODE_J => {
-                self.camera_input_rot.y = -1.0;
-            },
-            c.SDL_SCANCODE_L => {
-                self.camera_input_rot.y = 1.0;
-            },
-            c.SDL_SCANCODE_K => {
-                self.camera_input_rot.x = 1.0;
-            },
-            c.SDL_SCANCODE_I => {
-                self.camera_input_rot.x = -1.0;
-            },
-
-            else => {},
-        }
-    } else if (event.type == c.SDL_EVENT_KEY_UP) {
-        switch (event.key.keysym.scancode) {
-            c.SDL_SCANCODE_W => {
-                self.camera_input.z = 0.0;
-            },
-            c.SDL_SCANCODE_S => {
-                self.camera_input.z = 0.0;
-            },
-            c.SDL_SCANCODE_A => {
-                self.camera_input.x = 0.0;
-            },
-            c.SDL_SCANCODE_D => {
-                self.camera_input.x = 0.0;
-            },
-            c.SDL_SCANCODE_E => {
-                self.camera_input.y = 0.0;
-            },
-            c.SDL_SCANCODE_Q => {
-                self.camera_input.y = 0.0;
-            },
-            c.SDL_SCANCODE_J => {
-                self.camera_input_rot.y = 0.0;
-            },
-            c.SDL_SCANCODE_L => {
-                self.camera_input_rot.y = 0.0;
-            },
-            c.SDL_SCANCODE_K => {
-                self.camera_input_rot.x = 0.0;
-            },
-            c.SDL_SCANCODE_I => {
-                self.camera_input_rot.x = 0.0;
-            },
-
-            else => {},
-        }
-    }
 }
 
 fn isInGameView(self: *Self, pos: c.ImVec2) bool {
@@ -188,12 +114,53 @@ fn isInSceneView(self: *Self, pos: c.ImVec2) bool {
 }
 
 pub fn update(self: *Self, ctx: *GameApp) void {
-    if (self.camera_input.squaredLen() > (0.1 * 0.1)) {
-        const camera_delta = self.camera_input.normalized().mulf(ctx.delta * 5.0);
+    var input: Vec3 = Vec3.make(0, 0, 0);
+    var input_rot: Vec3 = Vec3.make(0, 0, 0);
+    input.z += if (self.inputs.isKeyDown(ScanCode.W)) 1 else 0;
+    input.z += if (self.inputs.isKeyDown(ScanCode.S)) -1 else 0;
+    input.x += if (self.inputs.isKeyDown(ScanCode.A)) -1 else 0;
+    input.x += if (self.inputs.isKeyDown(ScanCode.D)) 1 else 0;
+    input.x += if (self.inputs.isKeyDown(ScanCode.E)) 1 else 0;
+    input.y += if (self.inputs.isKeyDown(ScanCode.Q)) -1 else 0;
+    input_rot.y += if (self.inputs.isKeyDown(ScanCode.J)) -1 else 0;
+    input_rot.y += if (self.inputs.isKeyDown(ScanCode.L)) 1 else 0;
+    input_rot.x += if (self.inputs.isKeyDown(ScanCode.K)) 1 else 0;
+    input_rot.x += if (self.inputs.isKeyDown(ScanCode.I)) -1 else 0;
+
+    input = input.normalized().mulf(5); // normalize movement speed
+
+    // mouse wheel
+
+    const rot_x = Mat4.rotation(Vec3.make(1.0, 0.0, 0.0), self.camera_rot.x);
+    const rot_y = Mat4.rotation(Vec3.make(0.0, 1.0, 0.0), self.camera_rot.y);
+    const rot_z = Mat4.rotation(Vec3.make(0.0, 0.0, 1.0), self.camera_rot.z);
+    const rot_mat = rot_x.mul(rot_y).mul(rot_z);
+
+    const forward = Vec4.make(0, 0, 1, 0);
+
+    const transformedDirection = rot_mat.mulVec4(forward);
+
+    // Extract the 3D directional vector
+    const dir = Vec3.make(
+        transformedDirection.x,
+        transformedDirection.y,
+        transformedDirection.z,
+    );
+
+    const wheel = self.inputs.mouseWheel();
+    const scroll_speed: f32 = if (self.inputs.isKeyDown(ScanCode.LeftCtrl)) 5 else 20;
+    if (wheel.y > 0) {
+        input = input.add(dir.mulf(scroll_speed));
+    } else if (wheel.y < 0) {
+        input = input.sub(dir.mulf(scroll_speed));
+    }
+
+    if (input.squaredLen() > (0.1 * 0.1)) {
+        const camera_delta = input.mulf(ctx.delta);
         self.camera_pos = Vec3.add(self.camera_pos, camera_delta);
     }
-    if (self.camera_input_rot.squaredLen() > (0.1 * 0.1)) {
-        const rot_delta = self.camera_input_rot.mulf(ctx.delta * 1.0);
+    if (input_rot.squaredLen() > (0.1 * 0.1)) {
+        const rot_delta = input_rot.mulf(ctx.delta * 1.0);
         self.camera_rot = self.camera_rot.add(rot_delta);
     }
 }
@@ -420,53 +387,17 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
     }.f, &frame_userdata);
     c.ImDrawList_AddCallback(editor_image, c.ImDrawCallback_ResetRenderState, null);
 
-    const r = ctx.engine.renderables.items[0];
-    const bounds = r.worldBounds();
-    const view_proj = self.camera.view_projection;
-    const screenWidth = self.scene_view_size.x;
-    const screenHeight = self.scene_view_size.y;
-    const x_off = self.scene_window_rect.x;
-    const y_off = self.scene_window_rect.y;
+    gizmo.newFrame(editor_image, self.camera.view_projection, .{
+        .x = self.scene_window_rect.x,
+        .y = self.scene_window_rect.y,
+        .width = self.scene_view_size.x,
+        .height = self.scene_view_size.y,
+    });
 
-    const points = [8]Vec3{
-        Vec3{ .x = bounds.mins.x, .y = bounds.mins.y, .z = bounds.mins.z },
-        Vec3{ .x = bounds.maxs.x, .y = bounds.mins.y, .z = bounds.mins.z },
-        Vec3{ .x = bounds.mins.x, .y = bounds.maxs.y, .z = bounds.mins.z },
-        Vec3{ .x = bounds.maxs.x, .y = bounds.maxs.y, .z = bounds.mins.z },
-        Vec3{ .x = bounds.mins.x, .y = bounds.mins.y, .z = bounds.maxs.z },
-        Vec3{ .x = bounds.maxs.x, .y = bounds.mins.y, .z = bounds.maxs.z },
-        Vec3{ .x = bounds.mins.x, .y = bounds.maxs.y, .z = bounds.maxs.z },
-        Vec3{ .x = bounds.maxs.x, .y = bounds.maxs.y, .z = bounds.maxs.z },
-    };
-    const edges = [_][2]Vec3{
-        .{ points[0], points[1] },
-        .{ points[0], points[2] },
-        .{ points[0], points[4] },
-        .{ points[1], points[3] },
-        .{ points[1], points[5] },
-        .{ points[2], points[3] },
-        .{ points[2], points[6] },
-        .{ points[3], points[7] },
-        .{ points[4], points[5] },
-        .{ points[4], points[6] },
-        .{ points[5], points[7] },
-        .{ points[6], points[7] },
-    };
-    const red = c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 1, .y = 0, .z = 0, .w = 1 });
-    for (edges) |edge| {
-        const a = view_proj.mulVec3(edge[0]);
-        const b = view_proj.mulVec3(edge[1]);
-        const ax = (a.x + 1) * 0.5 * screenWidth;
-        const ay = (a.y + 1) * 0.5 * screenHeight;
-        const bx = (b.x + 1) * 0.5 * screenWidth;
-        const by = (b.y + 1) * 0.5 * screenHeight;
-        c.ImDrawList_AddLine(
-            editor_image,
-            c.ImVec2{ .x = ax + x_off, .y = ay + y_off },
-            c.ImVec2{ .x = bx + x_off, .y = by + y_off },
-            red,
-        );
-    }
+    const r = ctx.engine.renderables.items[0];
+    gizmo.drawBoundingBox(r.worldBounds()) catch @panic("error");
+
+    gizmo.endFrame();
     c.ImGui_End();
 
     c.ImGui_Render();

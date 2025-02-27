@@ -73,7 +73,12 @@ pub const Vec3 = extern struct {
     }
 
     pub inline fn normalized(self: Self) Self {
-        return self.divf(self.len());
+        const l = self.len();
+        if (l > 0) {
+            return self.divf(l);
+        } else {
+            return Self.ZERO;
+        }
     }
 
     pub inline fn dot(a: Self, b: Self) f32 {
@@ -386,4 +391,11 @@ pub const Mat4 = extern union {
             (n12 * n23 * n31 - n13 * n22 * n31 + n13 * n21 * n32 - n11 * n23 * n32 - n12 * n21 * n33 + n11 * n22 * n33) * det_inv,
         };
     }
+};
+
+pub const Rect = struct {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
 };
