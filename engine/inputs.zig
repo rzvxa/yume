@@ -254,6 +254,12 @@ pub const ScanCode = enum(c_int) {
     EndCall = 290,
 };
 
+pub const MouseButton = enum {
+    Left,
+    Middle,
+    Right,
+};
+
 pub const KeyState = enum(u1) {
     Up,
     Down,
@@ -262,12 +268,17 @@ pub const KeyState = enum(u1) {
 pub const InputContext = struct {
     const Self = @This();
     const ScancodeStates = [c.SDL_NUM_SCANCODES]KeyState;
+    const MouseButtonStates = [3]KeyState; // Assuming left, middle, and right mouse buttons
 
     by_scancode: ScancodeStates = std.mem.zeroes(ScancodeStates),
+    by_mouse_button: MouseButtonStates = std.mem.zeroes(MouseButtonStates),
     mouse_wheel: Vec2 = Vec2.ZERO,
+    mouse_pos: Vec2 = Vec2.ZERO,
+    mouse_delta: Vec2 = Vec2.ZERO,
 
     pub fn clear(self: *Self) void {
         self.mouse_wheel = Vec2.ZERO;
+        self.mouse_delta = Vec2.ZERO;
     }
 
     pub fn push(self: *Self, e: *c.SDL_Event) void {
@@ -281,6 +292,29 @@ pub const InputContext = struct {
             c.SDL_EVENT_MOUSE_WHEEL => {
                 self.mouse_wheel = Vec2.make(e.wheel.x, e.wheel.y);
             },
+            c.SDL_EVENT_MOUSE_BUTTON_DOWN => {
+                const button_idx: usize = switch (e.button.button) {
+                    c.SDL_BUTTON_LEFT => 0,
+                    c.SDL_BUTTON_MIDDLE => 1,
+                    c.SDL_BUTTON_RIGHT => 2,
+                    else => return,
+                };
+                self.by_mouse_button[button_idx] = KeyState.Down;
+            },
+            c.SDL_EVENT_MOUSE_BUTTON_UP => {
+                const button_idx: usize = switch (e.button.button) {
+                    c.SDL_BUTTON_LEFT => 0,
+                    c.SDL_BUTTON_MIDDLE => 1,
+                    c.SDL_BUTTON_RIGHT => 2,
+                    else => return,
+                };
+                self.by_mouse_button[button_idx] = KeyState.Up;
+            },
+            c.SDL_EVENT_MOUSE_MOTION => {
+                const new_mouse_pos = Vec2.make(e.motion.x, e.motion.y);
+                self.mouse_delta = new_mouse_pos.sub(self.mouse_pos);
+                self.mouse_pos = new_mouse_pos;
+            },
             else => {},
         }
     }
@@ -289,8 +323,25 @@ pub const InputContext = struct {
         return self.stateOf(scancode) == KeyState.Down;
     }
 
+    pub inline fn isMouseButtonDown(self: *Self, button: MouseButton) bool {
+        const button_idx = switch (button) {
+            MouseButton.Left => 0,
+            MouseButton.Middle => 1,
+            MouseButton.Right => 2,
+        };
+        return self.by_mouse_button[button_idx] == KeyState.Down;
+    }
+
     pub inline fn mouseWheel(self: *Self) Vec2 {
         return self.mouse_wheel;
+    }
+
+    pub inline fn mousePos(self: *Self) Vec2 {
+        return self.mouse_pos;
+    }
+
+    pub inline fn mouseDelta(self: *Self) Vec2 {
+        return self.mouse_delta;
     }
 
     pub inline fn stateOf(self: *Self, scancode: ScanCode) KeyState {

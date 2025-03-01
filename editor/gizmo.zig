@@ -66,12 +66,13 @@ pub fn drawBoundingBox(bounds: BoundingBox) DrawError!void {
     };
 
     for (edges) |edge| {
-        c.ImDrawList_AddLine(
-            context.drawlist,
-            toScreenPoint(edge[0]),
-            toScreenPoint(edge[1]),
-            red(),
-        );
+        const a = toScreenPoint(edge[0]);
+        const b = toScreenPoint(edge[1]);
+        // don't draw offscreen lines
+        if (a == null or b == null) {
+            continue;
+        }
+        c.ImDrawList_AddLine(context.drawlist, a.?, b.?, red());
     }
 }
 
@@ -89,14 +90,22 @@ pub fn drawArrow(from: Vec3, to: Vec3, thickness: f32, head_size: f32) DrawError
     const n = pixelSize(thickness);
     const head = head_size / n;
 
+    const imvec0 = c.ImVec2{ .x = 0, .y = 0 };
+
     // Calculate the direction vector
     const direction = to.sub(from).normalized();
-    const screen_to = toScreenPoint(to.sub(direction.mulf(head_size)));
+    const screen_to = toScreenPoint(to.sub(direction.mulf(head_size))) orelse imvec0;
 
     std.log.debug("n: {d} / {d} = {d}\n", .{ head_size, n, head });
 
     // Draw the main arrow line
-    c.ImDrawList_AddLineEx(context.drawlist, toScreenPoint(from), screen_to, color, thickness);
+    c.ImDrawList_AddLineEx(
+        context.drawlist,
+        toScreenPoint(from) orelse imvec0,
+        screen_to,
+        color,
+        thickness,
+    );
 
     // Create a basis for the perpendicular vector
     const upVector = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 };
@@ -119,30 +128,30 @@ pub fn drawArrow(from: Vec3, to: Vec3, thickness: f32, head_size: f32) DrawError
     // Draw the 4 triangles to form the pyramid arrowhead
     c.ImDrawList_AddTriangleFilled(
         context.drawlist,
-        toScreenPoint(base1),
-        toScreenPoint(base2),
-        toScreenPoint(arrowTip),
+        toScreenPoint(base1) orelse imvec0,
+        toScreenPoint(base2) orelse imvec0,
+        toScreenPoint(arrowTip) orelse imvec0,
         color,
     );
     c.ImDrawList_AddTriangleFilled(
         context.drawlist,
-        toScreenPoint(base2),
-        toScreenPoint(base3),
-        toScreenPoint(arrowTip),
+        toScreenPoint(base2) orelse imvec0,
+        toScreenPoint(base3) orelse imvec0,
+        toScreenPoint(arrowTip) orelse imvec0,
         color,
     );
     c.ImDrawList_AddTriangleFilled(
         context.drawlist,
-        toScreenPoint(base3),
-        toScreenPoint(base4),
-        toScreenPoint(arrowTip),
+        toScreenPoint(base3) orelse imvec0,
+        toScreenPoint(base4) orelse imvec0,
+        toScreenPoint(arrowTip) orelse imvec0,
         color,
     );
     c.ImDrawList_AddTriangleFilled(
         context.drawlist,
-        toScreenPoint(base4),
-        toScreenPoint(base1),
-        toScreenPoint(arrowTip),
+        toScreenPoint(base4) orelse imvec0,
+        toScreenPoint(base1) orelse imvec0,
+        toScreenPoint(arrowTip) orelse imvec0,
         color,
     );
 }
@@ -206,16 +215,33 @@ fn toWorldPosition(screen_point: c.ImVec2) Vec3 {
     return world_position;
 }
 
-fn toScreenPoint(vec: Vec3) c.ImVec2 {
-    const view_proj_vec = context.view_projection.mulVec3(vec);
+fn toScreenPoint(vec: Vec3) ?c.ImVec2 {
+    var view_proj_vec = context.view_projection.mulVec3(vec);
+
+    if (view_proj_vec.z > 1 or view_proj_vec.z < -1) {
+        return null;
+    }
+
+    if (view_proj_vec.x > 1) {
+        view_proj_vec.x = 1;
+    } else if (view_proj_vec.x < -1) {
+        view_proj_vec.x = -1;
+    }
+    if (view_proj_vec.y > 1) {
+        view_proj_vec.y = 1;
+    } else if (view_proj_vec.y < -1) {
+        view_proj_vec.y = -1;
+    }
+
     var point = c.ImVec2{
         .x = (view_proj_vec.x + 1) * 0.5 * context.viewport.width,
         .y = (view_proj_vec.y + 1) * 0.5 * context.viewport.height,
     };
 
-    // apply the possible offsets
+    // Apply the possible offsets
     point.x += context.viewport.x;
     point.y += context.viewport.y;
+
     return point;
 }
 

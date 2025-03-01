@@ -11,6 +11,7 @@ const Texture = textures.Texture;
 
 const Camera = @import("yume").Camera;
 const ScanCode = @import("yume").inputs.ScanCode;
+const MouseButton = @import("yume").inputs.MouseButton;
 const InputsContext = @import("yume").inputs.InputContext;
 
 const GameApp = @import("yume").GameApp;
@@ -116,45 +117,51 @@ fn isInSceneView(self: *Self, pos: c.ImVec2) bool {
 pub fn update(self: *Self, ctx: *GameApp) void {
     var input: Vec3 = Vec3.make(0, 0, 0);
     var input_rot: Vec3 = Vec3.make(0, 0, 0);
-    input.z += if (self.inputs.isKeyDown(ScanCode.W)) 1 else 0;
-    input.z += if (self.inputs.isKeyDown(ScanCode.S)) -1 else 0;
-    input.x += if (self.inputs.isKeyDown(ScanCode.A)) -1 else 0;
-    input.x += if (self.inputs.isKeyDown(ScanCode.D)) 1 else 0;
-    input.y += if (self.inputs.isKeyDown(ScanCode.E)) 1 else 0;
-    input.y += if (self.inputs.isKeyDown(ScanCode.Q)) -1 else 0;
-    input_rot.y += if (self.inputs.isKeyDown(ScanCode.J)) -1 else 0;
-    input_rot.y += if (self.inputs.isKeyDown(ScanCode.L)) 1 else 0;
-    input_rot.x += if (self.inputs.isKeyDown(ScanCode.K)) 1 else 0;
-    input_rot.x += if (self.inputs.isKeyDown(ScanCode.I)) -1 else 0;
 
-    input = input.normalized().mulf(5); // normalize movement speed
-
-    // mouse wheel
-
+    // Update camera rotation matrix
     const rot_x = Mat4.rotation(Vec3.make(1.0, 0.0, 0.0), self.camera_rot.x);
     const rot_y = Mat4.rotation(Vec3.make(0.0, 1.0, 0.0), self.camera_rot.y);
     const rot_z = Mat4.rotation(Vec3.make(0.0, 0.0, 1.0), self.camera_rot.z);
     const rot_mat = rot_x.mul(rot_y).mul(rot_z);
 
-    const forward = Vec4.make(0, 0, 1, 0);
+    const forward = rot_mat.mulVec4(Vec4.make(0, 0, 1, 0)).toVec3();
+    const right = rot_mat.mulVec4(Vec4.make(1, 0, 0, 0)).toVec3();
+    const up = rot_mat.mulVec4(Vec4.make(0, 1, 0, 0)).toVec3();
 
-    const transformedDirection = rot_mat.mulVec4(forward);
+    if (self.inputs.isMouseButtonDown(MouseButton.Middle)) {
+        // Shift + MMB for panning
+        if (self.inputs.isKeyDown(ScanCode.LeftShift)) {
+            const mouse_delta = self.inputs.mouseDelta();
+            input = input.sub(right.mulf(mouse_delta.x));
+            input = input.add(up.mulf(mouse_delta.y));
+        } else { // Camera rotation handling (MMB for orbiting)
+            const mouse_delta = self.inputs.mouseDelta();
+            input_rot.y += mouse_delta.x;
+            input_rot.x += mouse_delta.y;
+        }
+    }
 
-    // Extract the 3D directional vector
-    const dir = Vec3.make(
-        transformedDirection.x,
-        transformedDirection.y,
-        transformedDirection.z,
-    );
+    // Handle translation inputs (W, A, S, D for panning) relative to view
+    input = input.add(forward.mulf(if (self.inputs.isKeyDown(ScanCode.W)) 1 else 0));
+    input = input.sub(forward.mulf(if (self.inputs.isKeyDown(ScanCode.S)) 1 else 0));
+    input = input.add(right.mulf(if (self.inputs.isKeyDown(ScanCode.D)) 1 else 0));
+    input = input.sub(right.mulf(if (self.inputs.isKeyDown(ScanCode.A)) 1 else 0));
+    input = input.add(up.mulf(if (self.inputs.isKeyDown(ScanCode.E)) 1 else 0));
+    input = input.sub(up.mulf(if (self.inputs.isKeyDown(ScanCode.Q)) 1 else 0));
 
+    // Normalize movement speed
+    input = input.normalized().mulf(5);
+
+    // Mouse wheel for zooming in and out relative to view direction
     const wheel = self.inputs.mouseWheel();
     const scroll_speed: f32 = if (self.inputs.isKeyDown(ScanCode.LeftCtrl)) 5 else 20;
     if (wheel.y > 0) {
-        input = input.add(dir.mulf(scroll_speed));
+        input = input.add(forward.mulf(scroll_speed));
     } else if (wheel.y < 0) {
-        input = input.sub(dir.mulf(scroll_speed));
+        input = input.sub(forward.mulf(scroll_speed));
     }
 
+    // Apply camera movements
     if (input.squaredLen() > (0.1 * 0.1)) {
         const camera_delta = input.mulf(ctx.delta);
         self.camera_pos = Vec3.add(self.camera_pos, camera_delta);
