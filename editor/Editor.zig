@@ -124,15 +124,15 @@ pub fn update(self: *Self, ctx: *GameApp) void {
     const rot_z = Mat4.rotation(Vec3.make(0.0, 0.0, 1.0), self.camera_rot.z);
     const rot_mat = rot_x.mul(rot_y).mul(rot_z);
 
-    const forward = rot_mat.mulVec4(Vec4.make(0, 0, 1, 0)).toVec3();
-    const right = rot_mat.mulVec4(Vec4.make(1, 0, 0, 0)).toVec3();
-    const up = rot_mat.mulVec4(Vec4.make(0, 1, 0, 0)).toVec3();
+    const forward = rot_mat.mulVec4(Vec4.make(0, 0, 1, 0)).toVec3().normalized();
+    const left = Vec3.cross(forward, Vec3.make(0, 1, 0)).normalized();
+    const up = Vec3.cross(left, forward).normalized();
 
     if (self.inputs.isMouseButtonDown(MouseButton.Middle)) {
         // Shift + MMB for panning
         if (self.inputs.isKeyDown(ScanCode.LeftShift)) {
             const mouse_delta = self.inputs.mouseDelta();
-            input = input.sub(right.mulf(mouse_delta.x));
+            input = input.add(left.mulf(mouse_delta.x));
             input = input.add(up.mulf(mouse_delta.y));
         } else { // Camera rotation handling (MMB for orbiting)
             const mouse_delta = self.inputs.mouseDelta();
@@ -144,8 +144,8 @@ pub fn update(self: *Self, ctx: *GameApp) void {
     // Handle translation inputs (W, A, S, D for panning) relative to view
     input = input.add(forward.mulf(if (self.inputs.isKeyDown(ScanCode.W)) 1 else 0));
     input = input.sub(forward.mulf(if (self.inputs.isKeyDown(ScanCode.S)) 1 else 0));
-    input = input.add(right.mulf(if (self.inputs.isKeyDown(ScanCode.D)) 1 else 0));
-    input = input.sub(right.mulf(if (self.inputs.isKeyDown(ScanCode.A)) 1 else 0));
+    input = input.add(left.mulf(if (self.inputs.isKeyDown(ScanCode.A)) 1 else 0));
+    input = input.sub(left.mulf(if (self.inputs.isKeyDown(ScanCode.D)) 1 else 0));
     input = input.add(up.mulf(if (self.inputs.isKeyDown(ScanCode.E)) 1 else 0));
     input = input.sub(up.mulf(if (self.inputs.isKeyDown(ScanCode.Q)) 1 else 0));
 
