@@ -15,17 +15,19 @@ const GizmoContext = struct {
     inframe: bool = false,
     color: c.ImU32 = undefined,
     drawlist: [*c]c.ImDrawList = undefined,
+    view: Mat4 = Mat4.IDENTITY,
     view_projection: Mat4 = Mat4.IDENTITY,
     viewport: Rect = std.mem.zeroes(Rect),
 };
 
 var context: GizmoContext = .{};
 
-pub fn newFrame(drawlist: [*c]c.ImDrawList, view_projection: Mat4, viewport: Rect) void {
+pub fn newFrame(drawlist: [*c]c.ImDrawList, view: Mat4, view_projection: Mat4, viewport: Rect) void {
     if (context.inframe) {
         @panic("can't start a new frame while in frame");
     }
     context.drawlist = drawlist;
+    context.view = view;
     context.view_projection = view_projection;
     context.viewport = viewport;
     context.color = black();
@@ -84,13 +86,12 @@ fn pixelSize(n: f32) f32 {
 
 pub fn drawArrow(from: Vec3, to: Vec3, thickness: f32, head_size: f32) DrawError!void {
     const color = context.color;
+    const n = pixelSize(thickness);
+    const head = head_size / n;
 
     // Calculate the direction vector
     const direction = to.sub(from).normalized();
     const screen_to = toScreenPoint(to.sub(direction.mulf(head_size)));
-
-    const n = pixelSize(thickness);
-    const head = head_size / n;
 
     std.log.debug("n: {d} / {d} = {d}\n", .{ head_size, n, head });
 
@@ -155,12 +156,13 @@ pub fn manipulate(pos: Vec3, rot: Vec3, scale: Vec3) DrawError!void {
     // const outline_thickness = 1;
 
     const col = context.color;
+
     context.color = red();
-    try drawArrow(pos, x_end, thickness, 0.5 * 0.4);
+    try drawArrow(pos, x_end, thickness, 0.2);
     context.color = green();
-    try drawArrow(pos, y_end, thickness, 0.5 * 0.4);
+    try drawArrow(pos, y_end, thickness, 0.2);
     context.color = blue();
-    try drawArrow(pos, z_end, thickness, 0.5 * 0.4);
+    try drawArrow(pos, z_end, thickness, 0.2);
     context.color = col;
 
     // c.ImDrawList_AddLineEx(context.drawlist, toScreenPoint(pos), toScreenPoint(x_end), black(), thickness + outline_thickness);

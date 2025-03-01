@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const Vec2 = extern struct {
+    const Self = @This();
     x: f32,
     y: f32,
 
@@ -12,6 +13,22 @@ pub const Vec2 = extern struct {
 
     pub inline fn scalar(n: f32) Vec2 {
         return .{ .x = n, .y = n };
+    }
+
+    pub inline fn squaredLen(self: Self) f32 {
+        return self.x * self.x + self.y * self.y;
+    }
+
+    pub inline fn len(self: Self) f32 {
+        return @sqrt(self.x * self.x + self.y * self.y);
+    }
+
+    pub inline fn add(self: Self, other: Self) Self {
+        return make(self.x - other.x, self.y - other.y);
+    }
+
+    pub inline fn sub(self: Self, other: Self) Self {
+        return make(self.x - other.x, self.y - other.y);
     }
 
     pub inline fn toVec3(self: Vec2, z: f32) Vec3 {
@@ -302,6 +319,30 @@ pub const Mat4 = extern union {
             Vec4.make(0.0, 0.0, far / (near - far), -1.0),
             Vec4.make(0.0, 0.0, -(far * near) / (far - near), 0.0),
         );
+    }
+
+    pub fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) Mat4 {
+        return make(Vec4.make(
+            2 / (right - left),
+            0,
+            0,
+            0,
+        ), Vec4.make(
+            0,
+            2 / (bottom - top),
+            0,
+            0,
+        ), Vec4.make(
+            0,
+            0,
+            1 / (near - far),
+            0,
+        ), Vec4.make(
+            -(right + left) / (right - left),
+            -(bottom + top) / (bottom - top),
+            near / (near - far),
+            1,
+        ));
     }
 
     /// Create a rotation matrix around an arbitrary axis.

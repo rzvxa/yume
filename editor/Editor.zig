@@ -387,7 +387,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
     }.f, &frame_userdata);
     c.ImDrawList_AddCallback(editor_image, c.ImDrawCallback_ResetRenderState, null);
 
-    gizmo.newFrame(editor_image, self.camera.view_projection, .{
+    gizmo.newFrame(editor_image, self.camera.view, self.camera.view_projection, .{
         .x = self.scene_window_rect.x,
         .y = self.scene_window_rect.y,
         .width = self.scene_view_size.x,
