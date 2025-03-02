@@ -193,6 +193,43 @@ pub const Quat = extern struct {
     pub inline fn make(x: f32, y: f32, z: f32, w: f32) Self {
         return .{ .x = x, .y = y, .z = z, .w = w };
     }
+
+    pub fn fromAxisAngle(axis: Vec3, angle: f32) Quat {
+        const half_angle = angle / 2.0;
+        const sin_half_angle = @sin(half_angle);
+        return Quat{
+            .w = @cos(half_angle),
+            .x = axis.x * sin_half_angle,
+            .y = axis.y * sin_half_angle,
+            .z = axis.z * sin_half_angle,
+        };
+    }
+
+    pub fn mul(self: Quat, other: Quat) Quat {
+        return Quat{
+            .w = self.w * other.w - self.x * other.x - self.y * other.y - self.z * other.z,
+            .x = self.w * other.x + self.x * other.w + self.y * other.z - self.z * other.y,
+            .y = self.w * other.y - self.x * other.z + self.y * other.w + self.z * other.x,
+            .z = self.w * other.z + self.x * other.y - self.y * other.x + self.z * other.w,
+        };
+    }
+
+    pub fn mulVec3(self: Quat, v: Vec3) Vec3 {
+        const q_vec = Vec3.make(self.x, self.y, self.z);
+        const uv = Vec3.cross(q_vec, v);
+        const uuv = Vec3.cross(q_vec, uv);
+        return v.add((uv.mulf(2 * self.w)).add(uuv.mulf(2)));
+    }
+
+    pub fn normalized(self: Quat) Quat {
+        const length = @sqrt(self.w * self.w + self.x * self.x + self.y * self.y + self.z * self.z);
+        return Quat{
+            .w = self.w / length,
+            .x = self.x / length,
+            .y = self.y / length,
+            .z = self.z / length,
+        };
+    }
 };
 
 pub const Mat4 = extern union {

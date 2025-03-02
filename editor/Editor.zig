@@ -17,6 +17,7 @@ const InputsContext = @import("yume").inputs.InputContext;
 const GameApp = @import("yume").GameApp;
 const Vec3 = @import("yume").math3d.Vec3;
 const Vec4 = @import("yume").math3d.Vec4;
+const Quat = @import("yume").math3d.Quat;
 const Mat4 = @import("yume").math3d.Mat4;
 const AllocatedBuffer = @import("yume").AllocatedBuffer;
 const FRAME_OVERLAP = @import("yume").FRAME_OVERLAP;
@@ -118,14 +119,15 @@ pub fn update(self: *Self, ctx: *GameApp) void {
     var input: Vec3 = Vec3.make(0, 0, 0);
     var input_rot: Vec3 = Vec3.make(0, 0, 0);
 
-    // Update camera rotation matrix
-    const rot_x = Mat4.rotation(Vec3.make(1.0, 0.0, 0.0), self.camera_rot.x);
-    const rot_y = Mat4.rotation(Vec3.make(0.0, 1.0, 0.0), self.camera_rot.y);
-    const rot_z = Mat4.rotation(Vec3.make(0.0, 0.0, 1.0), self.camera_rot.z);
-    const rot_mat = rot_x.mul(rot_y).mul(rot_z);
+    // Create rotation quaternion
+    const rot_x = Quat.fromAxisAngle(Vec3.make(1.0, 0.0, 0.0), self.camera_rot.x);
+    const rot_y = Quat.fromAxisAngle(Vec3.make(0.0, 1.0, 0.0), self.camera_rot.y);
+    const rot_z = Quat.fromAxisAngle(Vec3.make(0.0, 0.0, 1.0), self.camera_rot.z);
+    const rot_quat = rot_z.mul(rot_y).mul(rot_x);
 
-    const forward = rot_mat.mulVec4(Vec4.make(0, 0, 1, 0)).toVec3().normalized();
-    const left = Vec3.cross(forward, Vec3.make(0, 1, 0)).normalized();
+    // Calculate direction vectors
+    const forward = rot_quat.mulVec3(Vec3.make(0, 0, 1)).normalized();
+    const left = rot_quat.mulVec3(Vec3.make(-1, 0, 0)).normalized();
     const up = Vec3.cross(left, forward).normalized();
 
     if (self.inputs.isMouseButtonDown(MouseButton.Middle)) {
@@ -139,15 +141,14 @@ pub fn update(self: *Self, ctx: *GameApp) void {
             input_rot.y += mouse_delta.x;
             input_rot.x += mouse_delta.y;
         }
+        // Handle translation inputs (W, A, S, D for panning) relative to view
+        input = input.add(forward.mulf(if (self.inputs.isKeyDown(ScanCode.W)) 1 else 0));
+        input = input.sub(forward.mulf(if (self.inputs.isKeyDown(ScanCode.S)) 1 else 0));
+        input = input.add(left.mulf(if (self.inputs.isKeyDown(ScanCode.A)) 1 else 0));
+        input = input.sub(left.mulf(if (self.inputs.isKeyDown(ScanCode.D)) 1 else 0));
+        input = input.add(up.mulf(if (self.inputs.isKeyDown(ScanCode.E)) 1 else 0));
+        input = input.sub(up.mulf(if (self.inputs.isKeyDown(ScanCode.Q)) 1 else 0));
     }
-
-    // Handle translation inputs (W, A, S, D for panning) relative to view
-    input = input.add(forward.mulf(if (self.inputs.isKeyDown(ScanCode.W)) 1 else 0));
-    input = input.sub(forward.mulf(if (self.inputs.isKeyDown(ScanCode.S)) 1 else 0));
-    input = input.add(left.mulf(if (self.inputs.isKeyDown(ScanCode.A)) 1 else 0));
-    input = input.sub(left.mulf(if (self.inputs.isKeyDown(ScanCode.D)) 1 else 0));
-    input = input.add(up.mulf(if (self.inputs.isKeyDown(ScanCode.E)) 1 else 0));
-    input = input.sub(up.mulf(if (self.inputs.isKeyDown(ScanCode.Q)) 1 else 0));
 
     // Normalize movement speed
     input = input.normalized().mulf(5);
@@ -393,6 +394,8 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         }
     }.f, &frame_userdata);
     c.ImDrawList_AddCallback(editor_image, c.ImDrawCallback_ResetRenderState, null);
+    c.ImGui_Text("Camera Position: Vec3{ .x = %f, .y = %f, .z = %f }", self.camera_pos.x, self.camera_pos.y, self.camera_pos.z);
+    c.ImGui_Text("Camera Rotation: Vec3{ .x = %f, .y = %f, .z = %f }", self.camera_rot.x, self.camera_rot.y, self.camera_rot.z);
 
     gizmo.newFrame(editor_image, self.camera.view, self.camera.view_projection, .{
         .x = self.scene_window_rect.x,

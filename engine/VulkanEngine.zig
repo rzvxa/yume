@@ -51,6 +51,20 @@ const Material = struct {
     pipeline_layout: c.VkPipelineLayout,
 };
 
+const MeshRenderer = struct {
+    mesh: *Mesh,
+    material: *Material,
+    transform: Mat4,
+
+    fn onTransformChange(self: *@This(), t: Mat4) void {
+        self.transform = t;
+    }
+
+    pub fn worldBounds(self: *const @This()) BoundingBox {
+        return self.mesh.bounds.translate(self.transform);
+    }
+};
+
 const RenderObject = struct {
     name: [*c]const u8,
     mesh: *Mesh,
@@ -1339,27 +1353,6 @@ fn initScene(self: *Self) void {
         .material = material,
     };
     self.renderables.append(lost_empire) catch @panic("Out of memory");
-
-    // var x: i32 = -20;
-    // var i: i32 = 0;
-    // while (x <= 20) : (x += 1) {
-    //     var y: i32 = -20;
-    //     while (y <= 20) : (y += 1) {
-    //         const translation = Mat4.translation(Vec3.make(@floatFromInt(x), 0.0, @floatFromInt(y)));
-    //         const scale = Mat4.scale(Vec3.make(0.2, 0.2, 0.2));
-    //         const transform = Mat4.mul(translation, scale);
-    //
-    //         i += 1;
-    //         const tri = RenderObject{
-    //             .name = "triangle",
-    //             .mesh = self.meshes.getPtr("triangle") orelse @panic("Failed to get triangle mesh"),
-    //             .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
-    //             .transform = transform,
-    //         };
-    //
-    //         self.renderables.append(tri) catch @panic("Out of memory");
-    //     }
-    // }
 }
 
 pub fn deinit(self: *Self) void {

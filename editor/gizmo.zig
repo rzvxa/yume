@@ -85,7 +85,7 @@ fn pixelSize(n: f32) f32 {
     return diff.len();
 }
 
-pub fn drawArrow(from: Vec3, to: Vec3, thickness: f32, head_size: f32) DrawError!void {
+pub fn drawArrow(from: Vec3, to: Vec3, thickness: f32, head_size: f32, outline_thickness: f32, outline_color: u32) DrawError!void {
     const color = context.color;
     const n = pixelSize(thickness);
     const head = head_size / n;
@@ -98,7 +98,14 @@ pub fn drawArrow(from: Vec3, to: Vec3, thickness: f32, head_size: f32) DrawError
 
     std.log.debug("n: {d} / {d} = {d}\n", .{ head_size, n, head });
 
-    // Draw the main arrow line
+    // Draw the main arrow line with outline
+    c.ImDrawList_AddLineEx(
+        context.drawlist,
+        toScreenPoint(from) orelse imvec0,
+        screen_to,
+        outline_color,
+        thickness + outline_thickness,
+    );
     c.ImDrawList_AddLineEx(
         context.drawlist,
         toScreenPoint(from) orelse imvec0,
@@ -125,35 +132,32 @@ pub fn drawArrow(from: Vec3, to: Vec3, thickness: f32, head_size: f32) DrawError
     const base4 = to.sub(direction.mulf(head_size)).sub(right).add(up);
     const arrowTip = to;
 
-    // Draw the 4 triangles to form the pyramid arrowhead
-    c.ImDrawList_AddTriangleFilled(
-        context.drawlist,
-        toScreenPoint(base1) orelse imvec0,
-        toScreenPoint(base2) orelse imvec0,
-        toScreenPoint(arrowTip) orelse imvec0,
-        color,
-    );
-    c.ImDrawList_AddTriangleFilled(
-        context.drawlist,
-        toScreenPoint(base2) orelse imvec0,
-        toScreenPoint(base3) orelse imvec0,
-        toScreenPoint(arrowTip) orelse imvec0,
-        color,
-    );
-    c.ImDrawList_AddTriangleFilled(
-        context.drawlist,
-        toScreenPoint(base3) orelse imvec0,
-        toScreenPoint(base4) orelse imvec0,
-        toScreenPoint(arrowTip) orelse imvec0,
-        color,
-    );
-    c.ImDrawList_AddTriangleFilled(
-        context.drawlist,
-        toScreenPoint(base4) orelse imvec0,
-        toScreenPoint(base1) orelse imvec0,
-        toScreenPoint(arrowTip) orelse imvec0,
-        color,
-    );
+    // Draw the 4 triangles to form the pyramid arrowhead with outline
+    const drawTriangleWithOutline = struct {
+        fn f(p1: Vec3, p2: Vec3, p3: Vec3, col: u32, out_col: u32) void {
+            _ = out_col;
+            const iv0 = c.ImVec2{ .x = 0, .y = 0 };
+            // c.ImDrawList_AddTriangleFilled(
+            //     context.drawlist,
+            //     toScreenPoint(p1) orelse iv0,
+            //     toScreenPoint(p2) orelse iv0,
+            //     toScreenPoint(p3) orelse iv0,
+            //     out_col,
+            // );
+            c.ImDrawList_AddTriangleFilled(
+                context.drawlist,
+                toScreenPoint(p1) orelse iv0,
+                toScreenPoint(p2) orelse iv0,
+                toScreenPoint(p3) orelse iv0,
+                col,
+            );
+        }
+    }.f;
+
+    drawTriangleWithOutline(base1, base2, arrowTip, color, outline_color);
+    drawTriangleWithOutline(base2, base3, arrowTip, darkenColor(color, 10), outline_color);
+    drawTriangleWithOutline(base3, base4, arrowTip, color, outline_color);
+    drawTriangleWithOutline(base4, base1, arrowTip, darkenColor(color, 10), outline_color);
 }
 
 pub fn manipulate(pos: Vec3, rot: Vec3, scale: Vec3) DrawError!void {
@@ -167,11 +171,11 @@ pub fn manipulate(pos: Vec3, rot: Vec3, scale: Vec3) DrawError!void {
     const col = context.color;
 
     context.color = red();
-    try drawArrow(pos, x_end, thickness, 0.2);
+    try drawArrow(pos, x_end, thickness, 0.2, 1, black());
     context.color = green();
-    try drawArrow(pos, y_end, thickness, 0.2);
+    try drawArrow(pos, y_end, thickness, 0.2, 1, black());
     context.color = blue();
-    try drawArrow(pos, z_end, thickness, 0.2);
+    try drawArrow(pos, z_end, thickness, 0.2, 1, black());
     context.color = col;
 
     // c.ImDrawList_AddLineEx(context.drawlist, toScreenPoint(pos), toScreenPoint(x_end), black(), thickness + outline_thickness);
@@ -267,4 +271,20 @@ fn green() c.ImU32 {
 
 fn blue() c.ImU32 {
     return c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0, .y = 0, .z = 1, .w = 1 });
+}
+
+fn darkenColor(color: u32, percentage: u8) u32 {
+    const r: u8 = @intCast((color >> 16) & 0xFF);
+    const g: u8 = @intCast((color >> 8) & 0xFF);
+    const b: u8 = @intCast(color & 0xFF);
+
+    const new_r = darken(r, percentage);
+    const new_g = darken(g, percentage);
+    const new_b = darken(b, percentage);
+
+    return (color & 0xFF000000) | (new_r << 16) | (new_g << 8) | new_b;
+}
+
+fn darken(col: u8, p: u8) u32 {
+    return @truncate(@as(u32, @intCast(@max(0, col))) - @as(u32, @intCast(col)) * p / 100);
 }
