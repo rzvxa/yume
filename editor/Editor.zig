@@ -131,13 +131,14 @@ pub fn update(self: *Self, ctx: *GameApp) void {
     const up = Vec3.cross(left, forward).normalized();
 
     if (self.inputs.isMouseButtonDown(MouseButton.Middle)) {
+        self.inputs.setRelativeMouseMode(true);
         // Shift + MMB for panning
         if (self.inputs.isKeyDown(ScanCode.LeftShift)) {
             const mouse_delta = self.inputs.mouseDelta();
             input = input.add(left.mulf(mouse_delta.x));
             input = input.add(up.mulf(mouse_delta.y));
         } else { // Camera rotation handling (MMB for orbiting)
-            const mouse_delta = self.inputs.mouseDelta();
+            const mouse_delta = self.inputs.mouseRelative();
             input_rot.y += mouse_delta.x;
             input_rot.x += mouse_delta.y;
         }
@@ -148,6 +149,8 @@ pub fn update(self: *Self, ctx: *GameApp) void {
         input = input.sub(left.mulf(if (self.inputs.isKeyDown(ScanCode.D)) 1 else 0));
         input = input.add(up.mulf(if (self.inputs.isKeyDown(ScanCode.E)) 1 else 0));
         input = input.sub(up.mulf(if (self.inputs.isKeyDown(ScanCode.Q)) 1 else 0));
+    } else {
+        self.inputs.setRelativeMouseMode(false);
     }
 
     // Normalize movement speed

@@ -96,8 +96,6 @@ pub fn drawArrow(from: Vec3, to: Vec3, thickness: f32, head_size: f32, outline_t
     const direction = to.sub(from).normalized();
     const screen_to = toScreenPoint(to.sub(direction.mulf(head_size))) orelse imvec0;
 
-    std.log.debug("n: {d} / {d} = {d}\n", .{ head_size, n, head });
-
     // Draw the main arrow line with outline
     c.ImDrawList_AddLineEx(
         context.drawlist,

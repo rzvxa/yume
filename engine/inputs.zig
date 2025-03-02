@@ -275,6 +275,7 @@ pub const InputContext = struct {
     mouse_wheel: Vec2 = Vec2.ZERO,
     mouse_pos: Vec2 = Vec2.ZERO,
     mouse_delta: Vec2 = Vec2.ZERO,
+    mouse_rel: Vec2 = Vec2.ZERO,
 
     pub fn clear(self: *Self) void {
         self.mouse_wheel = Vec2.ZERO;
@@ -314,6 +315,10 @@ pub const InputContext = struct {
                 const new_mouse_pos = Vec2.make(e.motion.x, e.motion.y);
                 self.mouse_delta = new_mouse_pos.sub(self.mouse_pos);
                 self.mouse_pos = new_mouse_pos;
+
+                if (c.SDL_GetRelativeMouseMode() == c.SDL_TRUE) {
+                    self.mouse_rel = Vec2.make(e.motion.xrel, e.motion.yrel);
+                }
             },
             else => {},
         }
@@ -344,8 +349,30 @@ pub const InputContext = struct {
         return self.mouse_delta;
     }
 
+    pub inline fn mouseRelative(self: *Self) Vec2 {
+        _ = self;
+        var xrel: f32 = 0;
+        var yrel: f32 = 0;
+        _ = c.SDL_GetRelativeMouseState(&xrel, &yrel);
+        const speed = (xrel * xrel) + (yrel * yrel);
+        if (speed <= 1) {
+            xrel = 0;
+            yrel = 0;
+        }
+
+        return Vec2.make(xrel, yrel);
+    }
+
     pub inline fn stateOf(self: *Self, scancode: ScanCode) KeyState {
         return self.by_scancode[@intFromEnum(scancode)];
+    }
+
+    pub inline fn setRelativeMouseMode(self: *Self, enabled: bool) void {
+        _ = self;
+        if (c.SDL_GetRelativeMouseMode() != c.SDL_TRUE) {
+            _ = c.SDL_GetRelativeMouseState(null, null);
+        }
+        _ = c.SDL_SetRelativeMouseMode(if (enabled) c.SDL_TRUE else c.SDL_FALSE);
     }
 };
 
