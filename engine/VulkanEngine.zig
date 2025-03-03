@@ -10,6 +10,8 @@ const mesh_mod = @import("mesh.zig");
 const Mesh = mesh_mod.Mesh;
 const BoundingBox = mesh_mod.BoundingBox;
 
+const scene = @import("scene.zig");
+
 const math3d = @import("math3d.zig");
 const Vec2 = math3d.Vec2;
 const Vec3 = math3d.Vec3;
@@ -51,17 +53,26 @@ const Material = struct {
     pipeline_layout: c.VkPipelineLayout,
 };
 
-const MeshRenderer = struct {
+pub const MeshRenderer = struct {
+    object: *scene.Object,
     mesh: *Mesh,
     material: *Material,
-    transform: Mat4,
 
-    fn onTransformChange(self: *@This(), t: Mat4) void {
-        self.transform = t;
+    pub fn init(object: *scene.Object, opts: struct { mesh: *Mesh, material: *Material }) MeshRenderer {
+        return .{
+            .object = object,
+            .mesh = opts.mesh,
+            .material = opts.material,
+        };
     }
 
     pub fn worldBounds(self: *const @This()) BoundingBox {
         return self.mesh.bounds.translate(self.transform);
+    }
+
+    pub fn asComponent(self: *@This()) scene.Component {
+        _ = self;
+        return .{};
     }
 };
 
@@ -120,6 +131,8 @@ const UploadContext = struct {
 };
 
 pub const FRAME_OVERLAP = 2;
+
+scene: *scene.Scene,
 
 // Data
 //
@@ -249,6 +262,7 @@ pub const VmaImageDeleter = struct {
 
 pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
     var engine = Self{
+        .scene = scene.Scene.init(a) catch @panic("OOM"),
         .window = window,
         .allocator = a,
         .deletion_queue = std.ArrayList(VulkanDeleter).init(a),
@@ -1291,6 +1305,12 @@ fn createShaderModule(self: *Self, code: []const u8) ?c.VkShaderModule {
     return shader_module;
 }
 
+pub fn loadScene(self: *Self, s: *scene.Scene) void {
+    var old_scene = self.scene;
+    self.scene = s;
+    old_scene.deinit();
+}
+
 fn initScene(self: *Self) void {
     const monkey_transform = Mat4.translation(Vec3.make(-5, 3, 0));
     const monkey = RenderObject{
@@ -1363,6 +1383,8 @@ pub fn deinit(self: *Self) void {
     while (mesh_it.next()) |entry| {
         self.allocator.free(entry.value_ptr.vertices);
     }
+
+    self.scene.deinit();
 
     self.textures.deinit();
     self.meshes.deinit();

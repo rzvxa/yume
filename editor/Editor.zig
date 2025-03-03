@@ -10,6 +10,8 @@ const textures = @import("yume").textures;
 const Texture = textures.Texture;
 
 const Camera = @import("yume").Camera;
+const Scene = @import("yume").scene_graph.Scene;
+const MeshRenderer = @import("yume").VulkanEngine.MeshRenderer;
 const ScanCode = @import("yume").inputs.ScanCode;
 const MouseButton = @import("yume").inputs.MouseButton;
 const InputsContext = @import("yume").inputs.InputContext;
@@ -73,6 +75,17 @@ pub fn init(ctx: *GameApp) Self {
     var self = Self{};
     self.init_descriptors(&ctx.engine);
     self.init_imgui(&ctx.engine);
+    var scene = Scene.init(ctx.allocator) catch @panic("OOM");
+    const monkey = scene.newObject(.{
+        .name = "Monkey",
+        .transform = Mat4.translation(Vec3.make(-5, 3, 0)),
+    }) catch @panic("OOM");
+
+    monkey.addComponent(MeshRenderer, .{
+        .mesh = ctx.engine.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
+        .material = ctx.engine.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
+    });
+    ctx.engine.loadScene(scene);
     return self;
 }
 

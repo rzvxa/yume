@@ -3,6 +3,7 @@ pub const VulkanEngine = @import("VulkanEngine.zig");
 pub const Mesh = @import("mesh.zig");
 pub const vki = @import("vulkan_init.zig");
 pub const textures = @import("textures.zig");
+pub const scene_graph = @import("scene.zig");
 
 pub const math3d = @import("math3d.zig");
 pub const Vec2 = math3d.Vec2;
