@@ -85,7 +85,7 @@ pub fn init(ctx: *GameApp) Self {
         }) catch @panic("OOM");
         var monkey = scene.newObject(.{
             .name = "Monkey",
-            .transform = Mat4.translation(Vec3.make(-5, 3, 0)),
+            .transform = Mat4.translation(Vec3.make(-5, 0, 0)),
         }) catch @panic("OOM");
         monkey.addComponent(MeshRenderer, .{
             .mesh = ctx.engine.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),

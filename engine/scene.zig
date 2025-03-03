@@ -122,8 +122,7 @@ pub const Object = struct {
     }
 
     pub fn addChildren(self: *Self, obj: *Object) void {
-        obj.parent = self;
-        self.children.append(obj) catch @panic("OOM");
+        return obj.setParent(self);
     }
 
     pub fn setParent(self: *Self, parent: *Object) void {
@@ -136,10 +135,9 @@ pub const Object = struct {
                 }
             }
             _ = p.children.swapRemove(index);
-            parent.children.append(self) catch @panic("OOM");
-            return;
         }
-        @panic("Can't set parent of a stray object!");
+        self.parent = parent;
+        parent.children.append(self) catch @panic("OOM");
     }
 
     pub fn translate(self: *Self, translation: Mat4) void {
