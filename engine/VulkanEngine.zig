@@ -298,7 +298,6 @@ pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
     engine.initPipelines();
     engine.loadTextures();
     engine.loadMeshes();
-    // engine.initScene();
 
     return engine;
 }
@@ -1309,70 +1308,6 @@ pub fn loadScene(self: *Self, s: *scene.Scene) void {
     var old_scene = self.scene;
     self.scene = s;
     old_scene.deinit();
-}
-
-fn initScene(self: *Self) void {
-    const monkey_transform = Mat4.translation(Vec3.make(-5, 3, 0));
-    const monkey = RenderObject{
-        .name = "monkey",
-        .mesh = self.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
-        .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
-        .transform = monkey_transform,
-    };
-    self.renderables.append(monkey) catch @panic("Out of memory");
-
-    var material = self.materials.getPtr("textured_mesh") orelse @panic("Failed to get default mesh material");
-
-    // Allocate descriptor set for signle-texture to use on the material
-    const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool = self.descriptor_pool,
-        .descriptorSetCount = 1,
-        .pSetLayouts = &self.single_texture_set_layout,
-    });
-
-    check_vk(c.vkAllocateDescriptorSets(self.device, &descriptor_set_alloc_info, &material.texture_set)) catch @panic("Failed to allocate descriptor set");
-
-    // Sampler
-    const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter = c.VK_FILTER_NEAREST,
-        .minFilter = c.VK_FILTER_NEAREST,
-        .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-        .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-        .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-    });
-
-    var sampler: c.VkSampler = undefined;
-    check_vk(c.vkCreateSampler(self.device, &sampler_ci, vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
-    self.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("Out of memory");
-
-    const lost_empire_tex = (self.textures.get("empire_diffuse") orelse @panic("Failed to get empire texture"));
-
-    const descriptor_image_info = std.mem.zeroInit(c.VkDescriptorImageInfo, .{
-        .sampler = sampler,
-        .imageView = lost_empire_tex.image_view,
-        .imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-    });
-
-    const write_descriptor_set = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
-        .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = material.texture_set,
-        .dstBinding = 0,
-        .descriptorCount = 1,
-        .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .pImageInfo = &descriptor_image_info,
-    });
-
-    c.vkUpdateDescriptorSets(self.device, 1, &write_descriptor_set, 0, null);
-
-    const lost_empire = RenderObject{
-        .name = "lost_empire",
-        .mesh = self.meshes.getPtr("lost_empire") orelse @panic("Failed to get triangle mesh"),
-        .transform = Mat4.translation(Vec3.make(5.0, -10.0, 0.0)),
-        .material = material,
-    };
-    self.renderables.append(lost_empire) catch @panic("Out of memory");
 }
 
 pub fn deinit(self: *Self) void {

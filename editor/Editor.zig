@@ -76,15 +76,71 @@ pub fn init(ctx: *GameApp) Self {
     self.init_descriptors(&ctx.engine);
     self.init_imgui(&ctx.engine);
     var scene = Scene.init(ctx.allocator) catch @panic("OOM");
-    const monkey = scene.newObject(.{
-        .name = "Monkey",
-        .transform = Mat4.translation(Vec3.make(-5, 3, 0)),
-    }) catch @panic("OOM");
 
-    monkey.addComponent(MeshRenderer, .{
-        .mesh = ctx.engine.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
-        .material = ctx.engine.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
-    });
+    {
+        const monkey = scene.newObject(.{
+            .name = "Monkey",
+            .transform = Mat4.translation(Vec3.make(-5, 3, 0)),
+        }) catch @panic("OOM");
+        monkey.addComponent(MeshRenderer, .{
+            .mesh = ctx.engine.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
+            .material = ctx.engine.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
+        });
+
+        const empire = scene.newObject(.{
+            .name = "Lost Empire",
+            .transform = Mat4.translation(Vec3.make(5.0, -10.0, 0.0)),
+        }) catch @panic("OOM");
+        var empire_material = ctx.engine.materials.getPtr("textured_mesh") orelse @panic("Failed to get default mesh material");
+
+        // Allocate descriptor set for signle-texture to use on the material
+        const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
+            .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = ctx.engine.descriptor_pool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &ctx.engine.single_texture_set_layout,
+        });
+
+        check_vk(c.vkAllocateDescriptorSets(ctx.engine.device, &descriptor_set_alloc_info, &empire_material.texture_set)) catch @panic("Failed to allocate descriptor set");
+
+        // Sampler
+        const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
+            .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .magFilter = c.VK_FILTER_NEAREST,
+            .minFilter = c.VK_FILTER_NEAREST,
+            .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        });
+
+        var sampler: c.VkSampler = undefined;
+        check_vk(c.vkCreateSampler(ctx.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
+        ctx.engine.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("Out of memory");
+
+        const lost_empire_tex = (ctx.engine.textures.get("empire_diffuse") orelse @panic("Failed to get empire texture"));
+
+        const descriptor_image_info = std.mem.zeroInit(c.VkDescriptorImageInfo, .{
+            .sampler = sampler,
+            .imageView = lost_empire_tex.image_view,
+            .imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        });
+
+        const write_descriptor_set = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
+            .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = empire_material.texture_set,
+            .dstBinding = 0,
+            .descriptorCount = 1,
+            .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &descriptor_image_info,
+        });
+
+        c.vkUpdateDescriptorSets(ctx.engine.device, 1, &write_descriptor_set, 0, null);
+
+        empire.addComponent(MeshRenderer, .{
+            .mesh = ctx.engine.meshes.getPtr("lost_empire") orelse @panic("Failed to get triangle mesh"),
+            .material = empire_material,
+        });
+    }
     ctx.engine.loadScene(scene);
     return self;
 }
