@@ -8,7 +8,7 @@ const BoundingBox = @import("mesh.zig").BoundingBox;
 pub const Scene = struct {
     const Self = @This();
 
-    root: Object,
+    root: *Object,
     renderables: std.ArrayList(*MeshRenderer),
     live_object: std.ArrayList(*Object),
     allocator: std.mem.Allocator,
@@ -21,16 +21,22 @@ pub const Scene = struct {
             .live_object = std.ArrayList(*Object).init(allocator),
             .root = undefined,
         };
-        self.root = Object.init(self, "root", Mat4.IDENTITY);
+        self.root = Object.create(self, "root", Mat4.IDENTITY) catch @panic("OOM");
+        self.live_object.append(self.root.ref()) catch @panic("OOM");
 
         return self;
     }
 
     pub fn deinit(self: *Self) void {
         self.renderables.deinit();
-        self.root.deinit();
+        self.root.clear(true);
+        self.root.deref();
         for (self.live_object.items) |obj| {
-            self.allocator.destroy(obj);
+            if (obj.refc > 1) {
+                std.log.debug("meamory leak! obj name: {s}, refc: {}", .{ obj.name, obj.refc - 1 });
+                @panic("meamory leak!");
+            }
+            obj.deref();
         }
         self.live_object.deinit();
         self.allocator.destroy(self);
@@ -52,14 +58,13 @@ pub const Scene = struct {
                 }
                 break :blk parent;
             } else {
-                break :blk &self.root;
+                break :blk self.root;
             }
         };
-        const obj = self.allocator.create(Object) catch @panic("OOM");
+        const obj = Object.create(self, options.name, options.transform) catch @panic("OOM");
         self.live_object.append(obj) catch @panic("OOM");
-        obj.* = Object.init(self, options.name, options.transform);
         parent.addChildren(obj);
-        return obj;
+        return obj.ref();
     }
 };
 
@@ -71,6 +76,8 @@ const ComponentDeinitializer = struct {
 pub const Object = struct {
     const Self = @This();
 
+    refc: u32 = 1,
+
     name: []const u8,
     transform: Mat4,
     parent: ?*Object = null,
@@ -79,8 +86,9 @@ pub const Object = struct {
     components_deinit_handles: std.ArrayList(ComponentDeinitializer),
     scene: *Scene,
 
-    pub fn init(scene: *Scene, name: []const u8, transform: Mat4) Object {
-        return .{
+    pub fn create(scene: *Scene, name: []const u8, transform: Mat4) !*Object {
+        const self = try scene.allocator.create(Self);
+        self.* = .{
             .name = name,
             .transform = transform,
             .children = std.ArrayList(*Object).init(scene.allocator),
@@ -89,9 +97,41 @@ pub const Object = struct {
 
             .scene = scene,
         };
+        return self;
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn ref(self: *Self) *Self {
+        self.refc += 1;
+        return self;
+    }
+
+    // returns true if we had the last reference and object destroyed.
+    pub fn deref(self: *Self) void {
+        self.refc -= 1;
+        if (self.refc == 0) {
+            self.deinit();
+        }
+    }
+
+    pub fn clear(self: *Self, recursive: bool) void {
+        var i: usize = self.children.items.len;
+        while (i > 0) {
+            i -= 1;
+            const child = self.children.items[i];
+            if (recursive) {
+                child.clear(true);
+            }
+            self.removeChildren(child);
+        }
+    }
+
+    fn deinit(self: *Self) void {
+        var i: usize = self.children.items.len;
+        while (i > 0) {
+            i -= 1;
+            self.removeChildren(self.children.items[i]);
+        }
+        self.children.deinit();
         for (self.components.items) |component| {
             component.deinit(component.ptr);
         }
@@ -100,10 +140,7 @@ pub const Object = struct {
             handle.deinitalizer(self.scene.allocator, handle.ptr);
         }
         self.components_deinit_handles.deinit();
-        for (self.children.items) |children| {
-            children.deinit();
-        }
-        self.children.deinit();
+        self.scene.allocator.destroy(self);
     }
 
     pub fn addComponent(self: *Self, comptime ComponentType: type, init_options: @typeInfo(@TypeOf(ComponentType.init)).Fn.params[1].type.?) void {
@@ -124,22 +161,28 @@ pub const Object = struct {
     }
 
     pub fn addChildren(self: *Self, obj: *Object) void {
-        return obj.setParent(self);
+        std.debug.assert(obj.parent != self);
+        _ = obj.ref();
+        if (obj.parent) |old_parent| {
+            old_parent.removeChildren(obj);
+        }
+        obj.parent = self;
+        self.children.append(obj) catch @panic("OOM");
     }
 
-    pub fn setParent(self: *Self, parent: *Object) void {
-        if (self.parent == parent) return;
-        if (self.parent) |p| {
-            var index: usize = 0;
-            for (p.children.items, 0..) |c, i| {
-                if (c == self) {
-                    index = i;
+    pub fn removeChildren(self: *Self, obj: *Object) void {
+        std.debug.assert(obj.parent == self);
+        const index: usize = blk: {
+            for (self.children.items, 0..) |c, i| {
+                if (c == obj) {
+                    break :blk i;
                 }
             }
-            _ = p.children.swapRemove(index);
-        }
-        self.parent = parent;
-        parent.children.append(self) catch @panic("OOM");
+            @panic("not found?");
+        };
+        _ = self.children.orderedRemove(index);
+        obj.parent = null;
+        obj.deref();
     }
 
     pub fn translate(self: *Self, translation: Mat4) void {

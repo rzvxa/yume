@@ -81,24 +81,27 @@ pub fn init(ctx: *GameApp) Self {
     var scene = Scene.init(ctx.allocator) catch @panic("OOM");
 
     {
-        const parent = scene.newObject(.{
+        const apes = scene.newObject(.{
             .name = "Apes Together Strong!",
             .transform = Mat4.translation(Vec3.make(0, 3, 0)),
         }) catch @panic("OOM");
+        defer apes.deref();
         var monkey = scene.newObject(.{
             .name = "Monkey",
             .transform = Mat4.translation(Vec3.make(-5, 3, 0)),
         }) catch @panic("OOM");
+        defer monkey.deref();
         monkey.addComponent(MeshRenderer, .{
             .mesh = ctx.engine.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
             .material = ctx.engine.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
         });
-        monkey.setParent(parent);
+        apes.addChildren(monkey);
 
         const empire = scene.newObject(.{
             .name = "Lost Empire",
             .transform = Mat4.translation(Vec3.make(5.0, -10.0, 0.0)),
         }) catch @panic("OOM");
+        defer empire.deref();
         var empire_material = ctx.engine.materials.getPtr("textured_mesh") orelse @panic("Failed to get default mesh material");
 
         // Allocate descriptor set for signle-texture to use on the material
