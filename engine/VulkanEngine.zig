@@ -66,13 +66,23 @@ pub const MeshRenderer = struct {
         };
     }
 
+    pub fn bounds(self: *const @This()) BoundingBox {
+        return self.mesh.bounds;
+    }
+
     pub fn worldBounds(self: *const @This()) BoundingBox {
-        return self.mesh.bounds.translate(self.object.transform);
+        return self.bounds().translate(self.object.transform);
     }
 
     pub fn asComponent(self: *@This()) scene.Component {
-        _ = self;
-        return .{};
+        return .{
+            .ptr = self,
+            .bounds = struct {
+                fn bounds(ptr: *anyopaque) BoundingBox {
+                    return MeshRenderer.bounds(@ptrCast(@alignCast(ptr)));
+                }
+            }.bounds,
+        };
     }
 };
 

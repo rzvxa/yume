@@ -1,7 +1,9 @@
 const std = @import("std");
 
+const Vec3 = @import("math3d.zig").Vec3;
 const Mat4 = @import("math3d.zig").Mat4;
 const MeshRenderer = @import("VulkanEngine.zig").MeshRenderer;
+const BoundingBox = @import("mesh.zig").BoundingBox;
 
 pub const Scene = struct {
     const Self = @This();
@@ -91,7 +93,7 @@ pub const Object = struct {
 
     pub fn deinit(self: *Self) void {
         for (self.components.items) |component| {
-            component.deinit();
+            component.deinit(component.ptr);
         }
         self.components.deinit();
         for (self.components_deinit_handles.items) |handle| {
@@ -149,16 +151,31 @@ pub const Object = struct {
             children.setTransform(translation);
         }
     }
+
+    pub fn bounds(self: *const Self) BoundingBox {
+        var bb = BoundingBox{
+            .mins = Vec3.scalar(std.math.floatMax(f32)),
+            .maxs = Vec3.scalar(std.math.floatMin(f32)),
+        };
+        for (self.components.items) |component| {
+            if (component.bounds) |b| {
+                bb.accumulateBB(b(component.ptr));
+            }
+        }
+        return bb.translate(self.transform);
+    }
 };
 
 pub const Component = struct {
-    update: *const fn (dt: f32) void = struct {
-        fn noop(_: f32) void {}
+    ptr: *anyopaque,
+    update: *const fn (self: *anyopaque, dt: f32) void = struct {
+        fn noop(_: *anyopaque, _: f32) void {}
     }.noop,
-    onTransformChange: *const fn (transform: Mat4) void = struct {
-        fn noop(_: Mat4) void {}
+    onTransformChange: *const fn (self: *anyopaque, transform: Mat4) void = struct {
+        fn noop(_: *anyopaque, _: Mat4) void {}
     }.noop,
-    deinit: *const fn () void = struct {
-        fn noop() void {}
+    bounds: ?*const fn (_: *anyopaque) BoundingBox = null,
+    deinit: *const fn (_: *anyopaque) void = struct {
+        fn noop(_: *anyopaque) void {}
     }.noop,
 };

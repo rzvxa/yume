@@ -35,6 +35,8 @@ const Self = @This();
 
 inputs: InputsContext = .{},
 
+selection: ?*Object = null,
+
 play: bool = false,
 imgui_demo_open: bool = false,
 
@@ -85,7 +87,7 @@ pub fn init(ctx: *GameApp) Self {
         }) catch @panic("OOM");
         var monkey = scene.newObject(.{
             .name = "Monkey",
-            .transform = Mat4.translation(Vec3.make(-5, 0, 0)),
+            .transform = Mat4.translation(Vec3.make(-5, 3, 0)),
         }) catch @panic("OOM");
         monkey.addComponent(MeshRenderer, .{
             .mesh = ctx.engine.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
@@ -351,7 +353,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
 
     _ = c.ImGui_Begin("Hierarchy", null, 0);
     for (ctx.engine.scene.root.children.items) |it| {
-        drawHierarchyNode(it);
+        self.drawHierarchyNode(it);
     }
     c.ImGui_End();
 
@@ -476,10 +478,9 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         .height = self.scene_view_size.y,
     });
 
-    if (ctx.engine.scene.renderables.items.len > 0) {
-        const r = ctx.engine.scene.renderables.items[0];
-        gizmo.drawBoundingBox(r.worldBounds()) catch @panic("error");
-        const components = r.object.transform.decomposeComponents();
+    if (self.selection) |selection| {
+        gizmo.drawBoundingBox(selection.bounds()) catch @panic("error");
+        const components = selection.transform.decomposeComponents();
         gizmo.manipulate(
             components.translation,
             Vec3.ZERO,
@@ -737,14 +738,17 @@ fn init_imgui(self: *Self, engine: *Engine) void {
     style.*.Colors[c.ImGuiCol_ModalWindowDimBg] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
 }
 
-fn drawHierarchyNode(obj: *Object) void {
+fn drawHierarchyNode(self: *Self, obj: *Object) void {
     var node_flags = c.ImGuiTreeNodeFlags_OpenOnArrow;
     if (obj.children.items.len == 0) {
         node_flags = c.ImGuiTreeNodeFlags_Leaf;
     }
-    if (c.ImGui_TreeNodeEx(obj.name.ptr, node_flags)) {
+    const open = c.ImGui_TreeNodeEx(obj.name.ptr, node_flags);
+    if (c.ImGui_IsItemClicked() and !c.ImGui_IsItemToggledOpen())
+        self.selection = obj;
+    if (open) {
         for (obj.children.items) |it| {
-            drawHierarchyNode(it);
+            self.drawHierarchyNode(it);
         }
         c.ImGui_TreePop();
     }

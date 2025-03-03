@@ -73,6 +73,16 @@ pub const BoundingBox = struct {
         self.maxs.z = @max(self.maxs.z, pos.z);
     }
 
+    pub fn accumulateBB(self: *Self, other: Self) void {
+        self.mins.x = @min(self.mins.x, other.mins.x);
+        self.mins.y = @min(self.mins.y, other.mins.y);
+        self.mins.z = @min(self.mins.z, other.mins.z);
+
+        self.maxs.x = @max(self.maxs.x, other.maxs.x);
+        self.maxs.y = @max(self.maxs.y, other.maxs.y);
+        self.maxs.z = @max(self.maxs.z, other.maxs.z);
+    }
+
     pub fn translate(self: Self, mat: Mat4) Self {
         return .{
             .mins = mat.mulVec3(self.mins),
