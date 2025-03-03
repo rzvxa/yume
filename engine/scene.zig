@@ -8,6 +8,7 @@ pub const Scene = struct {
 
     root: Object,
     renderables: std.ArrayList(*MeshRenderer),
+    live_object: std.ArrayList(*Object),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) std.mem.Allocator.Error!*Self {
@@ -15,6 +16,7 @@ pub const Scene = struct {
         self.* = .{
             .allocator = allocator,
             .renderables = std.ArrayList(*MeshRenderer).init(allocator),
+            .live_object = std.ArrayList(*Object).init(allocator),
             .root = undefined,
         };
         self.root = Object.init(self, "root", Mat4.IDENTITY);
@@ -25,6 +27,10 @@ pub const Scene = struct {
     pub fn deinit(self: *Self) void {
         self.renderables.deinit();
         self.root.deinit();
+        for (self.live_object.items) |obj| {
+            self.allocator.destroy(obj);
+        }
+        self.live_object.deinit();
         self.allocator.destroy(self);
     }
 
@@ -47,9 +53,11 @@ pub const Scene = struct {
                 break :blk &self.root;
             }
         };
-        const obj = Object.init(self, options.name, options.transform);
-        try parent.children.append(obj);
-        return &parent.children.items[parent.children.items.len - 1];
+        const obj = self.allocator.create(Object) catch @panic("OOM");
+        self.live_object.append(obj) catch @panic("OOM");
+        obj.* = Object.init(self, options.name, options.transform);
+        parent.addChildren(obj);
+        return obj;
     }
 };
 
@@ -63,7 +71,8 @@ pub const Object = struct {
 
     name: []const u8,
     transform: Mat4,
-    children: std.ArrayList(Object),
+    parent: ?*Object = null,
+    children: std.ArrayList(*Object),
     components: std.ArrayList(Component),
     components_deinit_handles: std.ArrayList(ComponentDeinitializer),
     scene: *Scene,
@@ -72,7 +81,7 @@ pub const Object = struct {
         return .{
             .name = name,
             .transform = transform,
-            .children = std.ArrayList(Object).init(scene.allocator),
+            .children = std.ArrayList(*Object).init(scene.allocator),
             .components = std.ArrayList(Component).init(scene.allocator),
             .components_deinit_handles = std.ArrayList(ComponentDeinitializer).init(scene.allocator),
 
@@ -89,7 +98,7 @@ pub const Object = struct {
             handle.deinitalizer(self.scene.allocator, handle.ptr);
         }
         self.components_deinit_handles.deinit();
-        for (self.children.items) |*children| {
+        for (self.children.items) |children| {
             children.deinit();
         }
         self.children.deinit();
@@ -110,6 +119,27 @@ pub const Object = struct {
         if (ComponentType == MeshRenderer) {
             self.scene.renderables.append(component) catch @panic("OOM");
         }
+    }
+
+    pub fn addChildren(self: *Self, obj: *Object) void {
+        obj.parent = self;
+        self.children.append(obj) catch @panic("OOM");
+    }
+
+    pub fn setParent(self: *Self, parent: *Object) void {
+        if (self.parent == parent) return;
+        if (self.parent) |p| {
+            var index: usize = 0;
+            for (p.children.items, 0..) |c, i| {
+                if (c == self) {
+                    index = i;
+                }
+            }
+            _ = p.children.swapRemove(index);
+            parent.children.append(self) catch @panic("OOM");
+            return;
+        }
+        @panic("Can't set parent of a stray object!");
     }
 
     pub fn translate(self: *Self, translation: Mat4) void {

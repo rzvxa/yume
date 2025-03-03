@@ -76,17 +76,6 @@ pub const MeshRenderer = struct {
     }
 };
 
-const RenderObject = struct {
-    name: [*c]const u8,
-    mesh: *Mesh,
-    material: *Material,
-    transform: Mat4,
-
-    pub fn worldBounds(self: *const @This()) BoundingBox {
-        return self.mesh.bounds.translate(self.transform);
-    }
-};
-
 const FrameData = struct {
     present_semaphore: c.VkSemaphore = VK_NULL_HANDLE,
     render_semaphore: c.VkSemaphore = VK_NULL_HANDLE,
@@ -187,7 +176,6 @@ descriptor_pool: c.VkDescriptorPool = VK_NULL_HANDLE,
 
 vma_allocator: c.VmaAllocator = undefined,
 
-renderables: std.ArrayList(RenderObject),
 materials: std.StringHashMap(Material),
 meshes: std.StringHashMap(Mesh),
 textures: std.StringHashMap(Texture),
@@ -268,7 +256,6 @@ pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
         .deletion_queue = std.ArrayList(VulkanDeleter).init(a),
         .buffer_deletion_queue = std.ArrayList(VmaBufferDeleter).init(a),
         .image_deletion_queue = std.ArrayList(VmaImageDeleter).init(a),
-        .renderables = std.ArrayList(RenderObject).init(a),
         .materials = std.StringHashMap(Material).init(a),
         .meshes = std.StringHashMap(Mesh).init(a),
         .textures = std.StringHashMap(Texture).init(a),
@@ -1324,7 +1311,6 @@ pub fn deinit(self: *Self) void {
     self.textures.deinit();
     self.meshes.deinit();
     self.materials.deinit();
-    self.renderables.deinit();
 
     for (self.buffer_deletion_queue.items) |*entry| {
         entry.delete(self);

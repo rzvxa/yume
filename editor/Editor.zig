@@ -11,6 +11,7 @@ const Texture = textures.Texture;
 
 const Camera = @import("yume").Camera;
 const Scene = @import("yume").scene_graph.Scene;
+const Object = @import("yume").scene_graph.Object;
 const MeshRenderer = @import("yume").VulkanEngine.MeshRenderer;
 const ScanCode = @import("yume").inputs.ScanCode;
 const MouseButton = @import("yume").inputs.MouseButton;
@@ -78,7 +79,11 @@ pub fn init(ctx: *GameApp) Self {
     var scene = Scene.init(ctx.allocator) catch @panic("OOM");
 
     {
-        const monkey = scene.newObject(.{
+        const parent = scene.newObject(.{
+            .name = "Apes Together Strong!",
+            .transform = Mat4.translation(Vec3.make(0, 3, 0)),
+        }) catch @panic("OOM");
+        var monkey = scene.newObject(.{
             .name = "Monkey",
             .transform = Mat4.translation(Vec3.make(-5, 3, 0)),
         }) catch @panic("OOM");
@@ -86,6 +91,7 @@ pub fn init(ctx: *GameApp) Self {
             .mesh = ctx.engine.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
             .material = ctx.engine.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
         });
+        monkey.setParent(parent);
 
         const empire = scene.newObject(.{
             .name = "Lost Empire",
@@ -344,14 +350,8 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
     c.ImGui_End();
 
     _ = c.ImGui_Begin("Hierarchy", null, 0);
-    for (ctx.engine.scene.renderables.items) |r| {
-        var node_flags = c.ImGuiTreeNodeFlags_OpenOnArrow;
-        if (std.mem.eql(u8, r.object.name, "triangle")) {
-            node_flags = c.ImGuiTreeNodeFlags_Leaf;
-        }
-        if (c.ImGui_TreeNodeEx(r.object.name.ptr, node_flags)) {
-            c.ImGui_TreePop();
-        }
+    for (ctx.engine.scene.root.children.items) |it| {
+        drawHierarchyNode(it);
     }
     c.ImGui_End();
 
@@ -735,6 +735,19 @@ fn init_imgui(self: *Self, engine: *Engine) void {
     style.*.Colors[c.ImGuiCol_NavWindowingHighlight] = c.ImVec4{ .x = 1.0, .y = 1.0, .z = 1.0, .w = 0.699999988079071 };
     style.*.Colors[c.ImGuiCol_NavWindowingDimBg] = c.ImVec4{ .x = 0.800000011920929, .y = 0.800000011920929, .z = 0.800000011920929, .w = 0.2000000029802322 };
     style.*.Colors[c.ImGuiCol_ModalWindowDimBg] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
+}
+
+fn drawHierarchyNode(obj: *Object) void {
+    var node_flags = c.ImGuiTreeNodeFlags_OpenOnArrow;
+    if (obj.children.items.len == 0) {
+        node_flags = c.ImGuiTreeNodeFlags_Leaf;
+    }
+    if (c.ImGui_TreeNodeEx(obj.name.ptr, node_flags)) {
+        for (obj.children.items) |it| {
+            drawHierarchyNode(it);
+        }
+        c.ImGui_TreePop();
+    }
 }
 
 fn create_imgui_texture(filepath: []const u8, engine: *Engine) c.VkDescriptorSet {
