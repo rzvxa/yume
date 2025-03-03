@@ -288,12 +288,12 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
     c.ImGui_End();
 
     _ = c.ImGui_Begin("Hierarchy", null, 0);
-    for (ctx.engine.renderables.items) |r| {
+    for (ctx.engine.scene.renderables.items) |r| {
         var node_flags = c.ImGuiTreeNodeFlags_OpenOnArrow;
-        if (std.mem.eql(u8, std.mem.span(r.name), "triangle")) {
+        if (std.mem.eql(u8, r.object.name, "triangle")) {
             node_flags = c.ImGuiTreeNodeFlags_Leaf;
         }
-        if (c.ImGui_TreeNodeEx(r.name, node_flags)) {
+        if (c.ImGui_TreeNodeEx(r.object.name.ptr, node_flags)) {
             c.ImGui_TreePop();
         }
     }
@@ -348,7 +348,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             );
             me.app.engine.drawObjects(
                 me.cmd,
-                me.app.engine.renderables.items,
+                me.app.engine.scene.renderables.items,
                 me.app.engine.camera_and_scene_buffer,
                 me.app.engine.camera_and_scene_set,
                 &me.app.engine.main_camera,
@@ -397,7 +397,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             me.d.camera.updateMatrices(me.d.camera_pos, me.d.camera_rot, aspect);
             me.app.engine.drawObjects(
                 me.cmd,
-                me.app.engine.renderables.items,
+                me.app.engine.scene.renderables.items,
                 me.d.editor_camera_and_scene_buffer,
                 me.d.editor_camera_and_scene_set,
                 &me.d.camera,
@@ -420,15 +420,16 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         .height = self.scene_view_size.y,
     });
 
-    const r = ctx.engine.renderables.items[0];
-    gizmo.drawBoundingBox(r.worldBounds()) catch @panic("error");
-    const components = r.transform.decomposeComponents();
-    gizmo.manipulate(
-        components.translation,
-        Vec3.ZERO,
-        components.scale,
-    ) catch @panic("error");
-
+    if (ctx.engine.scene.renderables.items.len > 0) {
+        const r = ctx.engine.scene.renderables.items[0];
+        gizmo.drawBoundingBox(r.worldBounds()) catch @panic("error");
+        const components = r.object.transform.decomposeComponents();
+        gizmo.manipulate(
+            components.translation,
+            Vec3.ZERO,
+            components.scale,
+        ) catch @panic("error");
+    }
     gizmo.endFrame();
     c.ImGui_End();
 

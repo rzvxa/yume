@@ -1,17 +1,20 @@
 const std = @import("std");
 
 const Mat4 = @import("math3d.zig").Mat4;
+const MeshRenderer = @import("VulkanEngine.zig").MeshRenderer;
 
 pub const Scene = struct {
     const Self = @This();
 
     root: Object,
+    renderables: std.ArrayList(*MeshRenderer),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) std.mem.Allocator.Error!*Self {
         const self = try allocator.create(Self);
         self.* = .{
             .allocator = allocator,
+            .renderables = std.ArrayList(*MeshRenderer).init(allocator),
             .root = undefined,
         };
         self.root = Object.init(self, "root", Mat4.IDENTITY);
@@ -20,6 +23,7 @@ pub const Scene = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        self.renderables.deinit();
         self.root.deinit();
         self.allocator.destroy(self);
     }
@@ -102,6 +106,10 @@ pub const Object = struct {
             }
         };
         self.components_deinit_handles.append(.{ .ptr = component, .deinitalizer = deinitializer.f }) catch @panic("OOM");
+
+        if (ComponentType == MeshRenderer) {
+            self.scene.renderables.append(component) catch @panic("OOM");
+        }
     }
 
     pub fn translate(self: *Self, translation: Mat4) void {

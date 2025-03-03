@@ -67,7 +67,7 @@ pub const MeshRenderer = struct {
     }
 
     pub fn worldBounds(self: *const @This()) BoundingBox {
-        return self.mesh.bounds.translate(self.transform);
+        return self.mesh.bounds.translate(self.object.transform);
     }
 
     pub fn asComponent(self: *@This()) scene.Component {
@@ -298,7 +298,7 @@ pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
     engine.initPipelines();
     engine.loadTextures();
     engine.loadMeshes();
-    engine.initScene();
+    // engine.initScene();
 
     return engine;
 }
@@ -1695,7 +1695,7 @@ pub fn beginPresentRenderPass(self: *Self, cmd: RenderCommand) void {
 pub fn drawObjects(
     self: *Self,
     cmd: c.VkCommandBuffer,
-    objects: []RenderObject,
+    renderables: []*MeshRenderer,
     ubo_buf: AllocatedBuffer,
     ubo_set: c.VkDescriptorSet,
     cam: *Camera,
@@ -1735,16 +1735,16 @@ pub fn drawObjects(
     var object_data: ?*align(@alignOf(GPUObjectData)) anyopaque = undefined;
     check_vk(c.vmaMapMemory(self.vma_allocator, self.getCurrentFrame().object_buffer.allocation, &object_data)) catch @panic("Failed to map object buffer");
     var object_data_arr: [*]GPUObjectData = @ptrCast(object_data orelse unreachable);
-    for (objects, 0..) |object, index| {
+    for (renderables, 0..) |object, index| {
         object_data_arr[index] = GPUObjectData{
-            .model_matrix = object.transform,
+            .model_matrix = object.object.transform,
         };
     }
     c.vmaUnmapMemory(self.vma_allocator, self.getCurrentFrame().object_buffer.allocation);
 
-    for (objects, 0..) |object, index| {
-        if (index == 0 or object.material != objects[index - 1].material) {
-            c.vkCmdBindPipeline(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline);
+    for (renderables, 0..) |r, index| {
+        if (index == 0 or r.material != renderables[index - 1].material) {
+            c.vkCmdBindPipeline(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, r.material.pipeline);
 
             // Compute the offset for dynamic uniform buffers (for now just the one containing scene data, the
             // camera data is not dynamic)
@@ -1753,28 +1753,28 @@ pub fn drawObjects(
                 @as(u32, @intCast(scene_data_offset)),
             };
 
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 0, 1, &ubo_set, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, r.material.pipeline_layout, 0, 1, &ubo_set, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
 
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 1, 1, &self.getCurrentFrame().object_descriptor_set, 0, null);
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, r.material.pipeline_layout, 1, 1, &self.getCurrentFrame().object_descriptor_set, 0, null);
         }
 
-        if (object.material.texture_set != VK_NULL_HANDLE) {
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 2, 1, &object.material.texture_set, 0, null);
+        if (r.material.texture_set != VK_NULL_HANDLE) {
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, r.material.pipeline_layout, 2, 1, &r.material.texture_set, 0, null);
         }
 
         const push_constants = MeshPushConstants{
             .data = Vec4.ZERO,
-            .render_matrix = object.transform,
+            .render_matrix = r.object.transform,
         };
 
-        c.vkCmdPushConstants(cmd, object.material.pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &push_constants);
+        c.vkCmdPushConstants(cmd, r.material.pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &push_constants);
 
-        if (index == 0 or object.mesh != objects[index - 1].mesh) {
+        if (index == 0 or r.mesh != renderables[index - 1].mesh) {
             const offset: c.VkDeviceSize = 0;
-            c.vkCmdBindVertexBuffers(cmd, 0, 1, &object.mesh.vertex_buffer.buffer, &offset);
+            c.vkCmdBindVertexBuffers(cmd, 0, 1, &r.mesh.vertex_buffer.buffer, &offset);
         }
 
-        c.vkCmdDraw(cmd, @as(u32, @intCast(object.mesh.vertices.len)), 1, 0, @intCast(index));
+        c.vkCmdDraw(cmd, @as(u32, @intCast(r.mesh.vertices.len)), 1, 0, @intCast(index));
     }
 }
 
