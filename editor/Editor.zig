@@ -490,7 +490,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
 
     if (self.selection) |selection| {
         gizmo.drawBoundingBox(selection.bounds()) catch @panic("error");
-        const components = selection.transform.decomposeComponents();
+        const components = selection.transform.decompose();
         gizmo.manipulate(
             components.translation,
             Vec3.ZERO,
@@ -672,6 +672,19 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
         node_flags |= c.ImGuiTreeNodeFlags_Selected;
     }
     const open = c.ImGui_TreeNodeEx(obj.name.ptr, node_flags);
+    if (c.ImGui_BeginPopupContextItem()) {
+        if (c.ImGui_BeginMenu("New")) {
+            _ = c.ImGui_MenuItem("New Object");
+            _ = c.ImGui_MenuItem("New Camera");
+            c.ImGui_EndMenu();
+        }
+        _ = c.ImGui_MenuItem("Copy");
+        _ = c.ImGui_MenuItem("Paste");
+        _ = c.ImGui_MenuItem("Delete");
+        _ = c.ImGui_MenuItem("Rename");
+        _ = c.ImGui_MenuItem("Duplicate");
+        c.ImGui_EndPopup();
+    }
     if (c.ImGui_IsItemClicked() and !c.ImGui_IsItemToggledOpen())
         self.selection = obj;
     if (open) {
@@ -686,6 +699,10 @@ fn drawProperties(self: *Self, obj: *Object) void {
     c.ImGui_PushID(&obj.uuid.urn());
     defer c.ImGui_PopID();
     self.editors.editObjectMeta(obj);
+    c.ImGui_Spacing();
+    c.ImGui_Separator();
+    c.ImGui_Spacing();
+    self.editors.editObjectTransform(obj);
     c.ImGui_Spacing();
     c.ImGui_Separator();
     c.ImGui_Spacing();
@@ -704,13 +721,32 @@ fn drawProperties(self: *Self, obj: *Object) void {
 
     const size = @max(c.ImGui_CalcTextSize(label).x + style.*.FramePadding.x * 2, 200);
     const avail = c.ImGui_GetContentRegionAvail().x;
+    const popup_id = "###add_component_popup";
 
     const off = (avail - size) * alignment;
     if (off > 0) {
         c.ImGui_SetCursorPosX(c.ImGui_GetCursorPosX() + off);
     }
 
-    _ = c.ImGui_ButtonEx(label, c.ImVec2{ .x = size, .y = 0 });
+    if (c.ImGui_ButtonEx(label, c.ImVec2{ .x = size, .y = 0 })) {
+        c.ImGui_OpenPopup(popup_id, 0);
+    }
+
+    if (c.ImGui_BeginPopup(popup_id, 0)) {
+        c.ImGui_Text("Name:");
+        c.ImGui_SameLine();
+        var query: [1024]u8 = undefined;
+        query[0] = 0;
+        _ = c.ImGui_InputText("###component_name", &query, 1024, 0);
+        if (c.ImGui_Button("Add###add_component")) {
+            c.ImGui_CloseCurrentPopup();
+        }
+        c.ImGui_SameLine();
+        if (c.ImGui_Button("Create###create_component")) {
+            c.ImGui_CloseCurrentPopup();
+        }
+        c.ImGui_EndPopup();
+    }
 }
 
 fn create_imgui_texture(filepath: []const u8, engine: *Engine) c.VkDescriptorSet {

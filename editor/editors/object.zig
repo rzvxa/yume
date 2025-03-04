@@ -41,9 +41,13 @@ pub fn edit(self: *Self, _: *Object) void {
             return 0;
         }
     };
-    var callback = Callback{ .buf = &self.name };
-    _ = c.ImGui_InputTextEx("Name", self.name.items.ptr, self.name.capacity, c.ImGuiInputTextFlags_CallbackResize, Callback.InputTextCallback, &callback);
-    c.ImGui_SameLine();
+    c.ImGui_TextDisabled("Object:");
+    c.ImGui_Separator();
+
     var enabled = true;
     _ = c.ImGui_Checkbox("##", &enabled);
+    c.ImGui_SameLine();
+
+    var callback = Callback{ .buf = &self.name };
+    _ = c.ImGui_InputTextEx("Name", self.name.items.ptr, self.name.capacity, c.ImGuiInputTextFlags_CallbackResize, Callback.InputTextCallback, &callback);
 }

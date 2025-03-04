@@ -19,3 +19,13 @@ pub fn checkSdlBool(res: c.SDL_bool) void {
         @panic("SDL error");
     }
 }
+
+pub const TypeId = usize;
+
+pub fn typeId(comptime T: type) TypeId {
+    _ = T;
+    const H = struct {
+        var byte: u8 = 0;
+    };
+    return @intFromPtr(&H.byte);
+}

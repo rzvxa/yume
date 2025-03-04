@@ -115,7 +115,7 @@ pub const Vec3 = extern struct {
     }
 
     pub inline fn toArray(self: Self) [3]f32 {
-        return @as(*const [3]f32, @ptrCast(self)).*;
+        return @as(*const [3]f32, @ptrCast(&self)).*;
     }
 };
 
@@ -188,7 +188,7 @@ pub const Quat = extern struct {
     z: f32,
     w: f32,
 
-    pub const IDENTITY: Self = make(1, 0, 0, 0);
+    pub const IDENTITY: Self = make(0, 0, 0, 1);
 
     pub inline fn make(x: f32, y: f32, z: f32, w: f32) Self {
         return .{ .x = x, .y = y, .z = z, .w = w };
@@ -214,21 +214,102 @@ pub const Quat = extern struct {
         };
     }
 
-    pub fn mulVec3(self: Quat, v: Vec3) Vec3 {
+    pub fn mulVec3(self: Self, v: Vec3) Vec3 {
         const q_vec = Vec3.make(self.x, self.y, self.z);
         const uv = Vec3.cross(q_vec, v);
         const uuv = Vec3.cross(q_vec, uv);
         return v.add((uv.mulf(2 * self.w)).add(uuv.mulf(2)));
     }
 
-    pub fn normalized(self: Quat) Quat {
+    pub fn normalized(self: Self) Self {
         const length = @sqrt(self.w * self.w + self.x * self.x + self.y * self.y + self.z * self.z);
-        return Quat{
-            .w = self.w / length,
-            .x = self.x / length,
-            .y = self.y / length,
-            .z = self.z / length,
+        return make(
+            self.x / length,
+            self.y / length,
+            self.z / length,
+            self.w / length,
+        );
+    }
+
+    pub fn toEuler(self: Self) Vec3 {
+        const half_pi: f32 = std.math.pi / 2.0;
+        var euler = Vec3.ZERO;
+
+        // Roll (x-axis rotation)
+        const sinr_cosp = 2 * (self.w * self.x + self.y * self.z);
+        const cosr_cosp = 1 - 2 * (self.x * self.x + self.y * self.y);
+        euler.x = std.math.atan2(sinr_cosp, cosr_cosp);
+
+        // Pitch (y-axis rotation)
+        const sinp = 2 * (self.w * self.y - self.z * self.x);
+        if (@abs(sinp) >= 1) {
+            euler.y = std.math.copysign(half_pi, sinp); // Use 90 degrees if out of range
+        } else {
+            euler.y = std.math.asin(sinp);
+        }
+
+        // Yaw (z-axis rotation)
+        const siny_cosp = 2 * (self.w * self.z + self.x * self.y);
+        const cosy_cosp = 1 - 2 * (self.y * self.y + self.z * self.z);
+        euler.z = std.math.atan2(siny_cosp, cosy_cosp);
+
+        // Convert to degrees
+        return euler.mulf(180.0).divf(std.math.pi);
+    }
+
+    pub fn fromEuler(euler: Vec3) Quat {
+        const half_to_rad = 0.5 * std.math.pi / 180.0;
+
+        const roll = euler.x * half_to_rad;
+        const pitch = euler.y * half_to_rad;
+        const yaw = euler.z * half_to_rad;
+
+        const cr = @cos(roll);
+        const sr = @sin(roll);
+        const cp = @cos(pitch);
+        const sp = @sin(pitch);
+        const cy = @cos(yaw);
+        const sy = @sin(yaw);
+
+        return Self{
+            .w = cr * cp * cy + sr * sp * sy,
+            .x = sr * cp * cy - cr * sp * sy,
+            .y = cr * sp * cy + sr * cp * sy,
+            .z = cr * cp * sy - sr * sp * cy,
         };
+    }
+
+    pub fn fromMat4(m: Mat4) Self {
+        const trace = m.unnamed[0][0] + m.unnamed[1][1] + m.unnamed[2][2];
+        var q = Self.make(0, 0, 0, 0);
+
+        if (trace > 0) {
+            const s = @sqrt(trace + 1.0) * 2;
+            q.w = 0.25 * s;
+            q.x = (m.unnamed[2][1] - m.unnamed[1][2]) / s;
+            q.y = (m.unnamed[0][2] - m.unnamed[2][0]) / s;
+            q.z = (m.unnamed[1][0] - m.unnamed[0][1]) / s;
+        } else if (m.unnamed[0][0] > m.unnamed[1][1] and m.unnamed[0][0] > m.unnamed[2][2]) {
+            const s = @sqrt(1.0 + m.unnamed[0][0] - m.unnamed[1][1] - m.unnamed[2][2]) * 2;
+            q.w = (m.unnamed[2][1] - m.unnamed[1][2]) / s;
+            q.x = 0.25 * s;
+            q.y = (m.unnamed[0][1] + m.unnamed[1][0]) / s;
+            q.z = (m.unnamed[0][2] + m.unnamed[2][0]) / s;
+        } else if (m.unnamed[1][1] > m.unnamed[2][2]) {
+            const s = @sqrt(1.0 + m.unnamed[1][1] - m.unnamed[0][0] - m.unnamed[2][2]) * 2;
+            q.w = (m.unnamed[0][2] - m.unnamed[2][0]) / s;
+            q.x = (m.unnamed[0][1] + m.unnamed[1][0]) / s;
+            q.y = 0.25 * s;
+            q.z = (m.unnamed[1][2] + m.unnamed[2][1]) / s;
+        } else {
+            const s = @sqrt(1.0 + m.unnamed[2][2] - m.unnamed[0][0] - m.unnamed[1][1]) * 2;
+            q.w = (m.unnamed[1][0] - m.unnamed[0][1]) / s;
+            q.x = (m.unnamed[0][2] + m.unnamed[2][0]) / s;
+            q.y = (m.unnamed[1][2] + m.unnamed[2][1]) / s;
+            q.z = 0.25 * s;
+        }
+
+        return q;
     }
 };
 
@@ -424,6 +505,30 @@ pub const Mat4 = extern union {
         );
     }
 
+    pub fn fromQuat(quat: Quat) Mat4 {
+        const x = quat.x;
+        const y = quat.y;
+        const z = quat.z;
+        const w = quat.w;
+
+        const xx = x * x;
+        const yy = y * y;
+        const zz = z * z;
+        const xy = x * y;
+        const xz = x * z;
+        const yz = y * z;
+        const wx = w * x;
+        const wy = w * y;
+        const wz = w * z;
+
+        return Mat4.make(
+            Vec4.make(1.0 - 2.0 * (yy + zz), 2.0 * (xy + wz), 2.0 * (xz - wy), 0.0),
+            Vec4.make(2.0 * (xy - wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz + wx), 0.0),
+            Vec4.make(2.0 * (xz + wy), 2.0 * (yz - wx), 1.0 - 2.0 * (xx + yy), 0.0),
+            Vec4.make(0.0, 0.0, 0.0, 1.0),
+        );
+    }
+
     // calculate the determinant of the given matrix
     pub fn determinant(m: Mat4) f32 {
         var det: f32 = 0;
@@ -489,7 +594,15 @@ pub const Mat4 = extern union {
         } };
     }
 
-    pub fn decomposeComponents(self: Self) Mat4Components {
+    pub fn compose(translation_vec: Vec3, rotation_quat: Quat, scale_vec: Vec3) Mat4 {
+        const scale_mat = Mat4.scale(scale_vec);
+        const rotation_mat = Mat4.fromQuat(rotation_quat);
+        const translation_mat = Mat4.translation(translation_vec);
+
+        return translation_mat.mul(rotation_mat).mul(scale_mat);
+    }
+
+    pub fn decompose(self: Self) Mat4Components {
         const t = Vec3.make(
             self.unnamed[3][0],
             self.unnamed[3][1],
@@ -512,7 +625,22 @@ pub const Mat4 = extern union {
             self.unnamed[2][2],
         ).len();
         const s = Vec3.make(sx, sy, sz);
-        return .{ .translation = t, .rotation = Quat.IDENTITY, .scale = s };
+
+        // Remove scale from the matrix
+        var m = self;
+        m.unnamed[0][0] /= sx;
+        m.unnamed[0][1] /= sy;
+        m.unnamed[0][2] /= sz;
+        m.unnamed[1][0] /= sx;
+        m.unnamed[1][1] /= sy;
+        m.unnamed[1][2] /= sz;
+        m.unnamed[2][0] /= sx;
+        m.unnamed[2][1] /= sy;
+        m.unnamed[2][2] /= sz;
+
+        // Extract rotation quaternion
+        const rot = Quat.fromMat4(m);
+        return .{ .translation = t, .rotation = rot, .scale = s };
     }
 };
 

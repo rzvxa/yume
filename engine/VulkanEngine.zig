@@ -76,7 +76,8 @@ pub const MeshRenderer = struct {
 
     pub fn asComponent(self: *@This()) scene.Component {
         return .{
-            .type_id = 42,
+            .type_id = utils.typeId(@This()),
+            .name = "Mesh Renderer",
             .ptr = self,
             .bounds = struct {
                 fn bounds(ptr: *anyopaque) BoundingBox {

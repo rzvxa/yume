@@ -216,7 +216,9 @@ pub const Object = struct {
 };
 
 pub const Component = struct {
-    type_id: u32,
+    type_id: usize,
+    name: [:0]const u8,
+    enable: bool = true,
     ptr: *anyopaque,
     uuid: Uuid = undefined,
     update: *const fn (self: *anyopaque, dt: f32) void = struct {

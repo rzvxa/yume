@@ -15,6 +15,7 @@ pub const Vec2 = math3d.Vec2;
 pub const Vec3 = math3d.Vec3;
 pub const Vec4 = math3d.Vec4;
 pub const Mat4 = math3d.Mat4;
+pub const Quat = math3d.Quat;
 pub const Rect = math3d.Rect;
 
 pub const AllocatedBuffer = VulkanEngine.AllocatedBuffer;
@@ -26,5 +27,9 @@ pub const VmaBufferDeleter = VulkanEngine.VmaBufferDeleter;
 pub const VulkanDeleter = VulkanEngine.VulkanDeleter;
 
 pub const inputs = @import("inputs.zig");
+
+pub const utils = @import("utils.zig");
+pub const TypeId = utils.TypeId;
+pub const typeId = utils.typeId;
 
 pub const Camera = @import("Camera.zig");
