@@ -20,7 +20,9 @@ pub fn init(allocator: std.mem.Allocator, obj: *Object) Self {
     return self;
 }
 
-pub fn deinit(_: *Self) void {}
+pub fn deinit(self: *Self) void {
+    self.name.deinit();
+}
 
 pub fn edit(self: *Self, _: *Object) void {
     // self.allocator.realloc()
@@ -41,4 +43,7 @@ pub fn edit(self: *Self, _: *Object) void {
     };
     var callback = Callback{ .buf = &self.name };
     _ = c.ImGui_InputTextEx("Name", self.name.items.ptr, self.name.capacity, c.ImGuiInputTextFlags_CallbackResize, Callback.InputTextCallback, &callback);
+    c.ImGui_SameLine();
+    var enabled = true;
+    _ = c.ImGui_Checkbox("##", &enabled);
 }

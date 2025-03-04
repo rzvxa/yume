@@ -683,10 +683,34 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
 }
 
 fn drawProperties(self: *Self, obj: *Object) void {
+    c.ImGui_PushID(&obj.uuid.urn());
+    defer c.ImGui_PopID();
     self.editors.editObjectMeta(obj);
+    c.ImGui_Spacing();
+    c.ImGui_Separator();
+    c.ImGui_Spacing();
     for (obj.components.items) |*comp| {
         self.editors.editComponent(obj, comp);
+        c.ImGui_Separator();
+        c.ImGui_Spacing();
+        c.ImGui_Spacing();
     }
+
+    c.ImGui_Spacing();
+
+    const style = c.ImGui_GetStyle();
+    const label = "Add Component";
+    const alignment = 0.5;
+
+    const size = @max(c.ImGui_CalcTextSize(label).x + style.*.FramePadding.x * 2, 200);
+    const avail = c.ImGui_GetContentRegionAvail().x;
+
+    const off = (avail - size) * alignment;
+    if (off > 0) {
+        c.ImGui_SetCursorPosX(c.ImGui_GetCursorPosX() + off);
+    }
+
+    _ = c.ImGui_ButtonEx(label, c.ImVec2{ .x = size, .y = 0 });
 }
 
 fn create_imgui_texture(filepath: []const u8, engine: *Engine) c.VkDescriptorSet {
