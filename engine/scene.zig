@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const Uuid = @import("uuid.zig");
 const Vec3 = @import("math3d.zig").Vec3;
 const Mat4 = @import("math3d.zig").Mat4;
 const MeshRenderer = @import("VulkanEngine.zig").MeshRenderer;
@@ -78,6 +79,7 @@ pub const Object = struct {
 
     refc: u32 = 1,
 
+    uuid: Uuid,
     name: []const u8,
     transform: Mat4,
     parent: ?*Object = null,
@@ -89,6 +91,7 @@ pub const Object = struct {
     pub fn create(scene: *Scene, name: []const u8, transform: Mat4) !*Object {
         const self = try scene.allocator.create(Self);
         self.* = .{
+            .uuid = Uuid.new(),
             .name = name,
             .transform = transform,
             .children = std.ArrayList(*Object).init(scene.allocator),
@@ -147,7 +150,10 @@ pub const Object = struct {
         const component = self.scene.allocator.create(ComponentType) catch @panic("OOM");
         component.* = ComponentType.init(self, init_options);
 
-        self.components.append(component.asComponent()) catch @panic("OOM");
+        var interface = component.asComponent();
+        interface.uuid = Uuid.new();
+
+        self.components.append(interface) catch @panic("OOM");
         const deinitializer = struct {
             fn f(allocator: std.mem.Allocator, ptr: *anyopaque) void {
                 allocator.destroy(@as(*ComponentType, @ptrCast(@alignCast(ptr))));
@@ -210,7 +216,9 @@ pub const Object = struct {
 };
 
 pub const Component = struct {
+    type_id: u32,
     ptr: *anyopaque,
+    uuid: Uuid = undefined,
     update: *const fn (self: *anyopaque, dt: f32) void = struct {
         fn noop(_: *anyopaque, _: f32) void {}
     }.noop,

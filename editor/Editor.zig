@@ -6,6 +6,8 @@ const gizmo = @import("gizmo.zig");
 
 const check_vk = @import("yume").vki.check_vk;
 
+const Editors = @import("editors/editors.zig");
+
 const textures = @import("yume").textures;
 const Texture = textures.Texture;
 
@@ -42,6 +44,8 @@ imgui_demo_open: bool = false,
 
 dockspace_flags: c.ImGuiDockNodeFlags = 0,
 
+editors: Editors,
+
 editor_camera_and_scene_buffer: AllocatedBuffer = undefined,
 editor_camera_and_scene_set: c.VkDescriptorSet = null,
 
@@ -75,7 +79,7 @@ stop_icon_ds: c.VkDescriptorSet = undefined,
 fast_forward_icon_ds: c.VkDescriptorSet = undefined,
 
 pub fn init(ctx: *GameApp) Self {
-    var self = Self{};
+    var self = Self{ .editors = Editors.init(ctx.allocator) };
     self.init_descriptors(&ctx.engine);
     self.init_imgui(&ctx.engine);
     var scene = Scene.init(ctx.allocator) catch @panic("OOM");
@@ -156,7 +160,8 @@ pub fn init(ctx: *GameApp) Self {
     return self;
 }
 
-pub fn deinit(_: *Self, ctx: *GameApp) void {
+pub fn deinit(self: *Self, ctx: *GameApp) void {
+    self.editors.deinit();
     check_vk(c.vkDeviceWaitIdle(ctx.engine.device)) catch @panic("Failed to wait for device idle");
     c.cImGui_ImplVulkan_Shutdown();
 }
@@ -365,7 +370,9 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
     c.ImGui_End();
 
     _ = c.ImGui_Begin("Properties", null, 0);
-    c.ImGui_Text("TODO");
+    if (self.selection) |selection| {
+        self.drawProperties(selection);
+    }
     c.ImGui_End();
 
     _ = c.ImGui_Begin("Game", null, 0);
@@ -653,6 +660,79 @@ fn init_imgui(self: *Self, engine: *Engine) void {
     io.*.ConfigFlags |= c.ImGuiConfigFlags_DockingEnable;
     io.*.ConfigWindowsMoveFromTitleBarOnly = true;
 
+    loadImGuiTheme();
+}
+
+fn drawHierarchyNode(self: *Self, obj: *Object) void {
+    var node_flags = c.ImGuiTreeNodeFlags_OpenOnArrow;
+    if (obj.children.items.len == 0) {
+        node_flags |= c.ImGuiTreeNodeFlags_Leaf;
+    }
+    if (self.selection == obj) {
+        node_flags |= c.ImGuiTreeNodeFlags_Selected;
+    }
+    const open = c.ImGui_TreeNodeEx(obj.name.ptr, node_flags);
+    if (c.ImGui_IsItemClicked() and !c.ImGui_IsItemToggledOpen())
+        self.selection = obj;
+    if (open) {
+        for (obj.children.items) |it| {
+            self.drawHierarchyNode(it);
+        }
+        c.ImGui_TreePop();
+    }
+}
+
+fn drawProperties(self: *Self, obj: *Object) void {
+    self.editors.editObjectMeta(obj);
+    for (obj.components.items) |*comp| {
+        self.editors.editComponent(obj, comp);
+    }
+}
+
+fn create_imgui_texture(filepath: []const u8, engine: *Engine) c.VkDescriptorSet {
+    const img = textures.load_image_from_file(engine, filepath) catch @panic("Failed to load image");
+    engine.image_deletion_queue.append(VmaImageDeleter{ .image = img }) catch @panic("Out of memory");
+
+    // Create the Image View
+    var image_view: c.VkImageView = undefined;
+    {
+        const info = c.VkImageViewCreateInfo{
+            .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = img.image,
+            .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
+            .format = c.VK_FORMAT_R8G8B8A8_UNORM,
+            .subresourceRange = .{
+                .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+        };
+        check_vk(c.vkCreateImageView(engine.device, &info, Engine.vk_alloc_cbs, &image_view)) catch @panic("Failed to create image view");
+    }
+    engine.textures.put(filepath, Texture{ .image = img, .image_view = image_view }) catch @panic("OOM");
+    engine.deletion_queue.append(VulkanDeleter.make(image_view, c.vkDestroyImageView)) catch @panic("OOM");
+    // Create Sampler
+    var sampler: c.VkSampler = undefined;
+    {
+        const sampler_info = c.VkSamplerCreateInfo{
+            .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .magFilter = c.VK_FILTER_LINEAR,
+            .minFilter = c.VK_FILTER_LINEAR,
+            .mipmapMode = c.VK_SAMPLER_MIPMAP_MODE_LINEAR,
+            .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT, // outside image bounds just use border color
+            .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .minLod = -1000,
+            .maxLod = 1000,
+            .maxAnisotropy = 1.0,
+        };
+        check_vk(c.vkCreateSampler(engine.device, &sampler_info, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
+    }
+    engine.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("OOM");
+    return c.cImGui_ImplVulkan_AddTexture(sampler, image_view, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
+fn loadImGuiTheme() void {
     // set visual studio theme
     const style = c.ImGui_GetStyle();
     style.*.Alpha = 1.0;
@@ -739,63 +819,4 @@ fn init_imgui(self: *Self, engine: *Engine) void {
     style.*.Colors[c.ImGuiCol_NavWindowingHighlight] = c.ImVec4{ .x = 1.0, .y = 1.0, .z = 1.0, .w = 0.699999988079071 };
     style.*.Colors[c.ImGuiCol_NavWindowingDimBg] = c.ImVec4{ .x = 0.800000011920929, .y = 0.800000011920929, .z = 0.800000011920929, .w = 0.2000000029802322 };
     style.*.Colors[c.ImGuiCol_ModalWindowDimBg] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
-}
-
-fn drawHierarchyNode(self: *Self, obj: *Object) void {
-    var node_flags = c.ImGuiTreeNodeFlags_OpenOnArrow;
-    if (obj.children.items.len == 0) {
-        node_flags = c.ImGuiTreeNodeFlags_Leaf;
-    }
-    const open = c.ImGui_TreeNodeEx(obj.name.ptr, node_flags);
-    if (c.ImGui_IsItemClicked() and !c.ImGui_IsItemToggledOpen())
-        self.selection = obj;
-    if (open) {
-        for (obj.children.items) |it| {
-            self.drawHierarchyNode(it);
-        }
-        c.ImGui_TreePop();
-    }
-}
-
-fn create_imgui_texture(filepath: []const u8, engine: *Engine) c.VkDescriptorSet {
-    const img = textures.load_image_from_file(engine, filepath) catch @panic("Failed to load image");
-    engine.image_deletion_queue.append(VmaImageDeleter{ .image = img }) catch @panic("Out of memory");
-
-    // Create the Image View
-    var image_view: c.VkImageView = undefined;
-    {
-        const info = c.VkImageViewCreateInfo{
-            .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = img.image,
-            .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
-            .format = c.VK_FORMAT_R8G8B8A8_UNORM,
-            .subresourceRange = .{
-                .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-        };
-        check_vk(c.vkCreateImageView(engine.device, &info, Engine.vk_alloc_cbs, &image_view)) catch @panic("Failed to create image view");
-    }
-    engine.textures.put(filepath, Texture{ .image = img, .image_view = image_view }) catch @panic("OOM");
-    engine.deletion_queue.append(VulkanDeleter.make(image_view, c.vkDestroyImageView)) catch @panic("OOM");
-    // Create Sampler
-    var sampler: c.VkSampler = undefined;
-    {
-        const sampler_info = c.VkSamplerCreateInfo{
-            .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-            .magFilter = c.VK_FILTER_LINEAR,
-            .minFilter = c.VK_FILTER_LINEAR,
-            .mipmapMode = c.VK_SAMPLER_MIPMAP_MODE_LINEAR,
-            .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT, // outside image bounds just use border color
-            .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            .minLod = -1000,
-            .maxLod = 1000,
-            .maxAnisotropy = 1.0,
-        };
-        check_vk(c.vkCreateSampler(engine.device, &sampler_info, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
-    }
-    engine.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("OOM");
-    return c.cImGui_ImplVulkan_AddTexture(sampler, image_view, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }

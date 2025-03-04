@@ -36,6 +36,13 @@ pub fn build(b: *std.Build) !void {
 
     const vk_lib_name = if (target.result.os.tag == .windows) "vulkan-1" else "vulkan";
 
+    const uuid_dep = b.dependency("uuid_zig", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const uuid_mod = uuid_dep.module("uuid");
+    yume.addImport("uuid", uuid_mod);
+
     yume.linkSystemLibrary("SDL3", .{});
     yume.linkSystemLibrary(vk_lib_name, .{});
     yume.addLibraryPath(.{ .cwd_relative = "vendor/sdl3/lib" });
