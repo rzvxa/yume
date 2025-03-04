@@ -67,12 +67,12 @@ pub fn deinit(self: *Self) void {
     self.object_transform_editors.clearAndFree();
 }
 
-pub fn editObjectMeta(self: *Self, object: *Object) void {
+pub fn editObjectMeta(self: *Self, object: *Object, icon: c.VkDescriptorSet) void {
     const entry = self.object_meta_editors.getOrPut(object.uuid) catch @panic("OOM");
     if (!entry.found_existing) {
         entry.value_ptr.* = ObjectMetaEditor.init(self.component_editors.allocator, object);
     }
-    entry.value_ptr.edit(object);
+    entry.value_ptr.edit(object, icon);
 }
 
 pub fn editObjectTransform(self: *Self, object: *Object) void {

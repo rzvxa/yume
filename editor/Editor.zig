@@ -77,6 +77,9 @@ play_icon_ds: c.VkDescriptorSet = undefined,
 pause_icon_ds: c.VkDescriptorSet = undefined,
 stop_icon_ds: c.VkDescriptorSet = undefined,
 fast_forward_icon_ds: c.VkDescriptorSet = undefined,
+folder_icon_ds: c.VkDescriptorSet = undefined,
+file_icon_ds: c.VkDescriptorSet = undefined,
+object_icon_ds: c.VkDescriptorSet = undefined,
 
 pub fn init(ctx: *GameApp) Self {
     var self = Self{ .editors = Editors.init(ctx.allocator) };
@@ -241,13 +244,15 @@ pub fn update(self: *Self, ctx: *GameApp) void {
     // Normalize movement speed
     input = input.normalized().mulf(5);
 
-    // Mouse wheel for zooming in and out relative to view direction
-    const wheel = self.inputs.mouseWheel();
-    const scroll_speed: f32 = if (self.inputs.isKeyDown(ScanCode.LeftCtrl)) 5 else 20;
-    if (wheel.y > 0) {
-        input = input.add(forward.mulf(scroll_speed));
-    } else if (wheel.y < 0) {
-        input = input.sub(forward.mulf(scroll_speed));
+    if (self.inputs.isKeyDown(ScanCode.LeftCtrl)) {
+        // Mouse wheel for zooming in and out relative to view direction
+        const wheel = self.inputs.mouseWheel();
+        const scroll_speed: f32 = if (self.inputs.isKeyDown(ScanCode.LeftShift)) 5 else 20;
+        if (wheel.y > 0) {
+            input = input.add(forward.mulf(scroll_speed));
+        } else if (wheel.y < 0) {
+            input = input.sub(forward.mulf(scroll_speed));
+        }
     }
 
     // Apply camera movements
@@ -348,11 +353,15 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             //   window ID to split, direction, fraction (between 0 and 1), the final two setting let's us choose which id we want (which ever one we DON'T set as NULL, will be returned by the function)
             //                                                              out_id_at_dir is the id of the node in the direction we specified earlier, out_id_at_opposite_dir is in the opposite direction
             const dock_id_left = c.ImGui_DockBuilderSplitNode(dockspace_id, c.ImGuiDir_Left, 0.2, null, &dockspace_id);
+            const dock_id_right = c.ImGui_DockBuilderSplitNode(dockspace_id, c.ImGuiDir_Right, 0.2, null, &dockspace_id);
             const dock_id_down = c.ImGui_DockBuilderSplitNode(dockspace_id, c.ImGuiDir_Down, 0.25, null, &dockspace_id);
 
             // we now dock our windows into the docking node we made above
             c.ImGui_DockBuilderDockWindow("Assets", dock_id_down);
             c.ImGui_DockBuilderDockWindow("Hierarchy", dock_id_left);
+            c.ImGui_DockBuilderDockWindow("Properties", dock_id_right);
+            c.ImGui_DockBuilderDockWindow("Game", dockspace_id);
+            c.ImGui_DockBuilderDockWindow("Scene", dockspace_id);
             c.ImGui_DockBuilderFinish(dockspace_id);
         }
     }
@@ -366,7 +375,47 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
     c.ImGui_End();
 
     _ = c.ImGui_Begin("Assets", null, 0);
-    c.ImGui_Text("TODO");
+    const item_sz = 64;
+    const bread_crumb_height = c.ImGui_GetFrameHeight() + (2 * c.ImGui_GetStyle().*.FramePadding.y);
+    const col_count = c.ImGui_GetContentRegionAvail().x / (item_sz + 32);
+    const avail = c.ImGui_GetContentRegionAvail();
+    const grid_size = c.ImVec2{ .x = avail.x, .y = avail.y - bread_crumb_height };
+    _ = c.ImGui_BeginChildFrameEx(c.ImGui_GetID("files grid"), grid_size, c.ImGuiWindowFlags_NoBackground);
+    c.ImGui_ColumnsEx(@intFromFloat(col_count), "dir", false);
+    for (0..3) |_| {
+        c.ImGui_Spacing();
+        c.ImGui_Spacing();
+        c.ImGui_Spacing();
+        _ = c.ImGui_ImageButton("dir", self.folder_icon_ds, c.ImVec2{ .x = item_sz, .y = item_sz });
+        _ = c.ImGui_Text("New Folder");
+        c.ImGui_Spacing();
+        c.ImGui_Spacing();
+        c.ImGui_Spacing();
+        c.ImGui_NextColumn();
+    }
+    for (0..7) |i| {
+        c.ImGui_Spacing();
+        c.ImGui_Spacing();
+        c.ImGui_Spacing();
+        _ = c.ImGui_ImageButton("file", self.file_icon_ds, c.ImVec2{ .x = item_sz, .y = item_sz });
+        _ = c.ImGui_Text("Script-%d.lua", i + 1);
+        c.ImGui_Spacing();
+        c.ImGui_Spacing();
+        c.ImGui_Spacing();
+        c.ImGui_NextColumn();
+    }
+    c.ImGui_EndChildFrame();
+    const crumbs = [3][]const u8{ "Assets", "Directory one", "Dir2" };
+    for (crumbs) |crumb| {
+        _ = c.ImGui_Button(crumb.ptr);
+        c.ImGui_SameLineEx(0, 0);
+        c.ImGui_BeginDisabled(true);
+        _ = c.ImGui_ArrowButton("sep", c.ImGuiDir_Right);
+        c.ImGui_EndDisabled();
+        c.ImGui_SameLineEx(0, 0);
+    }
+
+    _ = c.ImGui_Text("[You are here]");
     c.ImGui_End();
 
     _ = c.ImGui_Begin("Properties", null, 0);
@@ -654,6 +703,9 @@ fn init_imgui(self: *Self, engine: *Engine) void {
     self.pause_icon_ds = create_imgui_texture("assets/editor/icons/pause.png", engine);
     self.stop_icon_ds = create_imgui_texture("assets/editor/icons/stop.png", engine);
     self.fast_forward_icon_ds = create_imgui_texture("assets/editor/icons/fast-forward.png", engine);
+    self.folder_icon_ds = create_imgui_texture("assets/editor/icons/folder.png", engine);
+    self.file_icon_ds = create_imgui_texture("assets/editor/icons/file.png", engine);
+    self.object_icon_ds = create_imgui_texture("assets/editor/icons/object.png", engine);
 
     engine.deletion_queue.append(VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool)) catch @panic("Out of memory");
 
@@ -698,7 +750,7 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
 fn drawProperties(self: *Self, obj: *Object) void {
     c.ImGui_PushID(&obj.uuid.urn());
     defer c.ImGui_PopID();
-    self.editors.editObjectMeta(obj);
+    self.editors.editObjectMeta(obj, self.object_icon_ds);
     c.ImGui_Spacing();
     c.ImGui_Separator();
     c.ImGui_Spacing();
