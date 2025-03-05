@@ -357,7 +357,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             const dock_id_down = c.ImGui_DockBuilderSplitNode(dockspace_id, c.ImGuiDir_Down, 0.25, null, &dockspace_id);
 
             // we now dock our windows into the docking node we made above
-            c.ImGui_DockBuilderDockWindow("Assets", dock_id_down);
+            c.ImGui_DockBuilderDockWindow("Project", dock_id_down);
             c.ImGui_DockBuilderDockWindow("Hierarchy", dock_id_left);
             c.ImGui_DockBuilderDockWindow("Properties", dock_id_right);
             c.ImGui_DockBuilderDockWindow("Game", dockspace_id);
@@ -369,43 +369,59 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
     c.ImGui_End();
 
     _ = c.ImGui_Begin("Hierarchy", null, 0);
-    for (ctx.engine.scene.root.children.items) |it| {
-        self.drawHierarchyNode(it);
+    {
+        var i: usize = 0;
+        while (i < ctx.engine.scene.root.children.items.len) : (i += 1) {
+            self.drawHierarchyNode(ctx.engine.scene.root.children.items[i]);
+        }
+    }
+    var avail = c.ImGui_GetContentRegionAvail();
+    _ = c.ImGui_InvisibleButton("outside-the-tree", c.ImVec2{ .x = avail.x, .y = avail.y }, 0);
+    if (c.ImGui_BeginDragDropTarget()) {
+        if (c.ImGui_AcceptDragDropPayload("Object", 0)) |payload| {
+            const payload_obj: ?**Object = @ptrCast(@alignCast(payload.*.Data.?));
+            if (payload_obj) |p| {
+                ctx.engine.scene.root.addChildren(p.*);
+            }
+        }
+        c.ImGui_EndDragDropTarget();
     }
     c.ImGui_End();
 
-    _ = c.ImGui_Begin("Assets", null, 0);
+    _ = c.ImGui_Begin("Project", null, 0);
     const item_sz = 64;
     const bread_crumb_height = c.ImGui_GetFrameHeight() + (2 * c.ImGui_GetStyle().*.FramePadding.y);
-    const col_count = c.ImGui_GetContentRegionAvail().x / (item_sz + 32);
-    const avail = c.ImGui_GetContentRegionAvail();
+    const col_count = @max(1, c.ImGui_GetContentRegionAvail().x / (item_sz + 32));
+    avail = c.ImGui_GetContentRegionAvail();
     const grid_size = c.ImVec2{ .x = avail.x, .y = avail.y - bread_crumb_height };
     _ = c.ImGui_BeginChildFrameEx(c.ImGui_GetID("files grid"), grid_size, c.ImGuiWindowFlags_NoBackground);
     c.ImGui_ColumnsEx(@intFromFloat(col_count), "dir", false);
-    for (0..3) |_| {
+    for (0..10) |i| {
         c.ImGui_Spacing();
         c.ImGui_Spacing();
         c.ImGui_Spacing();
-        _ = c.ImGui_ImageButton("dir", self.folder_icon_ds, c.ImVec2{ .x = item_sz, .y = item_sz });
-        _ = c.ImGui_Text("New Folder");
-        c.ImGui_Spacing();
-        c.ImGui_Spacing();
-        c.ImGui_Spacing();
-        c.ImGui_NextColumn();
-    }
-    for (0..7) |i| {
-        c.ImGui_Spacing();
-        c.ImGui_Spacing();
-        c.ImGui_Spacing();
-        _ = c.ImGui_ImageButton("file", self.file_icon_ds, c.ImVec2{ .x = item_sz, .y = item_sz });
-        _ = c.ImGui_Text("Script-%d.lua", i + 1);
+        const is_dir = i < 3;
+        const name = if (is_dir) "New Folder (%d)" else "Script-%d.lua";
+        const icon = if (is_dir) self.folder_icon_ds else self.file_icon_ds;
+        const text_size = c.ImGui_CalcTextSize(name);
+        const btn_size = c.ImVec2{
+            .x = @max(item_sz, text_size.x) + (2 * c.ImGui_GetStyle().*.FramePadding.x),
+            .y = item_sz + text_size.y + (2 * c.ImGui_GetStyle().*.FramePadding.y),
+        };
+        const cursor = c.ImGui_GetCursorPos();
+        _ = c.ImGui_ButtonEx("###name", btn_size);
+        c.ImGui_SetCursorPos(cursor);
+        c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - item_sz) / 2));
+        _ = c.ImGui_Image(icon, c.ImVec2{ .x = item_sz, .y = item_sz });
+        c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - text_size.x) / 2));
+        _ = c.ImGui_Text(name, i + 1);
         c.ImGui_Spacing();
         c.ImGui_Spacing();
         c.ImGui_Spacing();
         c.ImGui_NextColumn();
     }
     c.ImGui_EndChildFrame();
-    const crumbs = [3][]const u8{ "Assets", "Directory one", "Dir2" };
+    const crumbs = [3][]const u8{ "Project", "Directory one", "Dir2" };
     for (crumbs) |crumb| {
         _ = c.ImGui_Button(crumb.ptr);
         c.ImGui_SameLineEx(0, 0);
@@ -434,7 +450,6 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         fn f(dl: [*c]const c.ImDrawList, dc: [*c]const c.ImDrawCmd) callconv(.C) void {
             _ = dl;
             const me: *FrameData = @alignCast(@ptrCast(dc.*.UserCallbackData));
-            // const cmd = me.get_current_frame().main_command_buffer;
             const cr = dc.*.ClipRect;
             me.d.game_window_rect = cr;
             const w = cr.z - cr.x;
@@ -716,15 +731,48 @@ fn init_imgui(self: *Self, engine: *Engine) void {
 }
 
 fn drawHierarchyNode(self: *Self, obj: *Object) void {
-    var node_flags = c.ImGuiTreeNodeFlags_OpenOnArrow;
+    c.ImGui_PushID(obj.name.ptr);
+    defer c.ImGui_PopID();
+    var node_flags = c.ImGuiTreeNodeFlags_OpenOnArrow | c.ImGuiTreeNodeFlags_SpanAvailWidth;
     if (obj.children.items.len == 0) {
         node_flags |= c.ImGuiTreeNodeFlags_Leaf;
     }
     if (self.selection == obj) {
         node_flags |= c.ImGuiTreeNodeFlags_Selected;
     }
-    const open = c.ImGui_TreeNodeEx(obj.name.ptr, node_flags);
-    if (c.ImGui_BeginPopupContextItem()) {
+    const open = c.ImGui_TreeNodeEx("##", node_flags);
+    if (c.ImGui_IsItemClicked() and !c.ImGui_IsItemToggledOpen()) {
+        self.selection = obj;
+    }
+
+    if (c.ImGui_BeginDragDropTarget()) {
+        if (c.ImGui_AcceptDragDropPayload("Object", 0)) |payload| {
+            const payload_obj: ?**Object = @ptrCast(@alignCast(payload.*.Data.?));
+            if (payload_obj) |p| {
+                obj.addChildren(p.*);
+            }
+        }
+        c.ImGui_EndDragDropTarget();
+    }
+
+    if (c.ImGui_BeginDragDropSource(0)) {
+        _ = c.ImGui_SetDragDropPayload("Object", @ptrCast(&obj), @sizeOf(*Object), c.ImGuiCond_Once);
+        c.ImGui_Text(obj.name.ptr);
+        c.ImGui_EndDragDropSource();
+    }
+
+    c.ImGui_SameLine();
+    c.ImGui_Image(self.object_icon_ds, c.ImVec2{ .x = c.ImGui_GetFontSize(), .y = c.ImGui_GetFontSize() });
+    c.ImGui_SameLine();
+    c.ImGui_Text(obj.name.ptr);
+    if (open) {
+        var i: usize = 0;
+        while (i < obj.children.items.len) : (i += 1) {
+            self.drawHierarchyNode(obj.children.items[i]);
+        }
+        c.ImGui_TreePop();
+    }
+    if (c.ImGui_BeginPopupContextItemEx("context-menu", c.ImGuiPopupFlags_MouseButtonRight)) {
         if (c.ImGui_BeginMenu("New")) {
             _ = c.ImGui_MenuItem("New Object");
             _ = c.ImGui_MenuItem("New Camera");
@@ -736,14 +784,6 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
         _ = c.ImGui_MenuItem("Rename");
         _ = c.ImGui_MenuItem("Duplicate");
         c.ImGui_EndPopup();
-    }
-    if (c.ImGui_IsItemClicked() and !c.ImGui_IsItemToggledOpen())
-        self.selection = obj;
-    if (open) {
-        for (obj.children.items) |it| {
-            self.drawHierarchyNode(it);
-        }
-        c.ImGui_TreePop();
     }
 }
 

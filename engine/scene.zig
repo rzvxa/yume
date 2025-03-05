@@ -184,6 +184,7 @@ pub const Object = struct {
                     break :blk i;
                 }
             }
+            std.log.debug("  {s} and {s}", .{ self.name, obj.name });
             @panic("not found?");
         };
         _ = self.children.orderedRemove(index);
