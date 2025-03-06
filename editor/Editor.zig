@@ -34,6 +34,13 @@ const VmaBufferDeleter = @import("yume").VmaBufferDeleter;
 const VulkanDeleter = @import("yume").VulkanDeleter;
 
 const Engine = @import("yume").VulkanEngine;
+
+const ManipulationTool = enum {
+    move,
+    rotate,
+    scale,
+};
+
 const Self = @This();
 
 inputs: InputsContext = .{},
@@ -62,6 +69,8 @@ camera: Camera = Camera.makePerspectiveCamera(.{
     .near = 0.1,
 }),
 
+active_tool: ManipulationTool = .move,
+
 game_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
 game_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
 is_game_window_focused: bool = false,
@@ -81,6 +90,9 @@ fast_forward_icon_ds: c.VkDescriptorSet = undefined,
 folder_icon_ds: c.VkDescriptorSet = undefined,
 file_icon_ds: c.VkDescriptorSet = undefined,
 object_icon_ds: c.VkDescriptorSet = undefined,
+move_tool_icon_ds: c.VkDescriptorSet = undefined,
+rotate_tool_icon_ds: c.VkDescriptorSet = undefined,
+scale_tool_icon_ds: c.VkDescriptorSet = undefined,
 
 pub fn init(ctx: *GameApp) Self {
     var self = Self{ .editors = Editors.init(ctx.allocator) };
@@ -578,8 +590,48 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         }
     }.f, &frame_userdata);
     c.ImDrawList_AddCallback(editor_image, c.ImDrawCallback_ResetRenderState, null);
-    c.ImGui_Text("Camera Position: Vec3{ .x = %f, .y = %f, .z = %f }", self.camera_pos.x, self.camera_pos.y, self.camera_pos.z);
-    c.ImGui_Text("Camera Rotation: Vec3{ .x = %f, .y = %f, .z = %f }", self.camera_rot.x, self.camera_rot.y, self.camera_rot.z);
+
+    const icon_sz = c.ImVec2{ .x = 16, .y = 16 };
+    const normal_col = c.ImGui_GetStyle().*.Colors[c.ImGuiCol_Button];
+    const active_col = c.ImGui_GetStyle().*.Colors[c.ImGuiCol_ButtonHovered];
+    if (c.ImGui_BeginChildFrame(c.ImGui_GetID("##toolbox"), c.ImVec2{
+        .x = icon_sz.x + (c.ImGui_GetStyle().*.FramePadding.x * 4),
+        .y = (icon_sz.y + c.ImGui_GetStyle().*.FramePadding.y * 4) * 3,
+    })) {
+        var clicked = false;
+        c.ImGui_PushStyleColorImVec4(
+            c.ImGuiCol_Button,
+            if (self.active_tool == .move) active_col else normal_col,
+        );
+
+        clicked = c.ImGui_ImageButton("##move-tool", self.move_tool_icon_ds, icon_sz);
+        c.ImGui_PopStyleColor();
+        if (clicked) {
+            self.active_tool = .move;
+        }
+
+        c.ImGui_PushStyleColorImVec4(
+            c.ImGuiCol_Button,
+            if (self.active_tool == .rotate) active_col else normal_col,
+        );
+        clicked = c.ImGui_ImageButton("##rotate-tool", self.rotate_tool_icon_ds, icon_sz);
+        c.ImGui_PopStyleColor();
+        if (clicked) {
+            self.active_tool = .rotate;
+        }
+
+        c.ImGui_PushStyleColorImVec4(
+            c.ImGuiCol_Button,
+            if (self.active_tool == .scale) active_col else normal_col,
+        );
+        clicked = c.ImGui_ImageButton("##scale-tool", self.scale_tool_icon_ds, icon_sz);
+        c.ImGui_PopStyleColor();
+        if (clicked) {
+            self.active_tool = .scale;
+        }
+
+        c.ImGui_EndChildFrame();
+    }
 
     gizmo.newFrame(editor_image, self.camera.view, self.camera.view_projection, .{
         .x = self.scene_window_rect.x,
@@ -757,6 +809,9 @@ fn init_imgui(self: *Self, engine: *Engine) void {
     self.folder_icon_ds = create_imgui_texture("assets/editor/icons/folder.png", engine);
     self.file_icon_ds = create_imgui_texture("assets/editor/icons/file.png", engine);
     self.object_icon_ds = create_imgui_texture("assets/editor/icons/object.png", engine);
+    self.move_tool_icon_ds = create_imgui_texture("assets/editor/icons/move-tool.png", engine);
+    self.rotate_tool_icon_ds = create_imgui_texture("assets/editor/icons/rotate-tool.png", engine);
+    self.scale_tool_icon_ds = create_imgui_texture("assets/editor/icons/scale-tool.png", engine);
 
     engine.deletion_queue.append(VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool)) catch @panic("Out of memory");
 

@@ -135,13 +135,6 @@ pub fn drawArrow(from: Vec3, to: Vec3, thickness: f32, head_size: f32, outline_t
         fn f(p1: Vec3, p2: Vec3, p3: Vec3, col: u32, out_col: u32) void {
             _ = out_col;
             const iv0 = c.ImVec2{ .x = 0, .y = 0 };
-            // c.ImDrawList_AddTriangleFilled(
-            //     context.drawlist,
-            //     toScreenPoint(p1) orelse iv0,
-            //     toScreenPoint(p2) orelse iv0,
-            //     toScreenPoint(p3) orelse iv0,
-            //     out_col,
-            // );
             c.ImDrawList_AddTriangleFilled(
                 context.drawlist,
                 toScreenPoint(p1) orelse iv0,
