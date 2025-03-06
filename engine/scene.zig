@@ -3,7 +3,9 @@ const std = @import("std");
 const Uuid = @import("uuid.zig");
 const Vec3 = @import("math3d.zig").Vec3;
 const Mat4 = @import("math3d.zig").Mat4;
-const MeshRenderer = @import("VulkanEngine.zig").MeshRenderer;
+const Quat = @import("math3d.zig").Quat;
+const utils = @import("utils.zig");
+const MeshRenderer = @import("components/MeshRenderer.zig");
 const BoundingBox = @import("mesh.zig").BoundingBox;
 
 pub const Scene = struct {
@@ -67,6 +69,42 @@ pub const Scene = struct {
         parent.addChildren(obj);
         return obj.ref();
     }
+
+    pub fn dfs(self: *Scene) std.mem.Allocator.Error!Dfs {
+        return try Dfs.init(self.allocator, self.root);
+    }
+};
+
+pub const Dfs = struct {
+    const Self = @This();
+
+    stack: std.ArrayList(*Object),
+
+    pub fn init(allocator: std.mem.Allocator, root: *Object) !Self {
+        var self = Self{
+            .stack = try std.ArrayList(*Object).initCapacity(allocator, 1),
+        };
+        self.stack.appendAssumeCapacity(root);
+        return self;
+    }
+
+    pub fn deinit(self: *Self) void {
+        for (self.stack.items) |o| {
+            o.deinit();
+        }
+        self.stack.deinit();
+    }
+
+    // the caller is responsible to deref the returned object
+    pub fn next(self: *Self) !?*Object {
+        if (self.stack.items.len == 0) return null;
+
+        const obj = self.stack.pop();
+        for (obj.children.items) |o| {
+            try self.stack.append(o.ref());
+        }
+        return obj;
+    }
 };
 
 const ComponentDeinitializer = struct {
@@ -81,7 +119,7 @@ pub const Object = struct {
 
     uuid: Uuid,
     name: []const u8,
-    transform: Mat4,
+    transform: Transform,
     parent: ?*Object = null,
     children: std.ArrayList(*Object),
     components: std.ArrayList(Component),
@@ -93,7 +131,7 @@ pub const Object = struct {
         self.* = .{
             .uuid = Uuid.new(),
             .name = name,
-            .transform = transform,
+            .transform = Transform.fromMatrix(transform),
             .children = std.ArrayList(*Object).init(scene.allocator),
             .components = std.ArrayList(Component).init(scene.allocator),
             .components_deinit_handles = std.ArrayList(ComponentDeinitializer).init(scene.allocator),
@@ -192,6 +230,15 @@ pub const Object = struct {
         obj.deref();
     }
 
+    pub fn getComponent(self: *Self, comptime C: type) ?*C {
+        for (self.components.items) |comp| {
+            if (comp.type_id == utils.typeId(C)) {
+                return @as(*C, @ptrCast(@alignCast(comp.ptr)));
+            }
+        }
+        return null;
+    }
+
     pub fn translate(self: *Self, translation: Mat4) void {
         self.transform = self.transform.mul(translation);
         for (self.components) |component| {
@@ -212,7 +259,28 @@ pub const Object = struct {
                 bb.accumulateBB(b(component.ptr));
             }
         }
-        return bb.translate(self.transform);
+        return bb.translate(self.transform.matrix());
+    }
+};
+
+pub const Transform = struct {
+    const Self = @This();
+
+    position: Vec3,
+    rotation: Vec3,
+    scale: Vec3,
+
+    pub fn fromMatrix(m: Mat4) Self {
+        const parts = m.decompose();
+        return .{
+            .position = parts.translation,
+            .rotation = parts.rotation.toEuler(),
+            .scale = parts.scale,
+        };
+    }
+
+    pub fn matrix(self: *const Self) Mat4 {
+        return Mat4.compose(self.position, Quat.fromEuler(self.rotation), self.scale);
     }
 };
 

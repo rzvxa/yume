@@ -66,11 +66,6 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
             }
         }
 
-        if (self.engine.camera_input.squaredLen() > (0.1 * 0.1)) {
-            const camera_delta = self.engine.camera_input.normalized().mulf(self.delta * 5.0);
-            self.engine.camera_pos = Vec3.add(self.engine.camera_pos, camera_delta);
-        }
-
         self.update();
         if (comptime canDispatch(Dispatcher, "update")) {
             d.update(self);
@@ -119,12 +114,13 @@ fn update(self: *Self) void {
     input.z += if (self.inputs.isKeyDown(inputs.ScanCode.S)) -1 else 0;
     input.x += if (self.inputs.isKeyDown(inputs.ScanCode.A)) -1 else 0;
     input.x += if (self.inputs.isKeyDown(inputs.ScanCode.D)) 1 else 0;
-    input.x += if (self.inputs.isKeyDown(inputs.ScanCode.E)) 1 else 0;
+    input.y += if (self.inputs.isKeyDown(inputs.ScanCode.E)) 1 else 0;
     input.y += if (self.inputs.isKeyDown(inputs.ScanCode.Q)) -1 else 0;
 
     if (input.squaredLen() > (0.1 * 0.1)) {
         const camera_delta = input.normalized().mulf(self.delta * 5.0);
-        self.engine.camera_pos = Vec3.add(self.engine.camera_pos, camera_delta);
+        var transform = &self.engine.main_camera.?.object.transform;
+        transform.position = transform.position.add(camera_delta);
     }
 }
 

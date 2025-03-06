@@ -19,7 +19,8 @@ const Vec4 = math3d.Vec4;
 const Mat4 = math3d.Mat4;
 
 const context = @import("context.zig");
-const Camera = @import("Camera.zig");
+const Camera = @import("components/Camera.zig");
+const MeshRenderer = @import("components/MeshRenderer.zig");
 
 const texs = @import("textures.zig");
 const Texture = texs.Texture;
@@ -47,45 +48,10 @@ pub const AllocatedImage = struct {
 };
 
 // Scene management
-const Material = struct {
+pub const Material = struct {
     texture_set: c.VkDescriptorSet = VK_NULL_HANDLE,
     pipeline: c.VkPipeline,
     pipeline_layout: c.VkPipelineLayout,
-};
-
-pub const MeshRenderer = struct {
-    object: *scene.Object,
-    mesh: *Mesh,
-    material: *Material,
-
-    pub fn init(object: *scene.Object, opts: struct { mesh: *Mesh, material: *Material }) MeshRenderer {
-        return .{
-            .object = object,
-            .mesh = opts.mesh,
-            .material = opts.material,
-        };
-    }
-
-    pub fn bounds(self: *const @This()) BoundingBox {
-        return self.mesh.bounds;
-    }
-
-    pub fn worldBounds(self: *const @This()) BoundingBox {
-        return self.bounds().translate(self.object.transform);
-    }
-
-    pub fn asComponent(self: *@This()) scene.Component {
-        return .{
-            .type_id = utils.typeId(@This()),
-            .name = "Mesh Renderer",
-            .ptr = self,
-            .bounds = struct {
-                fn bounds(ptr: *anyopaque) BoundingBox {
-                    return MeshRenderer.bounds(@ptrCast(@alignCast(ptr)));
-                }
-            }.bounds,
-        };
-    }
 };
 
 const FrameData = struct {
@@ -192,14 +158,7 @@ materials: std.StringHashMap(Material),
 meshes: std.StringHashMap(Mesh),
 textures: std.StringHashMap(Texture),
 
-camera_pos: Vec3 = Vec3.make(0.0, -3.0, -10.0),
-camera_input: Vec3 = Vec3.make(0.0, 0.0, 0.0),
-
-main_camera: Camera = Camera.makePerspectiveCamera(.{
-    .fovy_rad = std.math.degreesToRadians(70.0),
-    .far = 200,
-    .near = 0.1,
-}),
+main_camera: ?*Camera = null,
 
 deletion_queue: std.ArrayList(VulkanDeleter) = undefined,
 buffer_deletion_queue: std.ArrayList(VmaBufferDeleter) = undefined,
@@ -1303,9 +1262,19 @@ fn createShaderModule(self: *Self, code: []const u8) ?c.VkShaderModule {
     return shader_module;
 }
 
-pub fn loadScene(self: *Self, s: *scene.Scene) void {
+pub fn loadScene(self: *Self, s: *scene.Scene) !void {
     var old_scene = self.scene;
     self.scene = s;
+    var iter = self.scene.dfs() catch @panic("OOM");
+    while (try iter.next()) |next| {
+        std.log.debug("here {s}", .{next.name});
+        if (next.getComponent(Camera)) |camera| {
+            std.log.debug("cam on {s}", .{next.name});
+            self.main_camera = camera;
+        }
+
+        next.deref();
+    }
     old_scene.deinit();
 }
 
@@ -1670,7 +1639,7 @@ pub fn drawObjects(
     var object_data_arr: [*]GPUObjectData = @ptrCast(object_data orelse unreachable);
     for (renderables, 0..) |object, index| {
         object_data_arr[index] = GPUObjectData{
-            .model_matrix = object.object.transform,
+            .model_matrix = object.object.transform.matrix(),
         };
     }
     c.vmaUnmapMemory(self.vma_allocator, self.getCurrentFrame().object_buffer.allocation);
@@ -1697,7 +1666,7 @@ pub fn drawObjects(
 
         const push_constants = MeshPushConstants{
             .data = Vec4.ZERO,
-            .render_matrix = r.object.transform,
+            .render_matrix = r.object.transform.matrix(),
         };
 
         c.vkCmdPushConstants(cmd, r.material.pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &push_constants);

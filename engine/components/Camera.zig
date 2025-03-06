@@ -1,6 +1,9 @@
 const std = @import("std");
 
-const math3d = @import("math3d.zig");
+const Object = @import("../scene.zig").Object;
+const Component = @import("../scene.zig").Component;
+const typeId = @import("../utils.zig").typeId;
+const math3d = @import("../math3d.zig");
 const Vec2 = math3d.Vec2;
 const Vec3 = math3d.Vec3;
 const Vec4 = math3d.Vec4;
@@ -28,11 +31,21 @@ pub const CameraOptions = union(CameraKind) {
 
 const Self = @This();
 
+object: *Object = undefined,
 opts: CameraOptions,
 
 view: Mat4 = Mat4.make(Vec4.ZERO, Vec4.ZERO, Vec4.ZERO, Vec4.ZERO),
 projection: Mat4 = Mat4.make(Vec4.ZERO, Vec4.ZERO, Vec4.ZERO, Vec4.ZERO),
 view_projection: Mat4 = Mat4.make(Vec4.ZERO, Vec4.ZERO, Vec4.ZERO, Vec4.ZERO),
+
+pub fn init(object: *Object, opts: CameraOptions) Self {
+    var self = switch (opts) {
+        .perspective => makePerspectiveCamera(opts.perspective),
+        .orthographic => makeOrthographicCamera(opts.orthographic),
+    };
+    self.object = object;
+    return self;
+}
 
 pub fn makePerspectiveCamera(opts: PerspectiveOptions) Self {
     return Self{ .opts = .{ .perspective = opts } };
@@ -183,4 +196,12 @@ inline fn updateOrthographicProjection(self: *Self, aspect: f32) void {
 
 inline fn updateViewProjection(self: *Self) void {
     self.view_projection = self.projection.mul(self.view);
+}
+
+pub fn asComponent(self: *Self) Component {
+    return .{
+        .type_id = typeId(Self),
+        .name = "Camera",
+        .ptr = self,
+    };
 }

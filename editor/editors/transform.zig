@@ -21,27 +21,22 @@ pub fn init(allocator: std.mem.Allocator, _: *Object) Self {
 pub fn deinit(_: *Self) void {}
 
 pub fn edit(_: *Self, obj: *Object) void {
-    const components = obj.transform.decompose();
-
-    var pos = components.translation;
-    var rot = components.rotation.toEuler();
-    var scale = components.scale;
+    const transform = &obj.transform;
 
     var changed = false;
 
-    if (inputVec3("Position", &pos, 0.01)) {
+    if (inputVec3("Position", &transform.position, 0.01)) {
         changed = true;
     }
     // std.log.debug("rot: {} {}", .{ rot, components.rotation });
 
-    if (inputVec3("Rotation", &rot, 1)) {
+    if (inputVec3("Rotation", &transform.rotation, 1)) {
         changed = true;
     }
 
-    if (inputVec3("Scale", &scale, 0.01)) {
+    if (inputVec3("Scale", &transform.scale, 0.01)) {
         changed = true;
     }
-    obj.transform = Mat4.compose(pos, Quat.fromEuler(rot), scale);
 }
 
 pub fn inputVec3(label: [*c]const u8, v: *Vec3, speed: f32) bool {

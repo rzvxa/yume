@@ -32,4 +32,5 @@ pub const utils = @import("utils.zig");
 pub const TypeId = utils.TypeId;
 pub const typeId = utils.typeId;
 
-pub const Camera = @import("Camera.zig");
+pub const Camera = @import("components/Camera.zig");
+pub const MeshRenderer = @import("components/MeshRenderer.zig");

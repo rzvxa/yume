@@ -5,7 +5,7 @@ const std = @import("std");
 const Uuid = @import("yume").Uuid;
 const Object = @import("yume").Object;
 const Component = @import("yume").Component;
-const MeshRenderer = @import("yume").VulkanEngine.MeshRenderer;
+const MeshRenderer = @import("yume").MeshRenderer;
 const TypeId = @import("yume").TypeId;
 const typeId = @import("yume").typeId;
 const ObjectMetaEditor = @import("object.zig");
@@ -107,7 +107,31 @@ fn componentEditorOf(self: *Self, type_id: TypeId) ComponentEditor {
         return t;
     }
 
-    @panic("no ediitor");
+    return struct {
+        allocator: std.mem.Allocator,
+        pub fn init(a: std.mem.Allocator) *anyopaque {
+            const ptr = a.create(@This()) catch @panic("OOM");
+            ptr.* = @This(){ .allocator = a };
+            return ptr;
+        }
+
+        pub fn deinit(ptr: *anyopaque) void {
+            const me = @as(*@This(), @ptrCast(@alignCast(ptr)));
+            me.allocator.destroy(me);
+        }
+
+        pub fn edit(_: *anyopaque, obj: *Object, comp: *Component) void {
+            c.ImGui_Text("No Editor for %s{ compId: %d, uuid: %s }", obj.name.ptr, comp.type_id, &comp.uuid.urnZ());
+        }
+
+        pub fn asComponentEditor() ComponentEditor {
+            return .{
+                .init = @This().init,
+                .deinit = @This().deinit,
+                .edit = @This().edit,
+            };
+        }
+    }.asComponentEditor();
 }
 
 fn registerBuiltinComponentEditors(self: *Self) void {

@@ -14,7 +14,7 @@ const Texture = textures.Texture;
 const Camera = @import("yume").Camera;
 const Scene = @import("yume").scene_graph.Scene;
 const Object = @import("yume").scene_graph.Object;
-const MeshRenderer = @import("yume").VulkanEngine.MeshRenderer;
+const MeshRenderer = @import("yume").MeshRenderer;
 const ScanCode = @import("yume").inputs.ScanCode;
 const MouseButton = @import("yume").inputs.MouseButton;
 const InputsContext = @import("yume").inputs.InputContext;
@@ -88,6 +88,18 @@ pub fn init(ctx: *GameApp) Self {
     var scene = Scene.init(ctx.allocator) catch @panic("OOM");
 
     {
+        const main_camera = scene.newObject(.{
+            .name = "Main Camera",
+            .transform = Mat4.translation(Vec3.make(0, 1, 0)),
+        }) catch @panic("OOM");
+        defer main_camera.deref();
+        main_camera.addComponent(Camera, .{
+            .perspective = .{
+                .fovy_rad = std.math.degreesToRadians(70.0),
+                .far = 200,
+                .near = 0.1,
+            },
+        });
         const apes = scene.newObject(.{
             .name = "Apes Together Strong!",
             .transform = Mat4.translation(Vec3.make(0, 3, 0)),
@@ -159,7 +171,7 @@ pub fn init(ctx: *GameApp) Self {
             .material = empire_material,
         });
     }
-    ctx.engine.loadScene(scene);
+    ctx.engine.loadScene(scene) catch @panic("Failed to load default scene");
     return self;
 }
 
@@ -473,18 +485,20 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             }});
 
             const aspect = me.d.game_view_size.x / me.d.game_view_size.y;
-            me.app.engine.main_camera.updateMatrices(
-                me.app.engine.camera_pos,
-                Vec3.ZERO,
-                aspect,
-            );
-            me.app.engine.drawObjects(
-                me.cmd,
-                me.app.engine.scene.renderables.items,
-                me.app.engine.camera_and_scene_buffer,
-                me.app.engine.camera_and_scene_set,
-                &me.app.engine.main_camera,
-            );
+            if (me.app.engine.main_camera) |main_camera| {
+                main_camera.updateMatrices(
+                    main_camera.object.transform.position,
+                    Vec3.ZERO,
+                    aspect,
+                );
+                me.app.engine.drawObjects(
+                    me.cmd,
+                    me.app.engine.scene.renderables.items,
+                    me.app.engine.camera_and_scene_buffer,
+                    me.app.engine.camera_and_scene_set,
+                    main_camera,
+                );
+            }
 
             c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
                 .offset = .{ .x = 0, .y = 0 },
@@ -493,6 +507,17 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         }
     }.f, &frame_userdata);
     c.ImDrawList_AddCallback(game_image, c.ImDrawCallback_ResetRenderState, null);
+    if (ctx.engine.main_camera == null) {
+        const text = "No Camera";
+        const size = c.ImGui_CalcTextSize(text);
+        avail = c.ImGui_GetContentRegionAvail();
+        const style = c.ImGui_GetStyle();
+        c.ImGui_SetCursorPos(c.ImVec2{
+            .x = (avail.x - size.x) / 2,
+            .y = (avail.y - size.y + style.*.WindowPadding.y) / 2,
+        });
+        c.ImGui_Text(text);
+    }
     c.ImGui_End();
 
     _ = c.ImGui_Begin("Scene", null, 0);
@@ -554,11 +579,11 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
 
     if (self.selection) |selection| {
         gizmo.drawBoundingBox(selection.bounds()) catch @panic("error");
-        const components = selection.transform.decompose();
+        const transform = &selection.transform;
         gizmo.manipulate(
-            components.translation,
-            Vec3.ZERO,
-            components.scale,
+            transform.position,
+            transform.rotation,
+            transform.scale,
         ) catch @panic("error");
     }
     gizmo.endFrame();
