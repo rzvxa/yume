@@ -13,6 +13,7 @@ const math3d = @import("math3d.zig");
 const Vec3 = math3d.Vec3;
 
 const inputs = @import("inputs.zig");
+const assets = @import("assets.zig");
 
 const Self = @This();
 mouse: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
@@ -27,7 +28,7 @@ engine: VulkanEngine,
 
 delta: f32 = 0.016,
 
-pub fn init(a: std.mem.Allocator, window_title: []const u8) Self {
+pub fn init(a: std.mem.Allocator, window_title: []const u8) *Self {
     utils.checkSdl(c.SDL_Init(c.SDL_INIT_VIDEO));
 
     const window = c.SDL_CreateWindow(window_title.ptr, window_extent.width, window_extent.height, c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE) orelse @panic("Failed to create SDL window");
@@ -36,13 +37,18 @@ pub fn init(a: std.mem.Allocator, window_title: []const u8) Self {
 
     const engine = VulkanEngine.init(a, window);
 
-    return .{
+    const self = a.create(Self) catch @panic("OOM");
+
+    self.* = Self{
         .window_title = window_title,
         .allocator = a,
         .window = window,
         .inputs = inputs.init() catch @panic("Failed to initialize input manager"),
         .engine = engine,
     };
+
+    assets.AssetsDatabase.init(a, &self.engine);
+    return self;
 }
 
 pub fn run(self: *Self, comptime Dispatcher: anytype) void {
@@ -101,7 +107,9 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
 }
 
 pub fn deinit(self: *Self) void {
+    assets.AssetsDatabase.deinit();
     self.engine.deinit();
+    self.allocator.destroy(self);
 }
 
 fn newFrame(self: *Self) void {

@@ -4,6 +4,7 @@ const std = @import("std");
 
 const Object = @import("yume").Object;
 const Component = @import("yume").Component;
+const MeshRenderer = @import("yume").MeshRenderer;
 const Vec3 = @import("yume").Vec3;
 const Mat4 = @import("yume").Mat4;
 const Quat = @import("yume").Quat;
@@ -25,8 +26,14 @@ pub fn deinit(ptr: *anyopaque) void {
     me.allocator.destroy(me);
 }
 
-pub fn edit(_: *anyopaque, obj: *Object, comp: *Component) void {
-    c.ImGui_Text("2No Editor for %s(compId: %d)", obj.name.ptr, comp.type_id);
+pub fn edit(_: *anyopaque, _: *Object, comp: *Component) void {
+    const mr = @as(*MeshRenderer, @ptrCast(@alignCast(comp.ptr)));
+    var urn = mr.mesh.uuid.urn();
+    _ = c.ImGui_InputText("##mesh-reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);
+    c.ImGui_SameLine();
+    _ = c.ImGui_Button("...");
+    c.ImGui_SameLine();
+    _ = c.ImGui_Text("Mesh");
 }
 
 pub fn asComponentEditor() ComponentEditor {

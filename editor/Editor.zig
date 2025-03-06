@@ -7,6 +7,7 @@ const gizmo = @import("gizmo.zig");
 const check_vk = @import("yume").vki.check_vk;
 
 const Editors = @import("editors/editors.zig");
+const AssetsDatabase = @import("yume").AssetsDatabase;
 
 const textures = @import("yume").textures;
 const Texture = textures.Texture;
@@ -111,7 +112,7 @@ pub fn init(ctx: *GameApp) Self {
         }) catch @panic("OOM");
         defer monkey.deref();
         monkey.addComponent(MeshRenderer, .{
-            .mesh = ctx.engine.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
+            .mesh = AssetsDatabase.getOrLoadMesh("builtin://assets/builtin/u.obj") catch @panic("Failed to get monkey mesh"),
             .material = ctx.engine.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
         });
         apes.addChildren(monkey);
@@ -147,7 +148,9 @@ pub fn init(ctx: *GameApp) Self {
         check_vk(c.vkCreateSampler(ctx.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
         ctx.engine.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("Out of memory");
 
-        const lost_empire_tex = (ctx.engine.textures.get("empire_diffuse") orelse @panic("Failed to get empire texture"));
+        const lost_empire_tex_handle = AssetsDatabase.loadTexture("builtin://assets/builtin/lost_empire-RGBA.png") catch @panic("Failed to load texture");
+        const lost_empire_tex = AssetsDatabase.getTexture(lost_empire_tex_handle) catch @panic("Failed to get empire texture");
+        // const lost_empire_tex = (ctx.engine.textures.get("empire_diffuse") orelse @panic("Failed to get empire texture"));
 
         const descriptor_image_info = std.mem.zeroInit(c.VkDescriptorImageInfo, .{
             .sampler = sampler,
@@ -167,7 +170,7 @@ pub fn init(ctx: *GameApp) Self {
         c.vkUpdateDescriptorSets(ctx.engine.device, 1, &write_descriptor_set, 0, null);
 
         empire.addComponent(MeshRenderer, .{
-            .mesh = ctx.engine.meshes.getPtr("lost_empire") orelse @panic("Failed to get triangle mesh"),
+            .mesh = AssetsDatabase.getOrLoadMesh("builtin://assets/builtin/lost_empire.obj") catch @panic("Failed to get triangle mesh"),
             .material = empire_material,
         });
     }

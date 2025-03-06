@@ -4,6 +4,8 @@ const std = @import("std");
 const AllocatedBuffer = @import("VulkanEngine.zig").AllocatedBuffer;
 const m3d = @import("math3d.zig");
 
+const Uuid = @import("uuid.zig");
+
 const Vec2 = m3d.Vec2;
 const Vec3 = m3d.Vec3;
 const Mat4 = m3d.Mat4;
@@ -92,6 +94,7 @@ pub const BoundingBox = struct {
 };
 
 pub const Mesh = struct {
+    uuid: Uuid,
     vertices: []Vertex,
     bounds: BoundingBox,
     vertex_buffer: AllocatedBuffer = undefined,
@@ -167,6 +170,7 @@ pub fn load_from_obj(allocator: std.mem.Allocator, filepath: []const u8) Mesh {
     }
 
     return Mesh{
+        .uuid = Uuid.new(),
         .vertices = vb.vertices.toOwnedSlice() catch @panic("Failed to make owned slice"),
         .bounds = vb.bounds,
     };
