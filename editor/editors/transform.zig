@@ -25,17 +25,21 @@ pub fn edit(_: *Self, obj: *Object) void {
 
     var changed = false;
 
-    if (inputVec3("Position", &transform.position, 0.01)) {
+    if (inputVec3("Position", &transform.raw.position, 0.01)) {
         changed = true;
     }
     // std.log.debug("rot: {} {}", .{ rot, components.rotation });
 
-    if (inputVec3("Rotation", &transform.rotation, 1)) {
+    if (inputVec3("Rotation", &transform.raw.rotation, 1)) {
         changed = true;
     }
 
-    if (inputVec3("Scale", &transform.scale, 0.01)) {
+    if (inputVec3("Scale", &transform.raw.scale, 0.01)) {
         changed = true;
+    }
+
+    if (changed) {
+        transform.updateMatrices();
     }
 }
 

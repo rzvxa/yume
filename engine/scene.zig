@@ -204,27 +204,39 @@ pub const Object = struct {
         }
     }
 
-    pub fn addChildren(self: *Self, obj: *Object) void {
+    pub fn findChildren(self: *Self, obj: *Object) ?usize {
+        for (self.children.items, 0..) |c, i| {
+            if (c == obj) {
+                return i;
+            }
+        }
+        return null;
+    }
+
+    pub fn insertChildren(self: *Self, i: usize, obj: *Object) void {
         std.debug.assert(obj.parent != self);
         _ = obj.ref();
         if (obj.parent) |old_parent| {
             old_parent.removeChildren(obj);
         }
         obj.parent = self;
-        self.children.append(obj) catch @panic("OOM");
+        self.children.insert(i, obj) catch @panic("OOM");
+    }
+
+    pub fn swapChildrens(self: *Self, i: usize, j: usize) void {
+        std.debug.assert(i != j);
+        const tmp = self.children.items[i];
+        self.children.items[i] = self.children.items[j];
+        self.children.items[j] = tmp;
+    }
+
+    pub inline fn addChildren(self: *Self, obj: *Object) void {
+        self.insertChildren(self.children.items.len, obj);
     }
 
     pub fn removeChildren(self: *Self, obj: *Object) void {
         std.debug.assert(obj.parent == self);
-        const index: usize = blk: {
-            for (self.children.items, 0..) |c, i| {
-                if (c == obj) {
-                    break :blk i;
-                }
-            }
-            std.log.debug("  {s} and {s}", .{ self.name, obj.name });
-            @panic("not found?");
-        };
+        const index: usize = self.findChildren(obj) orelse @panic("not found");
         _ = self.children.orderedRemove(index);
         obj.parent = null;
         obj.deref();
@@ -259,28 +271,65 @@ pub const Object = struct {
                 bb.accumulateBB(b(component.ptr));
             }
         }
-        return bb.translate(self.transform.matrix());
+        return bb.translate(self.transform.matrix);
     }
 };
 
 pub const Transform = struct {
     const Self = @This();
 
-    position: Vec3,
-    rotation: Vec3,
-    scale: Vec3,
+    matrix: Mat4,
+    // after any change to this struct, the user should call `updateMatrices` method to reflect it correctly.
+    raw: struct {
+        position: Vec3,
+        rotation: Vec3,
+        scale: Vec3,
+    },
+
+    pub inline fn position(self: *Self) Vec3 {
+        return self.raw.position;
+    }
+
+    pub inline fn rotation(self: *Self) Vec3 {
+        return self.raw.rotation;
+    }
+
+    pub inline fn scale(self: *Self) Vec3 {
+        return self.raw.scale;
+    }
+
+    pub inline fn setPosition(self: *Self, pos: Vec3) void {
+        self.raw.position = pos;
+    }
+
+    pub inline fn setRotation(self: *Self) Vec3 {
+        return self.raw.rotation;
+    }
+
+    pub inline fn setScale(self: *Self) Vec3 {
+        return self.raw.scale;
+    }
 
     pub fn fromMatrix(m: Mat4) Self {
         const parts = m.decompose();
-        return .{
-            .position = parts.translation,
-            .rotation = parts.rotation.toEuler(),
-            .scale = parts.scale,
+        var self = Self{
+            .matrix = undefined,
+            .raw = .{
+                .position = parts.translation,
+                .rotation = parts.rotation.toEuler(),
+                .scale = parts.scale,
+            },
         };
+        self.updateMatrices();
+        return self;
     }
 
-    pub fn matrix(self: *const Self) Mat4 {
-        return Mat4.compose(self.position, Quat.fromEuler(self.rotation), self.scale);
+    pub inline fn matrix(self: *const Self) Mat4 {
+        return Mat4.compose(self.position(), Quat.fromEuler(self.rotation()), self.scale());
+    }
+
+    pub inline fn updateMatrices(self: *Self) void {
+        self.matrix = Mat4.compose(self.position(), Quat.fromEuler(self.rotation()), self.scale());
     }
 };
 

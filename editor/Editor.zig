@@ -393,7 +393,10 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         if (c.ImGui_AcceptDragDropPayload("Object", 0)) |payload| {
             const payload_obj: ?**Object = @ptrCast(@alignCast(payload.*.Data.?));
             if (payload_obj) |p| {
+                _ = p.*.ref();
+                p.*.parent.?.removeChildren(p.*);
                 ctx.engine.scene.root.addChildren(p.*);
+                p.*.deref();
             }
         }
         c.ImGui_EndDragDropTarget();
@@ -408,28 +411,33 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
     const grid_size = c.ImVec2{ .x = avail.x, .y = avail.y - bread_crumb_height };
     _ = c.ImGui_BeginChildFrameEx(c.ImGui_GetID("files grid"), grid_size, c.ImGuiWindowFlags_NoBackground);
     c.ImGui_ColumnsEx(@intFromFloat(col_count), "dir", false);
+    const ItemDrawer = struct {
+        fn draw(icon: c.VkDescriptorSet, name: []const u8, arg: usize) void {
+            c.ImGui_Spacing();
+            c.ImGui_Spacing();
+            c.ImGui_Spacing();
+            const text_size = c.ImGui_CalcTextSize(name.ptr);
+            const btn_size = c.ImVec2{
+                .x = @max(item_sz, text_size.x) + (2 * c.ImGui_GetStyle().*.FramePadding.x),
+                .y = item_sz + text_size.y + (2 * c.ImGui_GetStyle().*.FramePadding.y),
+            };
+            const cursor = c.ImGui_GetCursorPos();
+            _ = c.ImGui_ButtonEx("###name", btn_size);
+            c.ImGui_SetCursorPos(cursor);
+            c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - item_sz) / 2));
+            _ = c.ImGui_Image(icon, c.ImVec2{ .x = item_sz, .y = item_sz });
+            c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - text_size.x) / 2));
+            _ = c.ImGui_Text(name.ptr, arg);
+            c.ImGui_Spacing();
+            c.ImGui_Spacing();
+            c.ImGui_Spacing();
+        }
+    };
     for (0..10) |i| {
-        c.ImGui_Spacing();
-        c.ImGui_Spacing();
-        c.ImGui_Spacing();
         const is_dir = i < 3;
         const name = if (is_dir) "New Folder (%d)" else "Script-%d.lua";
         const icon = if (is_dir) self.folder_icon_ds else self.file_icon_ds;
-        const text_size = c.ImGui_CalcTextSize(name);
-        const btn_size = c.ImVec2{
-            .x = @max(item_sz, text_size.x) + (2 * c.ImGui_GetStyle().*.FramePadding.x),
-            .y = item_sz + text_size.y + (2 * c.ImGui_GetStyle().*.FramePadding.y),
-        };
-        const cursor = c.ImGui_GetCursorPos();
-        _ = c.ImGui_ButtonEx("###name", btn_size);
-        c.ImGui_SetCursorPos(cursor);
-        c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - item_sz) / 2));
-        _ = c.ImGui_Image(icon, c.ImVec2{ .x = item_sz, .y = item_sz });
-        c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - text_size.x) / 2));
-        _ = c.ImGui_Text(name, i + 1);
-        c.ImGui_Spacing();
-        c.ImGui_Spacing();
-        c.ImGui_Spacing();
+        ItemDrawer.draw(icon, name, i + 1);
         c.ImGui_NextColumn();
     }
     c.ImGui_EndChildFrame();
@@ -487,7 +495,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             const aspect = me.d.game_view_size.x / me.d.game_view_size.y;
             if (me.app.engine.main_camera) |main_camera| {
                 main_camera.updateMatrices(
-                    main_camera.object.transform.position,
+                    main_camera.object.transform.position(),
                     Vec3.ZERO,
                     aspect,
                 );
@@ -581,9 +589,9 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         gizmo.drawBoundingBox(selection.bounds()) catch @panic("error");
         const transform = &selection.transform;
         gizmo.manipulate(
-            transform.position,
-            transform.rotation,
-            transform.scale,
+            transform.position(),
+            transform.rotation(),
+            transform.scale(),
         ) catch @panic("error");
     }
     gizmo.endFrame();
@@ -765,6 +773,38 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
     if (self.selection == obj) {
         node_flags |= c.ImGuiTreeNodeFlags_Selected;
     }
+
+    const avail = c.ImGui_GetContentRegionAvail();
+
+    const edge_size = (c.ImGui_GetFrameHeight() + c.ImGui_GetStyle().*.FramePadding.y) / 3;
+    const cursor = c.ImGui_GetCursorPos();
+    _ = c.ImGui_InvisibleButton("over-drop", c.ImVec2{ .x = avail.x, .y = edge_size }, 0);
+    if (c.ImGui_BeginDragDropTarget()) {
+        c.ImGui_SetCursorPos(cursor);
+        _ = c.ImGui_ColorButtonEx(
+            "over-drop-colored",
+            c.ImVec4{ .x = 0.1, .y = 0.5, .z = 0.5, .w = 0.8 },
+            0,
+            c.ImVec2{ .x = avail.x, .y = edge_size },
+        );
+        if (c.ImGui_AcceptDragDropPayload("Object", 0)) |payload| {
+            const payload_obj: ?**Object = @ptrCast(@alignCast(payload.*.Data.?));
+            if (payload_obj) |pl| {
+                if (pl.* != obj) {
+                    const pl_parent = pl.*.parent.?;
+                    const obj_parent = obj.*.parent.?;
+                    if (pl_parent == obj_parent) {
+                        pl_parent.removeChildren(pl.*);
+                    }
+                    const obj_idx = obj_parent.findChildren(obj).?;
+                    obj_parent.insertChildren(obj_idx, pl.*);
+                }
+            }
+        }
+        c.ImGui_EndDragDropTarget();
+    }
+    c.ImGui_SetCursorPosY(c.ImGui_GetCursorPosY() - edge_size);
+
     const open = c.ImGui_TreeNodeEx("##", node_flags);
     if (c.ImGui_IsItemClicked() and !c.ImGui_IsItemToggledOpen()) {
         self.selection = obj;
@@ -774,7 +814,10 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
         if (c.ImGui_AcceptDragDropPayload("Object", 0)) |payload| {
             const payload_obj: ?**Object = @ptrCast(@alignCast(payload.*.Data.?));
             if (payload_obj) |p| {
+                _ = p.*.ref();
+                p.*.parent.?.removeChildren(p.*);
                 obj.addChildren(p.*);
+                p.*.deref();
             }
         }
         c.ImGui_EndDragDropTarget();
@@ -797,6 +840,7 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
         }
         c.ImGui_TreePop();
     }
+
     if (c.ImGui_BeginPopupContextItemEx("context-menu", c.ImGuiPopupFlags_MouseButtonRight)) {
         if (c.ImGui_BeginMenu("New")) {
             _ = c.ImGui_MenuItem("New Object");

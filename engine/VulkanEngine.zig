@@ -1642,7 +1642,7 @@ pub fn drawObjects(
     var object_data_arr: [*]GPUObjectData = @ptrCast(object_data orelse unreachable);
     for (renderables, 0..) |object, index| {
         object_data_arr[index] = GPUObjectData{
-            .model_matrix = object.object.transform.matrix(),
+            .model_matrix = object.object.transform.matrix,
         };
     }
     c.vmaUnmapMemory(self.vma_allocator, self.getCurrentFrame().object_buffer.allocation);
@@ -1669,7 +1669,7 @@ pub fn drawObjects(
 
         const push_constants = MeshPushConstants{
             .data = Vec4.ZERO,
-            .render_matrix = r.object.transform.matrix(),
+            .render_matrix = r.object.transform.matrix,
         };
 
         c.vkCmdPushConstants(cmd, r.material.pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &push_constants);

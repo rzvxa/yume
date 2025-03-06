@@ -9,24 +9,45 @@ const Vec3 = math3d.Vec3;
 const Vec4 = math3d.Vec4;
 const Mat4 = math3d.Mat4;
 
-pub const CameraKind = enum { perspective, orthographic };
+pub const CameraKind = enum {
+    pub const perspective_name = "Perspective";
+    pub const orthographic_name = "Orthographic";
+
+    perspective,
+    orthographic,
+
+    pub fn typeName(self: CameraKind) []const u8 {
+        return switch (self) {
+            .perspective => perspective_name,
+            .orthographic => orthographic_name,
+        };
+    }
+};
 pub const PerspectiveOptions = struct {
-    fovy_rad: f32,
-    near: f32,
-    far: f32,
+    fovy_rad: f32 = std.math.degreesToRadians(75),
+    near: f32 = 0.1,
+    far: f32 = 200,
 };
 pub const OrthographicOptions = struct {
-    left: f32,
-    right: f32,
-    bottom: f32,
-    top: f32,
-    near: f32,
-    far: f32,
+    left: f32 = -10,
+    right: f32 = 10,
+    bottom: f32 = -10,
+    top: f32 = 10,
+    near: f32 = 0.1,
+    far: f32 = 200,
 };
 
 pub const CameraOptions = union(CameraKind) {
     perspective: PerspectiveOptions,
     orthographic: OrthographicOptions,
+
+    pub inline fn kind(self: CameraOptions) CameraKind {
+        return @enumFromInt(@intFromEnum(self));
+    }
+
+    pub fn typeName(self: CameraOptions) []const u8 {
+        return self.kind().typeName();
+    }
 };
 
 const Self = @This();
@@ -58,7 +79,7 @@ pub fn makeOrthographicCamera(opts: OrthographicOptions) Self {
 pub fn updateMatrices(self: *Self, pos: Vec3, rot: Vec3, aspect: f32) void {
     switch (self.opts) {
         .perspective => self.updatePerspectiveMatrices(pos, rot, aspect),
-        .orthographic => self.updatePerspectiveMatrices(pos, rot, aspect),
+        .orthographic => self.updateOrthographicMatrices(pos, rot, aspect),
     }
 }
 

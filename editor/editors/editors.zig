@@ -5,17 +5,31 @@ const std = @import("std");
 const Uuid = @import("yume").Uuid;
 const Object = @import("yume").Object;
 const Component = @import("yume").Component;
+const Camera = @import("yume").Camera;
 const MeshRenderer = @import("yume").MeshRenderer;
 const TypeId = @import("yume").TypeId;
 const typeId = @import("yume").typeId;
 const ObjectMetaEditor = @import("object.zig");
 const ObjectTransformEditor = @import("transform.zig");
 const MeshRendererEditor = @import("MeshRendererEditor.zig");
+const CameraEditor = @import("CameraEditor.zig");
+
+pub const ComponentEditorFlags = packed struct {
+    no_disable: bool = false,
+    _padding1: bool = false,
+    _padding2: bool = false,
+    _padding3: bool = false,
+    _padding4: bool = false,
+    _padding5: bool = false,
+    _padding6: bool = false,
+    _padding7: bool = false,
+};
 
 pub const ComponentEditor = struct {
     init: *const fn (allocator: std.mem.Allocator) *anyopaque,
     deinit: *const fn (*anyopaque) void,
     edit: *const fn (self: *anyopaque, obj: *Object, comp: *Component) void,
+    flags: ComponentEditorFlags = .{},
 };
 
 const ComponentEditorInstance = struct { ptr: *anyopaque, type_id: TypeId };
@@ -96,7 +110,13 @@ pub fn editComponent(self: *Self, object: *Object, component: *Component) void {
         instance.value_ptr.* = .{ .ptr = editor.init(self.component_editors.allocator), .type_id = component.type_id };
     }
 
-    if (collapsingHeaderWithCheckBox(component.name, &component.enable, c.ImGuiTreeNodeFlags_DefaultOpen)) {
+    var open: bool = undefined;
+    if (editor.flags.no_disable) {
+        open = c.ImGui_CollapsingHeader(component.name, c.ImGuiTreeNodeFlags_DefaultOpen);
+    } else {
+        open = collapsingHeaderWithCheckBox(component.name, &component.enable, c.ImGuiTreeNodeFlags_DefaultOpen);
+    }
+    if (open) {
         editor.edit(instance.value_ptr.*.ptr, object, component);
     }
 }
@@ -136,6 +156,7 @@ fn componentEditorOf(self: *Self, type_id: TypeId) ComponentEditor {
 
 fn registerBuiltinComponentEditors(self: *Self) void {
     self.component_editor_types.put(typeId(MeshRenderer), MeshRendererEditor.asComponentEditor()) catch @panic("OOM");
+    self.component_editor_types.put(typeId(Camera), CameraEditor.asComponentEditor()) catch @panic("OOM");
 }
 
 fn collapsingHeaderWithCheckBox(label: [*c]const u8, checked: [*c]bool, flags: c.ImGuiTreeNodeFlags) bool {

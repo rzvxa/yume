@@ -120,7 +120,7 @@ fn update(self: *Self) void {
     if (input.squaredLen() > (0.1 * 0.1)) {
         const camera_delta = input.normalized().mulf(self.delta * 5.0);
         var transform = &self.engine.main_camera.?.object.transform;
-        transform.position = transform.position.add(camera_delta);
+        transform.setPosition(transform.position().add(camera_delta));
     }
 }
 
