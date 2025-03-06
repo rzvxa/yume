@@ -22,9 +22,6 @@ const context = @import("context.zig");
 const Camera = @import("components/Camera.zig");
 const MeshRenderer = @import("components/MeshRenderer.zig");
 
-const texs = @import("textures.zig");
-const Texture = texs.Texture;
-
 const window_extent = context.window_extent;
 
 const log = std.log.scoped(.vulkan_engine);
@@ -155,8 +152,6 @@ descriptor_pool: c.VkDescriptorPool = VK_NULL_HANDLE,
 vma_allocator: c.VmaAllocator = undefined,
 
 materials: std.StringHashMap(Material),
-meshes: std.StringHashMap(Mesh),
-textures: std.StringHashMap(Texture),
 
 main_camera: ?*Camera = null,
 
@@ -228,8 +223,6 @@ pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
         .buffer_deletion_queue = std.ArrayList(VmaBufferDeleter).init(a),
         .image_deletion_queue = std.ArrayList(VmaImageDeleter).init(a),
         .materials = std.StringHashMap(Material).init(a),
-        .meshes = std.StringHashMap(Mesh).init(a),
-        .textures = std.StringHashMap(Texture).init(a),
     };
 
     engine.initInstance();
@@ -721,7 +714,7 @@ fn initSyncStructures(self: *Self) void {
     log.info("Created sync structures", .{});
 }
 
-const PipelineBuilder = struct {
+pub const PipelineBuilder = struct {
     shader_stages: []c.VkPipelineShaderStageCreateInfo,
     vertex_input_state: c.VkPipelineVertexInputStateCreateInfo,
     input_assembly_state: c.VkPipelineInputAssemblyStateCreateInfo,
@@ -733,7 +726,7 @@ const PipelineBuilder = struct {
     pipeline_layout: c.VkPipelineLayout,
     depth_stencil_state: c.VkPipelineDepthStencilStateCreateInfo,
 
-    fn build(self: PipelineBuilder, device: c.VkDevice, render_pass: c.VkRenderPass) c.VkPipeline {
+    pub fn build(self: PipelineBuilder, device: c.VkDevice, render_pass: c.VkRenderPass) c.VkPipeline {
         const viewport_state = std.mem.zeroInit(c.VkPipelineViewportStateCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
             .viewportCount = 1,
@@ -787,15 +780,6 @@ fn initPipelines(self: *Self) void {
     // NOTE: we are currently destroying the shader modules as soon as we are done
     // creating the pipeline. This is not great if we needed the modules for multiple pipelines.
     // Howver, for the sake of simplicity, we are doing it this way for now.
-    const red_vert_code align(4) = @embedFile("triangle.vert").*;
-    const red_frag_code align(4) = @embedFile("triangle.frag").*;
-    const red_vert_module = createShaderModule(self, &red_vert_code) orelse VK_NULL_HANDLE;
-    defer c.vkDestroyShaderModule(self.device, red_vert_module, vk_alloc_cbs);
-    const red_frag_module = createShaderModule(self, &red_frag_code) orelse VK_NULL_HANDLE;
-    defer c.vkDestroyShaderModule(self.device, red_frag_module, vk_alloc_cbs);
-
-    if (red_vert_module != VK_NULL_HANDLE) log.info("Vert module loaded successfully", .{});
-    if (red_frag_module != VK_NULL_HANDLE) log.info("Frag module loaded successfully", .{});
 
     const pipeline_layout_ci = std.mem.zeroInit(c.VkPipelineLayoutCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -803,20 +787,6 @@ fn initPipelines(self: *Self) void {
     var triangle_pipeline_layout: c.VkPipelineLayout = undefined;
     check_vk(c.vkCreatePipelineLayout(self.device, &pipeline_layout_ci, vk_alloc_cbs, &triangle_pipeline_layout)) catch @panic("Failed to create pipeline layout");
     self.deletion_queue.append(VulkanDeleter.make(triangle_pipeline_layout, c.vkDestroyPipelineLayout)) catch @panic("Out of memory");
-
-    const vert_stage_ci = std.mem.zeroInit(c.VkPipelineShaderStageCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .stage = c.VK_SHADER_STAGE_VERTEX_BIT,
-        .module = red_vert_module,
-        .pName = "main",
-    });
-
-    const frag_stage_ci = std.mem.zeroInit(c.VkPipelineShaderStageCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .stage = c.VK_SHADER_STAGE_FRAGMENT_BIT,
-        .module = red_frag_module,
-        .pName = "main",
-    });
 
     const vertex_input_state_ci = std.mem.zeroInit(c.VkPipelineVertexInputStateCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -858,8 +828,16 @@ fn initPipelines(self: *Self) void {
     });
 
     var shader_stages = [_]c.VkPipelineShaderStageCreateInfo{
-        vert_stage_ci,
-        frag_stage_ci,
+        std.mem.zeroInit(c.VkPipelineShaderStageCreateInfo, .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = c.VK_SHADER_STAGE_VERTEX_BIT,
+            .pName = "main",
+        }),
+        std.mem.zeroInit(c.VkPipelineShaderStageCreateInfo, .{
+            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = c.VK_SHADER_STAGE_FRAGMENT_BIT,
+            .pName = "main",
+        }),
     };
     var pipeline_builder = PipelineBuilder{
         .shader_stages = shader_stages[0..],
@@ -883,39 +861,6 @@ fn initPipelines(self: *Self) void {
         .pipeline_layout = triangle_pipeline_layout,
         .depth_stencil_state = depth_stencil_state_ci,
     };
-
-    const red_triangle_pipeline = pipeline_builder.build(self.device, self.render_pass);
-    self.deletion_queue.append(VulkanDeleter.make(red_triangle_pipeline, c.vkDestroyPipeline)) catch @panic("Out of memory");
-    if (red_triangle_pipeline == VK_NULL_HANDLE) {
-        log.err("Failed to create red triangle pipeline", .{});
-    } else {
-        log.info("Created red triangle pipeline", .{});
-    }
-
-    _ = self.createMaterial(red_triangle_pipeline, triangle_pipeline_layout, "red_triangle_mat");
-
-    const rgb_vert_code align(4) = @embedFile("colored_triangle.vert").*;
-    const rgb_frag_code align(4) = @embedFile("colored_triangle.frag").*;
-    const rgb_vert_module = createShaderModule(self, &rgb_vert_code) orelse VK_NULL_HANDLE;
-    defer c.vkDestroyShaderModule(self.device, rgb_vert_module, vk_alloc_cbs);
-    const rgb_frag_module = createShaderModule(self, &rgb_frag_code) orelse VK_NULL_HANDLE;
-    defer c.vkDestroyShaderModule(self.device, rgb_frag_module, vk_alloc_cbs);
-
-    if (rgb_vert_module != VK_NULL_HANDLE) log.info("Vert module loaded successfully", .{});
-    if (rgb_frag_module != VK_NULL_HANDLE) log.info("Frag module loaded successfully", .{});
-
-    pipeline_builder.shader_stages[0].module = rgb_vert_module;
-    pipeline_builder.shader_stages[1].module = rgb_frag_module;
-
-    const rgb_triangle_pipeline = pipeline_builder.build(self.device, self.render_pass);
-    self.deletion_queue.append(VulkanDeleter.make(rgb_triangle_pipeline, c.vkDestroyPipeline)) catch @panic("Out of memory");
-    if (rgb_triangle_pipeline == VK_NULL_HANDLE) {
-        log.err("Failed to create rgb triangle pipeline", .{});
-    } else {
-        log.info("Created rgb triangle pipeline", .{});
-    }
-
-    _ = self.createMaterial(rgb_triangle_pipeline, triangle_pipeline_layout, "rgb_triangle_mat");
 
     // Create pipeline for meshes
     const vertex_descritpion = mesh_mod.Vertex.vertex_input_description;
@@ -1236,7 +1181,7 @@ fn initDescriptors(self: *Self) void {
     }
 }
 
-fn createShaderModule(self: *Self, code: []const u8) ?c.VkShaderModule {
+pub fn createShaderModule(self: *Self, code: []const u8) ?c.VkShaderModule {
     // NOTE: This being a better language than C/C++, means we don´t need to load
     // the SPIR-V code from a file, we can just embed it as an array of bytes.
     // To reflect the different behaviour from the original code, we also changed
@@ -1278,20 +1223,12 @@ pub fn loadScene(self: *Self, s: *scene.Scene) !void {
 pub fn deinit(self: *Self) void {
     check_vk(c.vkDeviceWaitIdle(self.device)) catch @panic("Failed to wait for device idle");
 
-    // TODO: this is a horrible way to keep track of the meshes to free. Quick and dirty hack.
-    var mesh_it = self.meshes.iterator();
-    while (mesh_it.next()) |entry| {
-        self.allocator.free(entry.value_ptr.vertices);
-    }
-
     if (self.main_camera) |main_camera| {
         main_camera.object.deref();
         self.main_camera = null;
     }
     self.scene.deinit();
 
-    self.textures.deinit();
-    self.meshes.deinit();
     self.materials.deinit();
 
     for (self.buffer_deletion_queue.items) |*entry| {

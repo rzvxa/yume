@@ -122,7 +122,8 @@ pub fn init(ctx: *GameApp) Self {
             .transform = Mat4.translation(Vec3.make(5.0, -10.0, 0.0)),
         }) catch @panic("OOM");
         defer empire.deref();
-        var empire_material = ctx.engine.materials.getPtr("textured_mesh") orelse @panic("Failed to get default mesh material");
+        // var empire_material = ctx.engine.materials.getPtr("textured_mesh") orelse @panic("Failed to get default mesh material");
+        var empire_material = AssetsDatabase.getOrLoadMaterial("textured_mesh") catch @panic("Failed to get default mesh material");
 
         // Allocate descriptor set for signle-texture to use on the material
         const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
@@ -933,7 +934,6 @@ fn create_imgui_texture(filepath: []const u8, engine: *Engine) c.VkDescriptorSet
         };
         check_vk(c.vkCreateImageView(engine.device, &info, Engine.vk_alloc_cbs, &image_view)) catch @panic("Failed to create image view");
     }
-    engine.textures.put(filepath, Texture{ .image = img, .image_view = image_view }) catch @panic("OOM");
     engine.deletion_queue.append(VulkanDeleter.make(image_view, c.vkDestroyImageView)) catch @panic("OOM");
     // Create Sampler
     var sampler: c.VkSampler = undefined;
