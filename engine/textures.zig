@@ -11,7 +11,7 @@ pub const Texture = struct {
     image_view: c.VkImageView,
 };
 
-pub fn load_image_from_file(comptime T: anytype, engine: *T, filepath: []const u8) !Engine.AllocatedImage {
+pub fn load_image_from_file(engine: *Engine, filepath: []const u8) !Engine.AllocatedImage {
     var width: c_int = undefined;
     var height: c_int = undefined;
     var channels: c_int = undefined;
@@ -32,7 +32,7 @@ pub fn load_image_from_file(comptime T: anytype, engine: *T, filepath: []const u
     const image_size = @as(c.VkDeviceSize, @intCast(width * height * 4));
     const format = c.VK_FORMAT_R8G8B8A8_UNORM;
 
-    const staging_buffer = engine.create_buffer(image_size, c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, c.VMA_MEMORY_USAGE_CPU_ONLY);
+    const staging_buffer = engine.createBuffer(image_size, c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, c.VMA_MEMORY_USAGE_CPU_ONLY);
     defer c.vmaDestroyBuffer(engine.vma_allocator, staging_buffer.buffer, staging_buffer.allocation);
 
     var img_data_slice: []const u8 = undefined;
@@ -81,7 +81,7 @@ pub fn load_image_from_file(comptime T: anytype, engine: *T, filepath: []const u
 
     // Tranfer CPU memory to GPU memory
     //
-    engine.immediate_submit(struct {
+    engine.immediateSubmit(struct {
         image: c.VkImage,
         extent: c.VkExtent3D,
         staging_buffer: Engine.AllocatedBuffer,

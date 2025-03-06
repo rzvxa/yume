@@ -10,18 +10,38 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+
     const engine_c_libs = b.addTranslateC(.{
         .root_source_file = b.path("engine/clibs.c"),
         .target = target,
         .optimize = optimize,
     });
-    const editor_c_libs = b.addTranslateC(.{
-        .root_source_file = b.path("editor/edclibs.c"),
+    engine_c_libs.addIncludeDir("vendor/ufbx/");
+    engine_c_libs.addIncludeDir("vendor/sdl3/include");
+    engine_c_libs.addIncludeDir("vendor/vma/");
+    engine_c_libs.addIncludeDir("vendor/stb/");
+
+    const ufbx_lib = b.addStaticLibrary(.{
+        .name = "ufbx",
         .target = target,
         .optimize = optimize,
     });
+    ufbx_lib.addIncludePath(b.path("vendor/ufbx/"));
+    ufbx_lib.linkLibC();
+    ufbx_lib.addCSourceFiles(.{
+        .files = &.{
+            "vendor/ufbx/ufbx.c",
+        },
+    });
 
     const vk_lib_name = if (target.result.os.tag == .windows) "vulkan-1" else "vulkan";
+
+    const uuid_dep = b.dependency("uuid_zig", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const uuid_mod = uuid_dep.module("uuid");
+    yume.addImport("uuid", uuid_mod);
 
     yume.linkSystemLibrary("SDL3", .{});
     yume.linkSystemLibrary(vk_lib_name, .{});
@@ -31,7 +51,6 @@ pub fn build(b: *std.Build) !void {
         yume.addLibraryPath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/lib", .{path}) catch @panic("OOM") });
         yume.addIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM") });
         engine_c_libs.addIncludeDir(std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM"));
-        editor_c_libs.addIncludeDir(std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM"));
     }
     yume.addCSourceFile(.{ .file = b.path("engine/vk_mem_alloc.cpp"), .flags = &.{""} });
     yume.addCSourceFile(.{ .file = b.path("engine/stb_image.c"), .flags = &.{""} });
@@ -39,13 +58,12 @@ pub fn build(b: *std.Build) !void {
     yume.addIncludePath(.{ .cwd_relative = "vendor/vma/" });
     yume.addIncludePath(.{ .cwd_relative = "vendor/stb/" });
 
-    engine_c_libs.addIncludeDir("vendor/sdl3/include");
-    engine_c_libs.addIncludeDir("vendor/vma/");
-    engine_c_libs.addIncludeDir("vendor/stb/");
+    yume.linkLibrary(ufbx_lib);
+
     const engine_c_mod = engine_c_libs.createModule();
     yume.addImport("clibs", engine_c_mod);
 
-    compile_all_shaders(b, yume);
+    compile_all_shaders(b);
 
     const editor = b.addExecutable(.{
         .name = "yume editor",
@@ -53,13 +71,8 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    editor_c_libs.addIncludeDir("vendor/sdl3/include");
-    editor_c_libs.addIncludeDir("vendor/vma/");
-    editor_c_libs.addIncludeDir("vendor/stb/");
-    editor_c_libs.addIncludeDir("vendor/imgui/");
     engine_c_libs.addIncludeDir("vendor/imgui/");
     editor.root_module.addImport("clibs", engine_c_mod);
-    editor.root_module.addImport("edclibs", editor_c_libs.createModule());
 
     if (env_map.get("VK_SDK_PATH")) |path| {
         editor.addIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM") });
@@ -71,7 +84,6 @@ pub fn build(b: *std.Build) !void {
 
     editor.linkLibCpp();
     editor.root_module.addImport("yume", yume);
-    compile_all_shaders(b, &editor.root_module);
 
     b.installArtifact(editor);
     if (target.result.os.tag == .windows) {
@@ -108,6 +120,7 @@ pub fn build(b: *std.Build) !void {
             "vendor/imgui/cimgui_impl_vulkan.cpp",
         },
     });
+
     editor.linkLibrary(imgui_lib);
 
     const run_cmd = b.addRunArtifact(editor);
@@ -120,25 +133,10 @@ pub fn build(b: *std.Build) !void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
-
-    // const unit_tests = b.addTest(.{
-    //     .root_source_file = b.path("editor/main.zig"),
-    //     .target = target,
-    //     .optimize = optimize,
-    // });
-
-    // const run_unit_tests = b.addRunArtifact(unit_tests);
-
-    // const test_step = b.step("test", "Run unit tests");
-    // test_step.dependOn(&run_unit_tests.step);
 }
 
-fn compile_all_shaders(b: *std.Build, mod: *std.Build.Module) void {
-    // This is a fix for a change between zig 0.11 and 0.12
-
-    const shaders_dir = if (@hasDecl(@TypeOf(b.build_root.handle), "openIterableDir"))
-        b.build_root.handle.openIterableDir("shaders", .{}) catch @panic("Failed to open shaders directory")
-    else
+fn compile_all_shaders(b: *std.Build) void {
+    const shaders_dir =
         b.build_root.handle.openDir("shaders", .{ .iterate = true }) catch @panic("Failed to open shaders directory");
 
     var file_it = shaders_dir.iterate();
@@ -150,15 +148,15 @@ fn compile_all_shaders(b: *std.Build, mod: *std.Build.Module) void {
                 const name = basename[0 .. basename.len - ext.len];
 
                 std.debug.print("Found shader file to compile: {s}. Compiling with name: {s}\n", .{ entry.name, name });
-                add_shader(b, mod, name);
+                add_shader(b, name);
             }
         }
     }
 }
 
-fn add_shader(b: *std.Build, mod: *std.Build.Module, name: []const u8) void {
+fn add_shader(b: *std.Build, name: []const u8) void {
     const source = std.fmt.allocPrint(b.allocator, "shaders/{s}.glsl", .{name}) catch @panic("OOM");
-    const outpath = std.fmt.allocPrint(b.allocator, "shaders/{s}.spv", .{name}) catch @panic("OOM");
+    const outpath = std.fmt.allocPrint(b.allocator, ".shader-cache/{s}.spv", .{name}) catch @panic("OOM");
 
     const shader_compilation = b.addSystemCommand(&.{"glslangValidator"});
     shader_compilation.addArg("-V");
@@ -166,5 +164,5 @@ fn add_shader(b: *std.Build, mod: *std.Build.Module, name: []const u8) void {
     const output = shader_compilation.addOutputFileArg(outpath);
     shader_compilation.addFileArg(b.path(source));
 
-    mod.addAnonymousImport(name, .{ .root_source_file = output });
+    b.getInstallStep().dependOn(&b.addInstallFileWithDir(output, .{ .custom = "../" }, outpath).step);
 }

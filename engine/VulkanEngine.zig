@@ -3,11 +3,15 @@ const c = @import("clibs");
 const std = @import("std");
 
 const utils = @import("utils.zig");
+const Uuid = @import("uuid.zig");
 
 const vki = @import("vulkan_init.zig");
 const check_vk = vki.check_vk;
 const mesh_mod = @import("mesh.zig");
 const Mesh = mesh_mod.Mesh;
+const BoundingBox = mesh_mod.BoundingBox;
+
+const scene = @import("scene.zig");
 
 const math3d = @import("math3d.zig");
 const Vec2 = math3d.Vec2;
@@ -16,9 +20,8 @@ const Vec4 = math3d.Vec4;
 const Mat4 = math3d.Mat4;
 
 const context = @import("context.zig");
-
-const texs = @import("textures.zig");
-const Texture = texs.Texture;
+const Camera = @import("components/Camera.zig");
+const MeshRenderer = @import("components/MeshRenderer.zig");
 
 const window_extent = context.window_extent;
 
@@ -28,7 +31,7 @@ const Self = @This();
 
 const VK_NULL_HANDLE = null;
 
-const vk_alloc_cbs: ?*c.VkAllocationCallbacks = null;
+pub const vk_alloc_cbs: ?*c.VkAllocationCallbacks = null;
 
 pub const RenderCommand = c.VkCommandBuffer;
 
@@ -43,17 +46,11 @@ pub const AllocatedImage = struct {
 };
 
 // Scene management
-const Material = struct {
+pub const Material = struct {
+    uuid: Uuid,
     texture_set: c.VkDescriptorSet = VK_NULL_HANDLE,
     pipeline: c.VkPipeline,
     pipeline_layout: c.VkPipelineLayout,
-};
-
-const RenderObject = struct {
-    name: [*c]const u8,
-    mesh: *Mesh,
-    material: *Material,
-    transform: Mat4,
 };
 
 const FrameData = struct {
@@ -71,6 +68,14 @@ pub const GPUCameraData = struct {
     view: Mat4,
     proj: Mat4,
     view_proj: Mat4,
+
+    fn fromCamera(cam: *Camera) GPUCameraData {
+        return GPUCameraData{
+            .view = cam.view,
+            .proj = cam.projection,
+            .view_proj = cam.view_projection,
+        };
+    }
 };
 
 pub const GPUSceneData = struct {
@@ -93,11 +98,11 @@ const UploadContext = struct {
 
 pub const FRAME_OVERLAP = 2;
 
+scene: *scene.Scene,
+
 // Data
 //
 frame_number: i32 = 0,
-selected_shader: i32 = 0,
-selected_mesh: i32 = 0,
 
 window: *c.SDL_Window = undefined,
 
@@ -148,38 +153,13 @@ descriptor_pool: c.VkDescriptorPool = VK_NULL_HANDLE,
 
 vma_allocator: c.VmaAllocator = undefined,
 
-renderables: std.ArrayList(RenderObject),
-materials: std.StringHashMap(Material),
-meshes: std.StringHashMap(Mesh),
-textures: std.StringHashMap(Texture),
-
-camera_pos: Vec3 = Vec3.make(0.0, -3.0, -10.0),
-camera_input: Vec3 = Vec3.make(0.0, 0.0, 0.0),
+main_camera: ?*Camera = null,
 
 deletion_queue: std.ArrayList(VulkanDeleter) = undefined,
 buffer_deletion_queue: std.ArrayList(VmaBufferDeleter) = undefined,
 image_deletion_queue: std.ArrayList(VmaImageDeleter) = undefined,
 
-// imgui state
 current_image_idx: u32 = 0,
-
-first_time: bool = true,
-mouse: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
-
-game_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
-game_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
-is_game_window_active: bool = false,
-is_game_window_focused: bool = false,
-
-scene_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
-scene_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
-is_scene_window_active: bool = false,
-is_scene_window_focused: bool = false,
-
-play_icon_ds: c.VkDescriptorSet = undefined,
-pause_icon_ds: c.VkDescriptorSet = undefined,
-stop_icon_ds: c.VkDescriptorSet = undefined,
-fast_forward_icon_ds: c.VkDescriptorSet = undefined,
 
 pub const MeshPushConstants = struct {
     data: Vec4,
@@ -190,11 +170,11 @@ pub const VulkanDeleter = struct {
     object: ?*anyopaque,
     delete_fn: *const fn (entry: *VulkanDeleter, self: *Self) void,
 
-    fn delete(self: *VulkanDeleter, engine: *Self) void {
+    pub fn delete(self: *VulkanDeleter, engine: *Self) void {
         self.delete_fn(self, engine);
     }
 
-    fn make(object: anytype, func: anytype) VulkanDeleter {
+    pub fn make(object: anytype, func: anytype) VulkanDeleter {
         const T = @TypeOf(object);
         comptime {
             std.debug.assert(@typeInfo(T) == .Optional);
@@ -209,11 +189,11 @@ pub const VulkanDeleter = struct {
         return VulkanDeleter{
             .object = object,
             .delete_fn = struct {
-                fn destroy_impl(entry: *VulkanDeleter, self: *Self) void {
+                fn f(entry: *VulkanDeleter, self: *Self) void {
                     const obj: @TypeOf(object) = @ptrCast(entry.object);
                     func(self.device, obj, vk_alloc_cbs);
                 }
-            }.destroy_impl,
+            }.f,
         };
     }
 };
@@ -229,30 +209,27 @@ pub const VmaBufferDeleter = struct {
 pub const VmaImageDeleter = struct {
     image: AllocatedImage,
 
-    fn delete(self: *VmaImageDeleter, engine: *Self) void {
+    pub fn delete(self: *VmaImageDeleter, engine: *Self) void {
         c.vmaDestroyImage(engine.vma_allocator, self.image.image, self.image.allocation);
     }
 };
 
 pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
     var engine = Self{
+        .scene = scene.Scene.init(a) catch @panic("OOM"),
         .window = window,
         .allocator = a,
         .deletion_queue = std.ArrayList(VulkanDeleter).init(a),
         .buffer_deletion_queue = std.ArrayList(VmaBufferDeleter).init(a),
         .image_deletion_queue = std.ArrayList(VmaImageDeleter).init(a),
-        .renderables = std.ArrayList(RenderObject).init(a),
-        .materials = std.StringHashMap(Material).init(a),
-        .meshes = std.StringHashMap(Mesh).init(a),
-        .textures = std.StringHashMap(Texture).init(a),
     };
 
-    engine.init_instance();
+    engine.initInstance();
 
     // Create the window surface
     utils.checkSdlBool(c.SDL_Vulkan_CreateSurface(window, engine.instance, vk_alloc_cbs, &engine.surface));
 
-    engine.init_device();
+    engine.initDevice();
 
     // Create a VMA allocator
     const allocator_ci = std.mem.zeroInit(c.VmaAllocatorCreateInfo, .{
@@ -262,22 +239,17 @@ pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
     });
     check_vk(c.vmaCreateAllocator(&allocator_ci, &engine.vma_allocator)) catch @panic("Failed to create VMA allocator");
 
-    engine.init_swapchain();
-    engine.init_commands();
-    engine.init_default_renderpass();
-    engine.init_framebuffers();
-    engine.init_sync_structures();
-    engine.init_descriptors();
-    engine.init_pipelines();
-    engine.load_textures();
-    engine.load_meshes();
-    engine.init_scene();
-    engine.init_imgui();
+    engine.initSwapchain();
+    engine.initCommands();
+    engine.initDefaultRenderpass();
+    engine.initFramebuffers();
+    engine.initSyncStructures();
+    engine.initDescriptors();
 
     return engine;
 }
 
-fn init_instance(self: *Self) void {
+fn initInstance(self: *Self) void {
     var sdl_required_extension_count: u32 = undefined;
     const sdl_extensions = c.SDL_Vulkan_GetInstanceExtensions(&sdl_required_extension_count);
     const sdl_extension_slice = sdl_extensions[0..sdl_required_extension_count];
@@ -300,7 +272,7 @@ fn init_instance(self: *Self) void {
     self.debug_messenger = instance.debug_messenger;
 }
 
-fn init_device(self: *Self) void {
+fn initDevice(self: *Self) void {
     // Physical device selection
     const required_device_extensions: []const [*c]const u8 = &.{
         "VK_KHR_swapchain",
@@ -342,7 +314,7 @@ fn init_device(self: *Self) void {
     self.present_queue = device.present_queue;
 }
 
-fn init_swapchain(self: *Self) void {
+fn initSwapchain(self: *Self) void {
     var win_width: c_int = undefined;
     var win_height: c_int = undefined;
     utils.checkSdl(c.SDL_GetWindowSize(self.window, &win_width, &win_height));
@@ -426,7 +398,7 @@ fn init_swapchain(self: *Self) void {
     log.info("Created depth image", .{});
 }
 
-fn init_commands(self: *Self) void {
+fn initCommands(self: *Self) void {
     // Create a command pool
     const command_pool_ci = std.mem.zeroInit(c.VkCommandPoolCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -475,7 +447,7 @@ fn init_commands(self: *Self) void {
     check_vk(c.vkAllocateCommandBuffers(self.device, &upload_command_buffer_ai, &self.upload_context.command_buffer)) catch @panic("Failed to allocate upload command buffer");
 }
 
-fn init_default_renderpass(self: *Self) void {
+fn initDefaultRenderpass(self: *Self) void {
     // Color attachement
     const color_attachment = std.mem.zeroInit(c.VkAttachmentDescription, .{
         .format = self.swapchain_format,
@@ -683,7 +655,7 @@ fn init_default_renderpass(self: *Self) void {
     log.info("Created render pass", .{});
 }
 
-fn init_framebuffers(self: *Self) void {
+fn initFramebuffers(self: *Self) void {
     var framebuffer_ci = std.mem.zeroInit(c.VkFramebufferCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
         .renderPass = self.render_pass,
@@ -708,7 +680,7 @@ fn init_framebuffers(self: *Self) void {
     log.info("Created {} framebuffers", .{self.framebuffers.len});
 }
 
-fn init_sync_structures(self: *Self) void {
+fn initSyncStructures(self: *Self) void {
     const semaphore_ci = std.mem.zeroInit(c.VkSemaphoreCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
     });
@@ -740,7 +712,7 @@ fn init_sync_structures(self: *Self) void {
     log.info("Created sync structures", .{});
 }
 
-const PipelineBuilder = struct {
+pub const PipelineBuilder = struct {
     shader_stages: []c.VkPipelineShaderStageCreateInfo,
     vertex_input_state: c.VkPipelineVertexInputStateCreateInfo,
     input_assembly_state: c.VkPipelineInputAssemblyStateCreateInfo,
@@ -752,7 +724,7 @@ const PipelineBuilder = struct {
     pipeline_layout: c.VkPipelineLayout,
     depth_stencil_state: c.VkPipelineDepthStencilStateCreateInfo,
 
-    fn build(self: PipelineBuilder, device: c.VkDevice, render_pass: c.VkRenderPass) c.VkPipeline {
+    pub fn build(self: PipelineBuilder, device: c.VkDevice, render_pass: c.VkRenderPass) c.VkPipeline {
         const viewport_state = std.mem.zeroInit(c.VkPipelineViewportStateCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
             .viewportCount = 1,
@@ -802,227 +774,7 @@ const PipelineBuilder = struct {
     }
 };
 
-fn init_pipelines(self: *Self) void {
-    // NOTE: we are currently destroying the shader modules as soon as we are done
-    // creating the pipeline. This is not great if we needed the modules for multiple pipelines.
-    // Howver, for the sake of simplicity, we are doing it this way for now.
-    const red_vert_code align(4) = @embedFile("triangle.vert").*;
-    const red_frag_code align(4) = @embedFile("triangle.frag").*;
-    const red_vert_module = create_shader_module(self, &red_vert_code) orelse VK_NULL_HANDLE;
-    defer c.vkDestroyShaderModule(self.device, red_vert_module, vk_alloc_cbs);
-    const red_frag_module = create_shader_module(self, &red_frag_code) orelse VK_NULL_HANDLE;
-    defer c.vkDestroyShaderModule(self.device, red_frag_module, vk_alloc_cbs);
-
-    if (red_vert_module != VK_NULL_HANDLE) log.info("Vert module loaded successfully", .{});
-    if (red_frag_module != VK_NULL_HANDLE) log.info("Frag module loaded successfully", .{});
-
-    const pipeline_layout_ci = std.mem.zeroInit(c.VkPipelineLayoutCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-    });
-    var triangle_pipeline_layout: c.VkPipelineLayout = undefined;
-    check_vk(c.vkCreatePipelineLayout(self.device, &pipeline_layout_ci, vk_alloc_cbs, &triangle_pipeline_layout)) catch @panic("Failed to create pipeline layout");
-    self.deletion_queue.append(VulkanDeleter.make(triangle_pipeline_layout, c.vkDestroyPipelineLayout)) catch @panic("Out of memory");
-
-    const vert_stage_ci = std.mem.zeroInit(c.VkPipelineShaderStageCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .stage = c.VK_SHADER_STAGE_VERTEX_BIT,
-        .module = red_vert_module,
-        .pName = "main",
-    });
-
-    const frag_stage_ci = std.mem.zeroInit(c.VkPipelineShaderStageCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .stage = c.VK_SHADER_STAGE_FRAGMENT_BIT,
-        .module = red_frag_module,
-        .pName = "main",
-    });
-
-    const vertex_input_state_ci = std.mem.zeroInit(c.VkPipelineVertexInputStateCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    });
-
-    const input_assembly_state_ci = std.mem.zeroInit(c.VkPipelineInputAssemblyStateCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        .topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-        .primitiveRestartEnable = c.VK_FALSE,
-    });
-
-    const rasterization_state_ci = std.mem.zeroInit(c.VkPipelineRasterizationStateCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        .polygonMode = c.VK_POLYGON_MODE_FILL,
-        .cullMode = c.VK_CULL_MODE_NONE,
-        .frontFace = c.VK_FRONT_FACE_CLOCKWISE,
-        .lineWidth = 1.0,
-    });
-
-    const multisample_state_ci = std.mem.zeroInit(c.VkPipelineMultisampleStateCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .rasterizationSamples = c.VK_SAMPLE_COUNT_1_BIT,
-        .minSampleShading = 1.0,
-    });
-
-    const depth_stencil_state_ci = std.mem.zeroInit(c.VkPipelineDepthStencilStateCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-        .depthTestEnable = c.VK_TRUE,
-        .depthWriteEnable = c.VK_TRUE,
-        .depthCompareOp = c.VK_COMPARE_OP_LESS_OR_EQUAL,
-        .depthBoundsTestEnable = c.VK_FALSE,
-        .stencilTestEnable = c.VK_FALSE,
-        .minDepthBounds = 0.0,
-        .maxDepthBounds = 1.0,
-    });
-
-    const color_blend_attachment_state = std.mem.zeroInit(c.VkPipelineColorBlendAttachmentState, .{
-        .colorWriteMask = c.VK_COLOR_COMPONENT_R_BIT | c.VK_COLOR_COMPONENT_G_BIT | c.VK_COLOR_COMPONENT_B_BIT | c.VK_COLOR_COMPONENT_A_BIT,
-    });
-
-    var shader_stages = [_]c.VkPipelineShaderStageCreateInfo{
-        vert_stage_ci,
-        frag_stage_ci,
-    };
-    var pipeline_builder = PipelineBuilder{
-        .shader_stages = shader_stages[0..],
-        .vertex_input_state = vertex_input_state_ci,
-        .input_assembly_state = input_assembly_state_ci,
-        .viewport = .{
-            .x = 0.0,
-            .y = 0.0,
-            .width = @as(f32, @floatFromInt(self.swapchain_extent.width)),
-            .height = @as(f32, @floatFromInt(self.swapchain_extent.height)),
-            .minDepth = 0.0,
-            .maxDepth = 1.0,
-        },
-        .scissor = .{
-            .offset = .{ .x = 0, .y = 0 },
-            .extent = self.swapchain_extent,
-        },
-        .rasterization_state = rasterization_state_ci,
-        .color_blend_attachment_state = color_blend_attachment_state,
-        .multisample_state = multisample_state_ci,
-        .pipeline_layout = triangle_pipeline_layout,
-        .depth_stencil_state = depth_stencil_state_ci,
-    };
-
-    const red_triangle_pipeline = pipeline_builder.build(self.device, self.render_pass);
-    self.deletion_queue.append(VulkanDeleter.make(red_triangle_pipeline, c.vkDestroyPipeline)) catch @panic("Out of memory");
-    if (red_triangle_pipeline == VK_NULL_HANDLE) {
-        log.err("Failed to create red triangle pipeline", .{});
-    } else {
-        log.info("Created red triangle pipeline", .{});
-    }
-
-    _ = self.create_material(red_triangle_pipeline, triangle_pipeline_layout, "red_triangle_mat");
-
-    const rgb_vert_code align(4) = @embedFile("colored_triangle.vert").*;
-    const rgb_frag_code align(4) = @embedFile("colored_triangle.frag").*;
-    const rgb_vert_module = create_shader_module(self, &rgb_vert_code) orelse VK_NULL_HANDLE;
-    defer c.vkDestroyShaderModule(self.device, rgb_vert_module, vk_alloc_cbs);
-    const rgb_frag_module = create_shader_module(self, &rgb_frag_code) orelse VK_NULL_HANDLE;
-    defer c.vkDestroyShaderModule(self.device, rgb_frag_module, vk_alloc_cbs);
-
-    if (rgb_vert_module != VK_NULL_HANDLE) log.info("Vert module loaded successfully", .{});
-    if (rgb_frag_module != VK_NULL_HANDLE) log.info("Frag module loaded successfully", .{});
-
-    pipeline_builder.shader_stages[0].module = rgb_vert_module;
-    pipeline_builder.shader_stages[1].module = rgb_frag_module;
-
-    const rgb_triangle_pipeline = pipeline_builder.build(self.device, self.render_pass);
-    self.deletion_queue.append(VulkanDeleter.make(rgb_triangle_pipeline, c.vkDestroyPipeline)) catch @panic("Out of memory");
-    if (rgb_triangle_pipeline == VK_NULL_HANDLE) {
-        log.err("Failed to create rgb triangle pipeline", .{});
-    } else {
-        log.info("Created rgb triangle pipeline", .{});
-    }
-
-    _ = self.create_material(rgb_triangle_pipeline, triangle_pipeline_layout, "rgb_triangle_mat");
-
-    // Create pipeline for meshes
-    const vertex_descritpion = mesh_mod.Vertex.vertex_input_description;
-
-    pipeline_builder.vertex_input_state.pVertexAttributeDescriptions = vertex_descritpion.attributes.ptr;
-    pipeline_builder.vertex_input_state.vertexAttributeDescriptionCount = @as(u32, @intCast(vertex_descritpion.attributes.len));
-    pipeline_builder.vertex_input_state.pVertexBindingDescriptions = vertex_descritpion.bindings.ptr;
-    pipeline_builder.vertex_input_state.vertexBindingDescriptionCount = @as(u32, @intCast(vertex_descritpion.bindings.len));
-
-    const tri_mesh_vert_code align(4) = @embedFile("tri_mesh.vert").*;
-    const tri_mesh_vert_module = create_shader_module(self, &tri_mesh_vert_code) orelse VK_NULL_HANDLE;
-    defer c.vkDestroyShaderModule(self.device, tri_mesh_vert_module, vk_alloc_cbs);
-
-    if (tri_mesh_vert_module != VK_NULL_HANDLE) log.info("Tri-mesh vert module loaded successfully", .{});
-
-    // Default lit shader
-    const default_lit_frag_code align(4) = @embedFile("default_lit.frag").*;
-    const default_lit_frag_module = create_shader_module(self, &default_lit_frag_code) orelse VK_NULL_HANDLE;
-    defer c.vkDestroyShaderModule(self.device, default_lit_frag_module, vk_alloc_cbs);
-
-    if (default_lit_frag_module != VK_NULL_HANDLE) log.info("Default lit frag module loaded successfully", .{});
-
-    pipeline_builder.shader_stages[0].module = tri_mesh_vert_module;
-    pipeline_builder.shader_stages[1].module = default_lit_frag_module;
-
-    // New layout for push constants
-    const push_constant_range = std.mem.zeroInit(c.VkPushConstantRange, .{
-        .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT,
-        .offset = 0,
-        .size = @sizeOf(MeshPushConstants),
-    });
-
-    const set_layouts = [_]c.VkDescriptorSetLayout{
-        self.global_set_layout,
-        self.object_set_layout,
-    };
-
-    const mesh_pipeline_layout_ci = std.mem.zeroInit(c.VkPipelineLayoutCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = @as(u32, @intCast(set_layouts.len)),
-        .pSetLayouts = &set_layouts[0],
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &push_constant_range,
-    });
-
-    var mesh_pipeline_layout: c.VkPipelineLayout = undefined;
-    check_vk(c.vkCreatePipelineLayout(self.device, &mesh_pipeline_layout_ci, vk_alloc_cbs, &mesh_pipeline_layout)) catch @panic("Failed to create mesh pipeline layout");
-    self.deletion_queue.append(VulkanDeleter.make(mesh_pipeline_layout, c.vkDestroyPipelineLayout)) catch @panic("Out of memory");
-
-    pipeline_builder.pipeline_layout = mesh_pipeline_layout;
-
-    const mesh_pipeline = pipeline_builder.build(self.device, self.render_pass);
-    self.deletion_queue.append(VulkanDeleter.make(mesh_pipeline, c.vkDestroyPipeline)) catch @panic("Out of memory");
-    if (mesh_pipeline == VK_NULL_HANDLE) {
-        log.err("Failed to create mesh pipeline", .{});
-    } else {
-        log.info("Created mesh pipeline", .{});
-    }
-
-    _ = self.create_material(mesh_pipeline, mesh_pipeline_layout, "default_mesh");
-
-    // Textured mesh shader
-    var textured_pipe_layout_ci = mesh_pipeline_layout_ci;
-    const textured_set_layoyts = [_]c.VkDescriptorSetLayout{
-        self.global_set_layout,
-        self.object_set_layout,
-        self.single_texture_set_layout,
-    };
-    textured_pipe_layout_ci.setLayoutCount = @as(u32, @intCast(textured_set_layoyts.len));
-    textured_pipe_layout_ci.pSetLayouts = &textured_set_layoyts[0];
-
-    var textured_pipe_layout: c.VkPipelineLayout = undefined;
-    check_vk(c.vkCreatePipelineLayout(self.device, &textured_pipe_layout_ci, vk_alloc_cbs, &textured_pipe_layout)) catch @panic("Failed to create textured mesh pipeline layout");
-    self.deletion_queue.append(VulkanDeleter.make(textured_pipe_layout, c.vkDestroyPipelineLayout)) catch @panic("Out of memory");
-
-    const textured_lit_frag_code align(4) = @embedFile("textured_lit.frag").*;
-    const textured_lit_frag = create_shader_module(self, &textured_lit_frag_code) orelse VK_NULL_HANDLE;
-    defer c.vkDestroyShaderModule(self.device, textured_lit_frag, vk_alloc_cbs);
-
-    pipeline_builder.shader_stages[1].module = textured_lit_frag;
-    pipeline_builder.pipeline_layout = textured_pipe_layout;
-    const textured_mesh_pipeline = pipeline_builder.build(self.device, self.render_pass);
-
-    _ = self.create_material(textured_mesh_pipeline, textured_pipe_layout, "textured_mesh");
-    self.deletion_queue.append(VulkanDeleter.make(textured_mesh_pipeline, c.vkDestroyPipeline)) catch @panic("Out of memory");
-}
-
-fn init_descriptors(self: *Self) void {
+fn initDescriptors(self: *Self) void {
     // Descriptor pool
     const pool_sizes = [_]c.VkDescriptorPoolSize{
         .{
@@ -1123,10 +875,10 @@ fn init_descriptors(self: *Self) void {
     // Scene and camera (per-frame) in a single buffer
     // Only one buffer and we get multiple offset of of it
     const camera_and_scene_buffer_size =
-        FRAME_OVERLAP * self.pad_uniform_buffer_size(@sizeOf(GPUCameraData)) +
-        FRAME_OVERLAP * self.pad_uniform_buffer_size(@sizeOf(GPUSceneData));
+        FRAME_OVERLAP * self.padUniformBufferSize(@sizeOf(GPUCameraData)) +
+        FRAME_OVERLAP * self.padUniformBufferSize(@sizeOf(GPUSceneData));
 
-    self.camera_and_scene_buffer = self.create_buffer(camera_and_scene_buffer_size, c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, c.VMA_MEMORY_USAGE_CPU_TO_GPU);
+    self.camera_and_scene_buffer = self.createBuffer(camera_and_scene_buffer_size, c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, c.VMA_MEMORY_USAGE_CPU_TO_GPU);
     self.buffer_deletion_queue.append(VmaBufferDeleter{ .buffer = self.camera_and_scene_buffer }) catch @panic("Out of memory");
 
     // Camera and scene descriptor set
@@ -1218,7 +970,11 @@ fn init_descriptors(self: *Self) void {
 
         // Object buffer
         const MAX_OBJECTS = 10000;
-        self.frames[i].object_buffer = self.create_buffer(MAX_OBJECTS * @sizeOf(GPUObjectData), c.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, c.VMA_MEMORY_USAGE_CPU_TO_GPU);
+        self.frames[i].object_buffer = self.createBuffer(
+            MAX_OBJECTS * @sizeOf(GPUObjectData),
+            c.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            c.VMA_MEMORY_USAGE_CPU_TO_GPU,
+        );
         self.buffer_deletion_queue.append(VmaBufferDeleter{ .buffer = self.frames[i].object_buffer }) catch @panic("Out of memory");
 
         // ======================================================================
@@ -1251,7 +1007,7 @@ fn init_descriptors(self: *Self) void {
     }
 }
 
-fn create_shader_module(self: *Self, code: []const u8) ?c.VkShaderModule {
+pub fn createShaderModule(self: *Self, code: []const u8) ?c.VkShaderModule {
     // NOTE: This being a better language than C/C++, means we don´t need to load
     // the SPIR-V code from a file, we can just embed it as an array of bytes.
     // To reflect the different behaviour from the original code, we also changed
@@ -1275,293 +1031,29 @@ fn create_shader_module(self: *Self, code: []const u8) ?c.VkShaderModule {
     return shader_module;
 }
 
-fn init_scene(self: *Self) void {
-    // const monkey = RenderObject{
-    //     .name = "monkey",
-    //     .mesh = self.meshes.getPtr("monkey") orelse @panic("Failed to get monkey mesh"),
-    //     .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
-    //     .transform = Mat4.IDENTITY,
-    // };
-    // self.renderables.append(monkey) catch @panic("Out of memory");
-
-    var material = self.materials.getPtr("textured_mesh") orelse @panic("Failed to get default mesh material");
-
-    // Allocate descriptor set for signle-texture to use on the material
-    const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool = self.descriptor_pool,
-        .descriptorSetCount = 1,
-        .pSetLayouts = &self.single_texture_set_layout,
-    });
-
-    check_vk(c.vkAllocateDescriptorSets(self.device, &descriptor_set_alloc_info, &material.texture_set)) catch @panic("Failed to allocate descriptor set");
-
-    // Sampler
-    const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter = c.VK_FILTER_NEAREST,
-        .minFilter = c.VK_FILTER_NEAREST,
-        .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-        .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-        .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-    });
-
-    var sampler: c.VkSampler = undefined;
-    check_vk(c.vkCreateSampler(self.device, &sampler_ci, vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
-    self.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("Out of memory");
-
-    const lost_empire_tex = (self.textures.get("empire_diffuse") orelse @panic("Failed to get empire texture"));
-
-    const descriptor_image_info = std.mem.zeroInit(c.VkDescriptorImageInfo, .{
-        .sampler = sampler,
-        .imageView = lost_empire_tex.image_view,
-        .imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-    });
-
-    const write_descriptor_set = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
-        .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = material.texture_set,
-        .dstBinding = 0,
-        .descriptorCount = 1,
-        .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .pImageInfo = &descriptor_image_info,
-    });
-
-    c.vkUpdateDescriptorSets(self.device, 1, &write_descriptor_set, 0, null);
-
-    const lost_empire = RenderObject{
-        .name = "lost_empire",
-        .mesh = self.meshes.getPtr("lost_empire") orelse @panic("Failed to get triangle mesh"),
-        .transform = Mat4.translation(Vec3.make(5.0, -10.0, 0.0)),
-        .material = material,
-    };
-    self.renderables.append(lost_empire) catch @panic("Out of memory");
-
-    // var x: i32 = -20;
-    // var i: i32 = 0;
-    // while (x <= 20) : (x += 1) {
-    //     var y: i32 = -20;
-    //     while (y <= 20) : (y += 1) {
-    //         const translation = Mat4.translation(Vec3.make(@floatFromInt(x), 0.0, @floatFromInt(y)));
-    //         const scale = Mat4.scale(Vec3.make(0.2, 0.2, 0.2));
-    //         const transform = Mat4.mul(translation, scale);
-    //
-    //         i += 1;
-    //         const tri = RenderObject{
-    //             .name = "triangle",
-    //             .mesh = self.meshes.getPtr("triangle") orelse @panic("Failed to get triangle mesh"),
-    //             .material = self.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
-    //             .transform = transform,
-    //         };
-    //
-    //         self.renderables.append(tri) catch @panic("Out of memory");
-    //     }
-    // }
+pub fn loadScene(self: *Self, s: *scene.Scene) !void {
+    var old_scene = self.scene;
+    self.scene = s;
+    var iter = self.scene.dfs() catch @panic("OOM");
+    defer iter.deinit();
+    while (try iter.next()) |next| {
+        if (next.getComponent(Camera)) |camera| {
+            self.main_camera = camera;
+            break;
+        }
+        next.deref();
+    }
+    old_scene.deinit();
 }
 
-fn init_imgui(self: *Self) void {
-    const pool_sizes = [_]c.VkDescriptorPoolSize{
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_SAMPLER,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
-            .descriptorCount = 1000,
-        },
-        .{
-            .type = c.VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
-            .descriptorCount = 1000,
-        },
-    };
-
-    const pool_ci = std.mem.zeroInit(c.VkDescriptorPoolCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .flags = c.VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-        .maxSets = 1000,
-        .poolSizeCount = @as(u32, @intCast(pool_sizes.len)),
-        .pPoolSizes = &pool_sizes[0],
-    });
-
-    var imgui_pool: c.VkDescriptorPool = undefined;
-    check_vk(c.vkCreateDescriptorPool(self.device, &pool_ci, vk_alloc_cbs, &imgui_pool)) catch @panic("Failed to create imgui descriptor pool");
-
-    _ = c.ImGui_CreateContext(null);
-    _ = c.cImGui_ImplSDL3_InitForVulkan(self.window);
-
-    var init_info = std.mem.zeroInit(c.ImGui_ImplVulkan_InitInfo, .{
-        .Instance = self.instance,
-        .PhysicalDevice = self.physical_device,
-        .Device = self.device,
-        .QueueFamily = self.graphics_queue_family,
-        .Queue = self.graphics_queue,
-        .DescriptorPool = imgui_pool,
-        .MinImageCount = FRAME_OVERLAP,
-        .ImageCount = FRAME_OVERLAP,
-        .MSAASamples = c.VK_SAMPLE_COUNT_1_BIT,
-    });
-
-    const io = c.ImGui_GetIO();
-    _ = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/roboto.ttf", 14, null, null);
-
-    _ = c.cImGui_ImplVulkan_Init(&init_info, self.render_pass);
-    _ = c.cImGui_ImplVulkan_CreateFontsTexture();
-
-    self.play_icon_ds = self.create_imgui_texture("assets/icons/play.png");
-    self.pause_icon_ds = self.create_imgui_texture("assets/icons/pause.png");
-    self.stop_icon_ds = self.create_imgui_texture("assets/icons/stop.png");
-    self.fast_forward_icon_ds = self.create_imgui_texture("assets/icons/fast-forward.png");
-
-    self.deletion_queue.append(VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool)) catch @panic("Out of memory");
-
-    c.ImGui_GetIO().*.ConfigFlags |= c.ImGuiConfigFlags_DockingEnable;
-    c.ImGui_GetIO().*.ConfigWindowsMoveFromTitleBarOnly = true;
-
-    const ImVec2 = struct {
-        fn f(x: f32, y: f32) c.ImVec2 {
-            return c.ImVec2{ .x = x, .y = y };
-        }
-    }.f;
-    const ImVec4 = struct {
-        fn f(x: f32, y: f32, z: f32, w: f32) c.ImVec4 {
-            return c.ImVec4{ .x = x, .y = y, .z = z, .w = w };
-        }
-    }.f;
-
-    const style = c.ImGui_GetStyle();
-    style.*.Alpha = 1.0;
-    style.*.DisabledAlpha = 0.6000000238418579;
-    style.*.WindowPadding = ImVec2(8.0, 8.0);
-    style.*.WindowRounding = 0.0;
-    style.*.WindowBorderSize = 1.0;
-    style.*.WindowMinSize = ImVec2(32.0, 32.0);
-    style.*.WindowTitleAlign = ImVec2(0.0, 0.5);
-    style.*.WindowMenuButtonPosition = c.ImGuiDir_Left;
-    style.*.ChildRounding = 0.0;
-    style.*.ChildBorderSize = 1.0;
-    style.*.PopupRounding = 0.0;
-    style.*.PopupBorderSize = 1.0;
-    style.*.FramePadding = ImVec2(4.0, 3.0);
-    style.*.FrameRounding = 0.0;
-    style.*.FrameBorderSize = 0.0;
-    style.*.ItemSpacing = ImVec2(8.0, 4.0);
-    style.*.ItemInnerSpacing = ImVec2(4.0, 4.0);
-    style.*.CellPadding = ImVec2(4.0, 2.0);
-    style.*.IndentSpacing = 21.0;
-    style.*.ColumnsMinSpacing = 6.0;
-    style.*.ScrollbarSize = 14.0;
-    style.*.ScrollbarRounding = 0.0;
-    style.*.GrabMinSize = 10.0;
-    style.*.GrabRounding = 0.0;
-    style.*.TabRounding = 0.0;
-    style.*.TabBorderSize = 0.0;
-    style.*.TabMinWidthForCloseButton = 0.0;
-    style.*.ColorButtonPosition = c.ImGuiDir_Right;
-    style.*.ButtonTextAlign = ImVec2(0.5, 0.5);
-    style.*.SelectableTextAlign = ImVec2(0.0, 0.0);
-
-    style.*.Colors[c.ImGuiCol_Text] = ImVec4(1.0, 1.0, 1.0, 1.0);
-    style.*.Colors[c.ImGuiCol_TextDisabled] = ImVec4(0.5921568870544434, 0.5921568870544434, 0.5921568870544434, 1.0);
-    style.*.Colors[c.ImGuiCol_WindowBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_ChildBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_PopupBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_Border] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
-    style.*.Colors[c.ImGuiCol_BorderShadow] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
-    style.*.Colors[c.ImGuiCol_FrameBg] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
-    style.*.Colors[c.ImGuiCol_FrameBgHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_FrameBgActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_TitleBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_TitleBgActive] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_TitleBgCollapsed] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_MenuBarBg] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
-    style.*.Colors[c.ImGuiCol_ScrollbarBg] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
-    style.*.Colors[c.ImGuiCol_ScrollbarGrab] = ImVec4(0.321568638086319, 0.321568638086319, 0.3333333432674408, 1.0);
-    style.*.Colors[c.ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.3529411852359772, 0.3529411852359772, 0.3725490272045135, 1.0);
-    style.*.Colors[c.ImGuiCol_ScrollbarGrabActive] = ImVec4(0.3529411852359772, 0.3529411852359772, 0.3725490272045135, 1.0);
-    style.*.Colors[c.ImGuiCol_CheckMark] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_SliderGrab] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_SliderGrabActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_Button] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
-    style.*.Colors[c.ImGuiCol_ButtonHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_ButtonActive] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_Header] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
-    style.*.Colors[c.ImGuiCol_HeaderHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_HeaderActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_Separator] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
-    style.*.Colors[c.ImGuiCol_SeparatorHovered] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
-    style.*.Colors[c.ImGuiCol_SeparatorActive] = ImVec4(0.3058823645114899, 0.3058823645114899, 0.3058823645114899, 1.0);
-    style.*.Colors[c.ImGuiCol_ResizeGrip] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_ResizeGripHovered] = ImVec4(0.2000000029802322, 0.2000000029802322, 0.2156862765550613, 1.0);
-    style.*.Colors[c.ImGuiCol_ResizeGripActive] = ImVec4(0.321568638086319, 0.321568638086319, 0.3333333432674408, 1.0);
-    style.*.Colors[c.ImGuiCol_Tab] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_TabHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_TabActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_TabUnfocused] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_TabUnfocusedActive] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_PlotLines] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_PlotLinesHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_PlotHistogram] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_PlotHistogramHovered] = ImVec4(0.1137254908680916, 0.5921568870544434, 0.9254902005195618, 1.0);
-    style.*.Colors[c.ImGuiCol_TableHeaderBg] = ImVec4(0.1882352977991104, 0.1882352977991104, 0.2000000029802322, 1.0);
-    style.*.Colors[c.ImGuiCol_TableBorderStrong] = ImVec4(0.3098039329051971, 0.3098039329051971, 0.3490196168422699, 1.0);
-    style.*.Colors[c.ImGuiCol_TableBorderLight] = ImVec4(0.2274509817361832, 0.2274509817361832, 0.2470588237047195, 1.0);
-    style.*.Colors[c.ImGuiCol_TableRowBg] = ImVec4(0.0, 0.0, 0.0, 0.0);
-    style.*.Colors[c.ImGuiCol_TableRowBgAlt] = ImVec4(1.0, 1.0, 1.0, 0.05999999865889549);
-    style.*.Colors[c.ImGuiCol_TextSelectedBg] = ImVec4(0.0, 0.4666666686534882, 0.7843137383460999, 1.0);
-    style.*.Colors[c.ImGuiCol_DragDropTarget] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_NavHighlight] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-    style.*.Colors[c.ImGuiCol_NavWindowingHighlight] = ImVec4(1.0, 1.0, 1.0, 0.699999988079071);
-    style.*.Colors[c.ImGuiCol_NavWindowingDimBg] = ImVec4(0.800000011920929, 0.800000011920929, 0.800000011920929, 0.2000000029802322);
-    style.*.Colors[c.ImGuiCol_ModalWindowDimBg] = ImVec4(0.1450980454683304, 0.1450980454683304, 0.1490196138620377, 1.0);
-}
-
-pub fn cleanup(self: *Self) void {
+pub fn deinit(self: *Self) void {
     check_vk(c.vkDeviceWaitIdle(self.device)) catch @panic("Failed to wait for device idle");
 
-    // TODO: this is a horrible way to keep track of the meshes to free. Quick and dirty hack.
-    var mesh_it = self.meshes.iterator();
-    while (mesh_it.next()) |entry| {
-        self.allocator.free(entry.value_ptr.vertices);
+    if (self.main_camera) |main_camera| {
+        main_camera.object.deref();
+        self.main_camera = null;
     }
-
-    self.textures.deinit();
-    self.meshes.deinit();
-    self.materials.deinit();
-    self.renderables.deinit();
-
-    c.cImGui_ImplVulkan_Shutdown();
+    self.scene.deinit();
 
     for (self.buffer_deletion_queue.items) |*entry| {
         entry.delete(self);
@@ -1596,74 +1088,7 @@ pub fn cleanup(self: *Self) void {
     c.SDL_DestroyWindow(self.window);
 }
 
-fn load_textures(self: *Self) void {
-    const lost_empire_image = texs.load_image_from_file(Self, self, "assets/lost_empire-RGBA.png") catch @panic("Failed to load image");
-    self.image_deletion_queue.append(VmaImageDeleter{ .image = lost_empire_image }) catch @panic("Out of memory");
-    const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
-        .image = lost_empire_image.image,
-        .format = c.VK_FORMAT_R8G8B8A8_UNORM,
-        .components = .{
-            .r = c.VK_COMPONENT_SWIZZLE_IDENTITY,
-            .g = c.VK_COMPONENT_SWIZZLE_IDENTITY,
-            .b = c.VK_COMPONENT_SWIZZLE_IDENTITY,
-            .a = c.VK_COMPONENT_SWIZZLE_IDENTITY,
-        },
-        .subresourceRange = .{
-            .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-    });
-
-    var lost_empire = Texture{
-        .image = lost_empire_image,
-        .image_view = VK_NULL_HANDLE,
-    };
-
-    check_vk(c.vkCreateImageView(self.device, &image_view_ci, vk_alloc_cbs, &lost_empire.image_view)) catch @panic("Failed to create image view");
-    self.deletion_queue.append(VulkanDeleter.make(lost_empire.image_view, c.vkDestroyImageView)) catch @panic("Out of memory");
-
-    self.textures.put("empire_diffuse", lost_empire) catch @panic("Out of memory");
-}
-
-fn load_meshes(self: *Self) void {
-    const vertices = [_]mesh_mod.Vertex{ .{
-        .position = Vec3.make(1.0, 1.0, 0.0),
-        .normal = undefined,
-        .color = Vec3.make(0.0, 1.0, 0.0),
-        .uv = Vec2.make(1.0, 1.0),
-    }, .{
-        .position = Vec3.make(-1.0, 1.0, 0.0),
-        .normal = undefined,
-        .color = Vec3.make(0.0, 1.0, 0.0),
-        .uv = Vec2.make(0.0, 1.0),
-    }, .{
-        .position = Vec3.make(0.0, -1.0, 0.0),
-        .normal = undefined,
-        .color = Vec3.make(0.0, 1.0, 0.0),
-        .uv = Vec2.make(0.5, 0.0),
-    } };
-
-    var triangle_mesh = Mesh{
-        .vertices = self.allocator.dupe(mesh_mod.Vertex, vertices[0..]) catch @panic("Out of memory"),
-    };
-    self.upload_mesh(&triangle_mesh);
-    self.meshes.put("triangle", triangle_mesh) catch @panic("Out of memory");
-
-    var monkey_mesh = mesh_mod.load_from_obj(self.allocator, "assets/suzanne.obj");
-    self.upload_mesh(&monkey_mesh);
-    self.meshes.put("monkey", monkey_mesh) catch @panic("Out of memory");
-
-    var lost_empire = mesh_mod.load_from_obj(self.allocator, "assets/lost_empire.obj");
-    self.upload_mesh(&lost_empire);
-    self.meshes.put("lost_empire", lost_empire) catch @panic("Out of memory");
-}
-
-fn upload_mesh(self: *Self, mesh: *Mesh) void {
+pub fn uploadMesh(self: *Self, mesh: *Mesh) void {
     // Create a cpu buffer for staging
     const staging_buffer_ci = std.mem.zeroInit(c.VkBufferCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -1705,7 +1130,7 @@ fn upload_mesh(self: *Self, mesh: *Mesh) void {
 
     // Now we can copy immediate the content of the staging buffer to the gpu
     // only memory.
-    self.immediate_submit(struct {
+    self.immediateSubmit(struct {
         mesh_buffer: c.VkBuffer,
         staging_buffer: c.VkBuffer,
         size: usize,
@@ -1726,76 +1151,14 @@ fn upload_mesh(self: *Self, mesh: *Mesh) void {
     c.vmaDestroyBuffer(self.vma_allocator, staging_buffer.buffer, staging_buffer.allocation);
 }
 
-pub fn processGameEvent(self: *Self, event: *c.SDL_Event) void {
-    if (event.type == c.SDL_EVENT_KEY_DOWN) {
-        switch (event.key.keysym.scancode) {
-            c.SDL_SCANCODE_SPACE => {
-                self.selected_shader = if (self.selected_shader == 1) 0 else 1;
-            },
-            c.SDL_SCANCODE_M => {
-                self.selected_mesh = if (self.selected_mesh == 1) 0 else 1;
-            },
-
-            // WASD for camera
-            c.SDL_SCANCODE_W => {
-                self.camera_input.z = 1.0;
-            },
-            c.SDL_SCANCODE_S => {
-                self.camera_input.z = -1.0;
-            },
-            c.SDL_SCANCODE_A => {
-                self.camera_input.x = 1.0;
-            },
-            c.SDL_SCANCODE_D => {
-                self.camera_input.x = -1.0;
-            },
-            c.SDL_SCANCODE_E => {
-                self.camera_input.y = 1.0;
-            },
-            c.SDL_SCANCODE_Q => {
-                self.camera_input.y = -1.0;
-            },
-
-            else => {},
-        }
-    } else if (event.type == c.SDL_EVENT_KEY_UP) {
-        switch (event.key.keysym.scancode) {
-            c.SDL_SCANCODE_ESCAPE => {
-                self.is_game_window_active = false;
-                self.is_scene_window_active = false;
-            },
-            c.SDL_SCANCODE_W => {
-                self.camera_input.z = 0.0;
-            },
-            c.SDL_SCANCODE_S => {
-                self.camera_input.z = 0.0;
-            },
-            c.SDL_SCANCODE_A => {
-                self.camera_input.x = 0.0;
-            },
-            c.SDL_SCANCODE_D => {
-                self.camera_input.x = 0.0;
-            },
-            c.SDL_SCANCODE_E => {
-                self.camera_input.y = 0.0;
-            },
-            c.SDL_SCANCODE_Q => {
-                self.camera_input.y = 0.0;
-            },
-
-            else => {},
-        }
-    }
-}
-
-fn get_current_frame(self: *Self) FrameData {
+fn getCurrentFrame(self: *Self) FrameData {
     return self.frames[@intCast(@mod(self.frame_number, FRAME_OVERLAP))];
 }
 
 pub fn beginFrame(self: *Self) RenderCommand {
     // Wait until the GPU has finished rendering the last frame
     const timeout: u64 = 1_000_000_000; // 1 second in nanonesconds
-    const frame = self.get_current_frame();
+    const frame = self.getCurrentFrame();
 
     check_vk(c.vkWaitForFences(self.device, 1, &frame.render_fence, c.VK_TRUE, timeout)) catch @panic("Failed to wait for render fence");
     check_vk(c.vkResetFences(self.device, 1, &frame.render_fence)) catch @panic("Failed to reset render fence");
@@ -1817,7 +1180,7 @@ pub fn beginFrame(self: *Self) RenderCommand {
 
     // Make a claer color that changes with each frame (120*pi frame period)
     // 0.11 and 0.12 fix for change in fabs
-    const color = math3d.abs(std.math.sin(@as(f32, @floatFromInt(self.frame_number)) / 120.0));
+    const color = @abs(std.math.sin(@as(f32, @floatFromInt(self.frame_number)) / 120.0));
 
     const color_clear: c.VkClearValue = .{
         .color = .{ .float32 = [_]f32{ color, 0.0, color, 1.0 } },
@@ -1857,7 +1220,7 @@ pub fn beginFrame(self: *Self) RenderCommand {
 }
 
 pub fn endFrame(self: *Self, cmd: RenderCommand) void {
-    const frame = self.get_current_frame();
+    const frame = self.getCurrentFrame();
     c.vkCmdEndRenderPass(cmd);
     check_vk(c.vkEndCommandBuffer(cmd)) catch @panic("Failed to end command buffer");
 
@@ -1949,41 +1312,39 @@ pub fn beginPresentRenderPass(self: *Self, cmd: RenderCommand) void {
     c.vkCmdBeginRenderPass(cmd, &render_pass_begin_info, c.VK_SUBPASS_CONTENTS_INLINE);
 }
 
-pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject, aspect: f32, a: AllocatedBuffer, b: c.VkDescriptorSet) void {
-    const view = Mat4.translation(self.camera_pos);
-    var proj = Mat4.perspective(std.math.degreesToRadians(70.0), aspect, 0.1, 200.0);
-
-    proj.j.y *= -1.0;
-
+pub fn drawObjects(
+    self: *Self,
+    cmd: c.VkCommandBuffer,
+    renderables: []*MeshRenderer,
+    ubo_buf: AllocatedBuffer,
+    ubo_set: c.VkDescriptorSet,
+    cam: *Camera,
+) void {
     // Create and bind the camera buffer
-    const curr_camera_data = GPUCameraData{
-        .view = view,
-        .proj = proj,
-        .view_proj = proj.mul(view),
-    };
+    const curr_camera_data = GPUCameraData.fromCamera(cam);
 
     const frame_index: usize = @intCast(@mod(self.frame_number, FRAME_OVERLAP));
 
     // TODO: meta function that deals with alignment and copying of data with
     // map/unmap. We now have two versions, one for a single pointer to struct
     // and one for array/slices (used to copy mesh vertices).
-    const padded_camera_data_size = self.pad_uniform_buffer_size(@sizeOf(GPUCameraData));
+    const padded_camera_data_size = self.padUniformBufferSize(@sizeOf(GPUCameraData));
     const scene_data_base_offset = padded_camera_data_size * FRAME_OVERLAP;
-    const padded_scene_data_size = self.pad_uniform_buffer_size(@sizeOf(GPUSceneData));
+    const padded_scene_data_size = self.padUniformBufferSize(@sizeOf(GPUSceneData));
 
     const camera_data_offset = padded_camera_data_size * frame_index;
     const scene_data_offset = scene_data_base_offset + padded_scene_data_size * frame_index;
 
     var data: ?*align(@alignOf(GPUCameraData)) anyopaque = undefined;
-    check_vk(c.vmaMapMemory(self.vma_allocator, a.allocation, &data)) catch @panic("Failed to map camera buffer");
+    check_vk(c.vmaMapMemory(self.vma_allocator, ubo_buf.allocation, &data)) catch @panic("Failed to map camera buffer");
 
     const camera_data: *GPUCameraData = @ptrFromInt(@intFromPtr(data) + camera_data_offset);
     const scene_data: *GPUSceneData = @ptrFromInt(@intFromPtr(data) + scene_data_offset);
     camera_data.* = curr_camera_data;
     const framed = @as(f32, @floatFromInt(self.frame_number)) / 120.0;
-    scene_data.ambient_color = Vec3.make(@sin(framed), 0.0, @cos(framed)).to_point4();
+    scene_data.ambient_color = Vec3.make(@sin(framed), 0.0, @cos(framed)).toVec4(1);
 
-    c.vmaUnmapMemory(self.vma_allocator, a.allocation);
+    c.vmaUnmapMemory(self.vma_allocator, ubo_buf.allocation);
 
     // NOTE: In this copy I do conversion. Now, this is generally unsafe as none
     // of the structures involved are c compatible (marked extern). However, we
@@ -1992,18 +1353,18 @@ pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject
     // we can more easily pass them back and forth from C and do those kind of
     // conversions.
     var object_data: ?*align(@alignOf(GPUObjectData)) anyopaque = undefined;
-    check_vk(c.vmaMapMemory(self.vma_allocator, self.get_current_frame().object_buffer.allocation, &object_data)) catch @panic("Failed to map object buffer");
+    check_vk(c.vmaMapMemory(self.vma_allocator, self.getCurrentFrame().object_buffer.allocation, &object_data)) catch @panic("Failed to map object buffer");
     var object_data_arr: [*]GPUObjectData = @ptrCast(object_data orelse unreachable);
-    for (objects, 0..) |object, index| {
+    for (renderables, 0..) |object, index| {
         object_data_arr[index] = GPUObjectData{
-            .model_matrix = object.transform,
+            .model_matrix = object.object.transform.matrix,
         };
     }
-    c.vmaUnmapMemory(self.vma_allocator, self.get_current_frame().object_buffer.allocation);
+    c.vmaUnmapMemory(self.vma_allocator, self.getCurrentFrame().object_buffer.allocation);
 
-    for (objects, 0..) |object, index| {
-        if (index == 0 or object.material != objects[index - 1].material) {
-            c.vkCmdBindPipeline(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline);
+    for (renderables, 0..) |r, index| {
+        if (index == 0 or r.material != renderables[index - 1].material) {
+            c.vkCmdBindPipeline(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, r.material.pipeline);
 
             // Compute the offset for dynamic uniform buffers (for now just the one containing scene data, the
             // camera data is not dynamic)
@@ -2012,32 +1373,32 @@ pub fn draw_objects(self: *Self, cmd: c.VkCommandBuffer, objects: []RenderObject
                 @as(u32, @intCast(scene_data_offset)),
             };
 
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 0, 1, &b, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, r.material.pipeline_layout, 0, 1, &ubo_set, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
 
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 1, 1, &self.get_current_frame().object_descriptor_set, 0, null);
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, r.material.pipeline_layout, 1, 1, &self.getCurrentFrame().object_descriptor_set, 0, null);
         }
 
-        if (object.material.texture_set != VK_NULL_HANDLE) {
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, object.material.pipeline_layout, 2, 1, &object.material.texture_set, 0, null);
+        if (r.material.texture_set != VK_NULL_HANDLE) {
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, r.material.pipeline_layout, 2, 1, &r.material.texture_set, 0, null);
         }
 
         const push_constants = MeshPushConstants{
             .data = Vec4.ZERO,
-            .render_matrix = object.transform,
+            .render_matrix = r.object.transform.matrix,
         };
 
-        c.vkCmdPushConstants(cmd, object.material.pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &push_constants);
+        c.vkCmdPushConstants(cmd, r.material.pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &push_constants);
 
-        if (index == 0 or object.mesh != objects[index - 1].mesh) {
+        if (index == 0 or r.mesh != renderables[index - 1].mesh) {
             const offset: c.VkDeviceSize = 0;
-            c.vkCmdBindVertexBuffers(cmd, 0, 1, &object.mesh.vertex_buffer.buffer, &offset);
+            c.vkCmdBindVertexBuffers(cmd, 0, 1, &r.mesh.vertex_buffer.buffer, &offset);
         }
 
-        c.vkCmdDraw(cmd, @as(u32, @intCast(object.mesh.vertices.len)), 1, 0, @intCast(index));
+        c.vkCmdDraw(cmd, @as(u32, @intCast(r.mesh.vertices.len)), 1, 0, @intCast(index));
     }
 }
 
-fn create_material(self: *Self, pipeline: c.VkPipeline, pipeline_layout: c.VkPipelineLayout, name: []const u8) *Material {
+fn createMaterial(self: *Self, pipeline: c.VkPipeline, pipeline_layout: c.VkPipelineLayout, name: []const u8) *Material {
     self.materials.put(name, Material{
         .pipeline = pipeline,
         .pipeline_layout = pipeline_layout,
@@ -2045,15 +1406,11 @@ fn create_material(self: *Self, pipeline: c.VkPipeline, pipeline_layout: c.VkPip
     return self.materials.getPtr(name) orelse unreachable;
 }
 
-fn get_material(self: *Self, name: []const u8) ?*Material {
+fn getMaterial(self: *Self, name: []const u8) ?*Material {
     return self.material.getPtr(name);
 }
 
-fn get_mesh(self: *Self, name: []const u8) ?*Mesh {
-    return self.meshes.getPtr(name);
-}
-
-pub fn create_buffer(self: *Self, alloc_size: usize, usage: c.VkBufferUsageFlags, memory_usage: c.VmaMemoryUsage) AllocatedBuffer {
+pub fn createBuffer(self: *Self, alloc_size: usize, usage: c.VkBufferUsageFlags, memory_usage: c.VmaMemoryUsage) AllocatedBuffer {
     const buffer_ci = std.mem.zeroInit(c.VkBufferCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = alloc_size,
@@ -2070,13 +1427,13 @@ pub fn create_buffer(self: *Self, alloc_size: usize, usage: c.VkBufferUsageFlags
     return buffer;
 }
 
-pub fn pad_uniform_buffer_size(self: *Self, original_size: usize) usize {
+pub fn padUniformBufferSize(self: *Self, original_size: usize) usize {
     const min_ubo_alignment = @as(usize, @intCast(self.physical_device_properties.limits.minUniformBufferOffsetAlignment));
     const aligned_size = (original_size + min_ubo_alignment - 1) & ~(min_ubo_alignment - 1);
     return aligned_size;
 }
 
-pub fn immediate_submit(self: *Self, submit_ctx: anytype) void {
+pub fn immediateSubmit(self: *Self, submit_ctx: anytype) void {
     // Check the context is good
     comptime {
         var Context = @TypeOf(submit_ctx);
@@ -2143,57 +1500,4 @@ pub fn immediate_submit(self: *Self, submit_ctx: anytype) void {
     check_vk(c.vkResetFences(self.device, 1, &self.upload_context.upload_fence)) catch @panic("Failed to reset upload fence");
 
     check_vk(c.vkResetCommandPool(self.device, self.upload_context.command_pool, 0)) catch @panic("Failed to reset command pool");
-}
-
-fn create_imgui_texture(self: *Self, filepath: []const u8) c.VkDescriptorSet {
-    const img = texs.load_image_from_file(Self, self, filepath) catch @panic("Failed to load image");
-    self.image_deletion_queue.append(VmaImageDeleter{ .image = img }) catch @panic("Out of memory");
-
-    // Create the Image View
-    var image_view: c.VkImageView = undefined;
-    {
-        const info = c.VkImageViewCreateInfo{
-            .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = img.image,
-            .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
-            .format = c.VK_FORMAT_R8G8B8A8_UNORM,
-            .subresourceRange = .{
-                .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-        };
-        check_vk(c.vkCreateImageView(self.device, &info, vk_alloc_cbs, &image_view)) catch @panic("Failed to create image view");
-    }
-    self.textures.put(filepath, Texture{ .image = img, .image_view = image_view }) catch @panic("OOM");
-    self.deletion_queue.append(VulkanDeleter.make(image_view, c.vkDestroyImageView)) catch @panic("OOM");
-    // Create Sampler
-    var sampler: c.VkSampler = undefined;
-    {
-        const sampler_info = c.VkSamplerCreateInfo{
-            .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-            .magFilter = c.VK_FILTER_LINEAR,
-            .minFilter = c.VK_FILTER_LINEAR,
-            .mipmapMode = c.VK_SAMPLER_MIPMAP_MODE_LINEAR,
-            .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT, // outside image bounds just use border color
-            .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            .minLod = -1000,
-            .maxLod = 1000,
-            .maxAnisotropy = 1.0,
-        };
-        check_vk(c.vkCreateSampler(self.device, &sampler_info, vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
-    }
-    self.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("OOM");
-    return c.cImGui_ImplVulkan_AddTexture(sampler, image_view, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-}
-
-pub fn isInGameView(self: *Self, pos: c.ImVec2) bool {
-    return (pos.x > self.game_window_rect.x and pos.x < self.game_window_rect.z) and
-        (pos.y > self.game_window_rect.y and pos.y < self.game_window_rect.w);
-}
-
-pub fn isInSceneView(self: *Self, pos: c.ImVec2) bool {
-    return (pos.x > self.scene_window_rect.x and pos.x < self.scene_window_rect.z) and
-        (pos.y > self.scene_window_rect.y and pos.y < self.scene_window_rect.w);
 }

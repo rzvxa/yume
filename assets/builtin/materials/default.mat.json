@@ -1,0 +1,8 @@
+{
+  "name": "Default Material",
+  "passes": {
+    "vertex": "builtin://shaders/tri_mesh.vert.glsl",
+    "fragment": "builtin://shaders/textured_lit.frag.glsl"
+  },
+  "set_layouts": ["global", "object", "single_texture"]
+}
