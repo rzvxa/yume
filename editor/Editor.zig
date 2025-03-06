@@ -113,7 +113,7 @@ pub fn init(ctx: *GameApp) Self {
         defer monkey.deref();
         monkey.addComponent(MeshRenderer, .{
             .mesh = AssetsDatabase.getOrLoadMesh("builtin://u.obj") catch @panic("Failed to get monkey mesh"),
-            .material = ctx.engine.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
+            .material = AssetsDatabase.getOrLoadMaterial("builtin://materials/none.mat.json") catch @panic("Failed to get none material"),
         });
         apes.addChildren(monkey);
 
@@ -122,7 +122,6 @@ pub fn init(ctx: *GameApp) Self {
             .transform = Mat4.translation(Vec3.make(5.0, -10.0, 0.0)),
         }) catch @panic("OOM");
         defer empire.deref();
-        // var empire_material = ctx.engine.materials.getPtr("textured_mesh") orelse @panic("Failed to get default mesh material");
         var empire_material = AssetsDatabase.getOrLoadMaterial("builtin://materials/default.mat.json") catch @panic("Failed to get default mesh material");
 
         // Allocate descriptor set for signle-texture to use on the material

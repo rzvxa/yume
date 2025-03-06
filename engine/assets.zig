@@ -139,7 +139,6 @@ pub const AssetsDatabase = struct {
         const handle = MaterialAssetHandle{ .uuid = Uuid.new() };
         const filepath = try resolveUri(instance.allocator, uri);
         defer instance.allocator.free(filepath);
-        log.debug("{s}", .{filepath});
 
         const matfile = try std.fs.cwd().openFile(filepath, .{});
         defer matfile.close();
@@ -245,10 +244,11 @@ pub const AssetsDatabase = struct {
         pipeline_builder.vertex_input_state.vertexBindingDescriptionCount = @as(u32, @intCast(vertex_descritpion.bindings.len));
 
         const vert_path = try resolveUri(instance.allocator, matparsed.value.passes.vertex);
-        log.debug("HERE {s}", .{vert_path});
+        defer instance.allocator.free(vert_path);
         var vert_file = try std.fs.cwd().openFile(vert_path, .{});
         defer vert_file.close();
         const vert_code = try vert_file.readToEndAlloc(instance.allocator, 20_000);
+        defer instance.allocator.free(vert_code);
         const vert_module = instance.engine.createShaderModule(vert_code) orelse null;
         defer c.vkDestroyShaderModule(instance.engine.device, vert_module, Engine.vk_alloc_cbs);
 
@@ -261,11 +261,15 @@ pub const AssetsDatabase = struct {
             .size = @sizeOf(Engine.MeshPushConstants),
         });
 
-        const set_layouts = [_]c.VkDescriptorSetLayout{
-            instance.engine.global_set_layout,
-            instance.engine.object_set_layout,
-            instance.engine.single_texture_set_layout,
-        };
+        const set_layouts = try instance.allocator.alloc(c.VkDescriptorSetLayout, matparsed.value.set_layouts.len);
+        defer instance.allocator.free(set_layouts);
+        for (matparsed.value.set_layouts, 0..) |set_layout, i| {
+            set_layouts[i] = switch (set_layout) {
+                .global => instance.engine.global_set_layout,
+                .object => instance.engine.object_set_layout,
+                .single_texture => instance.engine.single_texture_set_layout,
+            };
+        }
         var pipeline_layout_ci = std.mem.zeroInit(c.VkPipelineLayoutCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
             .setLayoutCount = @as(u32, @intCast(set_layouts.len)),
@@ -282,12 +286,17 @@ pub const AssetsDatabase = struct {
             &pipeline_layout,
         )) catch @panic("Failed to create textured mesh pipeline layout");
 
-        const textured_lit_frag_code align(4) = @embedFile("textured_lit.frag").*;
-        const textured_lit_frag = instance.engine.createShaderModule(&textured_lit_frag_code) orelse null;
-        defer c.vkDestroyShaderModule(instance.engine.device, textured_lit_frag, Engine.vk_alloc_cbs);
+        const frag_path = try resolveUri(instance.allocator, matparsed.value.passes.fragment);
+        defer instance.allocator.free(frag_path);
+        var frag_file = try std.fs.cwd().openFile(frag_path, .{});
+        defer frag_file.close();
+        const frag_code = try frag_file.readToEndAlloc(instance.allocator, 20_000);
+        defer instance.allocator.free(frag_code);
+        const frag_module = instance.engine.createShaderModule(frag_code) orelse null;
+        defer c.vkDestroyShaderModule(instance.engine.device, frag_module, Engine.vk_alloc_cbs);
 
         pipeline_builder.shader_stages[0].module = vert_module;
-        pipeline_builder.shader_stages[1].module = textured_lit_frag;
+        pipeline_builder.shader_stages[1].module = frag_module;
         pipeline_builder.pipeline_layout = pipeline_layout;
         const pipeline = pipeline_builder.build(instance.engine.device, instance.engine.render_pass);
 
@@ -450,17 +459,12 @@ fn resolveUri(allocator: std.mem.Allocator, uri: []const u8) ![]const u8 {
     }
 
     const ext = std.fs.path.extension(path);
-    log.debug("this {s} {s}", .{ path, ext });
     if (std.mem.eql(u8, ext, ".glsl") and
         uri.len - prefix_len > SHADER_PREFIX.len and
         std.mem.eql(u8, uri[prefix_len .. prefix_len + SHADER_PREFIX.len], SHADER_PREFIX))
     {
         const slice = uri[prefix_len + SHADER_PREFIX.len + 1 .. uri.len - 5];
         const cache_path = try std.fmt.allocPrint(allocator, ".shader-cache/{s}.spv", .{slice});
-        log.debug("other {s} {s}", .{
-            path,
-            cache_path,
-        });
         allocator.free(path);
         return cache_path;
     }

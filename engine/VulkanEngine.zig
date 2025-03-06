@@ -151,8 +151,6 @@ descriptor_pool: c.VkDescriptorPool = VK_NULL_HANDLE,
 
 vma_allocator: c.VmaAllocator = undefined,
 
-materials: std.StringHashMap(Material),
-
 main_camera: ?*Camera = null,
 
 deletion_queue: std.ArrayList(VulkanDeleter) = undefined,
@@ -222,7 +220,6 @@ pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
         .deletion_queue = std.ArrayList(VulkanDeleter).init(a),
         .buffer_deletion_queue = std.ArrayList(VmaBufferDeleter).init(a),
         .image_deletion_queue = std.ArrayList(VmaImageDeleter).init(a),
-        .materials = std.StringHashMap(Material).init(a),
     };
 
     engine.initInstance();
@@ -246,7 +243,6 @@ pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
     engine.initFramebuffers();
     engine.initSyncStructures();
     engine.initDescriptors();
-    engine.initPipelines();
 
     return engine;
 }
@@ -776,178 +772,6 @@ pub const PipelineBuilder = struct {
     }
 };
 
-fn initPipelines(self: *Self) void {
-    // NOTE: we are currently destroying the shader modules as soon as we are done
-    // creating the pipeline. This is not great if we needed the modules for multiple pipelines.
-    // Howver, for the sake of simplicity, we are doing it this way for now.
-
-    const pipeline_layout_ci = std.mem.zeroInit(c.VkPipelineLayoutCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-    });
-    var triangle_pipeline_layout: c.VkPipelineLayout = undefined;
-    check_vk(c.vkCreatePipelineLayout(self.device, &pipeline_layout_ci, vk_alloc_cbs, &triangle_pipeline_layout)) catch @panic("Failed to create pipeline layout");
-    self.deletion_queue.append(VulkanDeleter.make(triangle_pipeline_layout, c.vkDestroyPipelineLayout)) catch @panic("Out of memory");
-
-    const vertex_input_state_ci = std.mem.zeroInit(c.VkPipelineVertexInputStateCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    });
-
-    const input_assembly_state_ci = std.mem.zeroInit(c.VkPipelineInputAssemblyStateCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        .topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-        .primitiveRestartEnable = c.VK_FALSE,
-    });
-
-    const rasterization_state_ci = std.mem.zeroInit(c.VkPipelineRasterizationStateCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        .polygonMode = c.VK_POLYGON_MODE_FILL,
-        .cullMode = c.VK_CULL_MODE_NONE,
-        .frontFace = c.VK_FRONT_FACE_CLOCKWISE,
-        .lineWidth = 1.0,
-    });
-
-    const multisample_state_ci = std.mem.zeroInit(c.VkPipelineMultisampleStateCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .rasterizationSamples = c.VK_SAMPLE_COUNT_1_BIT,
-        .minSampleShading = 1.0,
-    });
-
-    const depth_stencil_state_ci = std.mem.zeroInit(c.VkPipelineDepthStencilStateCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-        .depthTestEnable = c.VK_TRUE,
-        .depthWriteEnable = c.VK_TRUE,
-        .depthCompareOp = c.VK_COMPARE_OP_LESS_OR_EQUAL,
-        .depthBoundsTestEnable = c.VK_FALSE,
-        .stencilTestEnable = c.VK_FALSE,
-        .minDepthBounds = 0.0,
-        .maxDepthBounds = 1.0,
-    });
-
-    const color_blend_attachment_state = std.mem.zeroInit(c.VkPipelineColorBlendAttachmentState, .{
-        .colorWriteMask = c.VK_COLOR_COMPONENT_R_BIT | c.VK_COLOR_COMPONENT_G_BIT | c.VK_COLOR_COMPONENT_B_BIT | c.VK_COLOR_COMPONENT_A_BIT,
-    });
-
-    var shader_stages = [_]c.VkPipelineShaderStageCreateInfo{
-        std.mem.zeroInit(c.VkPipelineShaderStageCreateInfo, .{
-            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = c.VK_SHADER_STAGE_VERTEX_BIT,
-            .pName = "main",
-        }),
-        std.mem.zeroInit(c.VkPipelineShaderStageCreateInfo, .{
-            .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = c.VK_SHADER_STAGE_FRAGMENT_BIT,
-            .pName = "main",
-        }),
-    };
-    var pipeline_builder = PipelineBuilder{
-        .shader_stages = shader_stages[0..],
-        .vertex_input_state = vertex_input_state_ci,
-        .input_assembly_state = input_assembly_state_ci,
-        .viewport = .{
-            .x = 0.0,
-            .y = 0.0,
-            .width = @as(f32, @floatFromInt(self.swapchain_extent.width)),
-            .height = @as(f32, @floatFromInt(self.swapchain_extent.height)),
-            .minDepth = 0.0,
-            .maxDepth = 1.0,
-        },
-        .scissor = .{
-            .offset = .{ .x = 0, .y = 0 },
-            .extent = self.swapchain_extent,
-        },
-        .rasterization_state = rasterization_state_ci,
-        .color_blend_attachment_state = color_blend_attachment_state,
-        .multisample_state = multisample_state_ci,
-        .pipeline_layout = triangle_pipeline_layout,
-        .depth_stencil_state = depth_stencil_state_ci,
-    };
-
-    // Create pipeline for meshes
-    const vertex_descritpion = mesh_mod.Vertex.vertex_input_description;
-
-    pipeline_builder.vertex_input_state.pVertexAttributeDescriptions = vertex_descritpion.attributes.ptr;
-    pipeline_builder.vertex_input_state.vertexAttributeDescriptionCount = @as(u32, @intCast(vertex_descritpion.attributes.len));
-    pipeline_builder.vertex_input_state.pVertexBindingDescriptions = vertex_descritpion.bindings.ptr;
-    pipeline_builder.vertex_input_state.vertexBindingDescriptionCount = @as(u32, @intCast(vertex_descritpion.bindings.len));
-
-    const tri_mesh_vert_code align(4) = @embedFile("tri_mesh.vert").*;
-    const tri_mesh_vert_module = createShaderModule(self, &tri_mesh_vert_code) orelse VK_NULL_HANDLE;
-    defer c.vkDestroyShaderModule(self.device, tri_mesh_vert_module, vk_alloc_cbs);
-
-    if (tri_mesh_vert_module != VK_NULL_HANDLE) log.info("Tri-mesh vert module loaded successfully", .{});
-
-    // Default lit shader
-    const default_lit_frag_code align(4) = @embedFile("default_lit.frag").*;
-    const default_lit_frag_module = createShaderModule(self, &default_lit_frag_code) orelse VK_NULL_HANDLE;
-    defer c.vkDestroyShaderModule(self.device, default_lit_frag_module, vk_alloc_cbs);
-
-    if (default_lit_frag_module != VK_NULL_HANDLE) log.info("Default lit frag module loaded successfully", .{});
-
-    pipeline_builder.shader_stages[0].module = tri_mesh_vert_module;
-    pipeline_builder.shader_stages[1].module = default_lit_frag_module;
-
-    // New layout for push constants
-    const push_constant_range = std.mem.zeroInit(c.VkPushConstantRange, .{
-        .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT,
-        .offset = 0,
-        .size = @sizeOf(MeshPushConstants),
-    });
-
-    const set_layouts = [_]c.VkDescriptorSetLayout{
-        self.global_set_layout,
-        self.object_set_layout,
-    };
-
-    const mesh_pipeline_layout_ci = std.mem.zeroInit(c.VkPipelineLayoutCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = @as(u32, @intCast(set_layouts.len)),
-        .pSetLayouts = &set_layouts[0],
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &push_constant_range,
-    });
-
-    var mesh_pipeline_layout: c.VkPipelineLayout = undefined;
-    check_vk(c.vkCreatePipelineLayout(self.device, &mesh_pipeline_layout_ci, vk_alloc_cbs, &mesh_pipeline_layout)) catch @panic("Failed to create mesh pipeline layout");
-    self.deletion_queue.append(VulkanDeleter.make(mesh_pipeline_layout, c.vkDestroyPipelineLayout)) catch @panic("Out of memory");
-
-    pipeline_builder.pipeline_layout = mesh_pipeline_layout;
-
-    const mesh_pipeline = pipeline_builder.build(self.device, self.render_pass);
-    self.deletion_queue.append(VulkanDeleter.make(mesh_pipeline, c.vkDestroyPipeline)) catch @panic("Out of memory");
-    if (mesh_pipeline == VK_NULL_HANDLE) {
-        log.err("Failed to create mesh pipeline", .{});
-    } else {
-        log.info("Created mesh pipeline", .{});
-    }
-
-    _ = self.createMaterial(mesh_pipeline, mesh_pipeline_layout, "default_mesh");
-
-    // Textured mesh shader
-    var textured_pipe_layout_ci = mesh_pipeline_layout_ci;
-    const textured_set_layoyts = [_]c.VkDescriptorSetLayout{
-        self.global_set_layout,
-        self.object_set_layout,
-        self.single_texture_set_layout,
-    };
-    textured_pipe_layout_ci.setLayoutCount = @as(u32, @intCast(textured_set_layoyts.len));
-    textured_pipe_layout_ci.pSetLayouts = &textured_set_layoyts[0];
-
-    var textured_pipe_layout: c.VkPipelineLayout = undefined;
-    check_vk(c.vkCreatePipelineLayout(self.device, &textured_pipe_layout_ci, vk_alloc_cbs, &textured_pipe_layout)) catch @panic("Failed to create textured mesh pipeline layout");
-    self.deletion_queue.append(VulkanDeleter.make(textured_pipe_layout, c.vkDestroyPipelineLayout)) catch @panic("Out of memory");
-
-    const textured_lit_frag_code align(4) = @embedFile("textured_lit.frag").*;
-    const textured_lit_frag = createShaderModule(self, &textured_lit_frag_code) orelse VK_NULL_HANDLE;
-    defer c.vkDestroyShaderModule(self.device, textured_lit_frag, vk_alloc_cbs);
-
-    pipeline_builder.shader_stages[1].module = textured_lit_frag;
-    pipeline_builder.pipeline_layout = textured_pipe_layout;
-    const textured_mesh_pipeline = pipeline_builder.build(self.device, self.render_pass);
-
-    _ = self.createMaterial(textured_mesh_pipeline, textured_pipe_layout, "textured_mesh");
-    self.deletion_queue.append(VulkanDeleter.make(textured_mesh_pipeline, c.vkDestroyPipeline)) catch @panic("Out of memory");
-}
-
 fn initDescriptors(self: *Self) void {
     // Descriptor pool
     const pool_sizes = [_]c.VkDescriptorPoolSize{
@@ -1228,8 +1052,6 @@ pub fn deinit(self: *Self) void {
         self.main_camera = null;
     }
     self.scene.deinit();
-
-    self.materials.deinit();
 
     for (self.buffer_deletion_queue.items) |*entry| {
         entry.delete(self);

@@ -63,7 +63,7 @@ pub fn build(b: *std.Build) !void {
     const engine_c_mod = engine_c_libs.createModule();
     yume.addImport("clibs", engine_c_mod);
 
-    compile_all_shaders(b, yume);
+    compile_all_shaders(b);
 
     const editor = b.addExecutable(.{
         .name = "yume editor",
@@ -84,7 +84,6 @@ pub fn build(b: *std.Build) !void {
 
     editor.linkLibCpp();
     editor.root_module.addImport("yume", yume);
-    compile_all_shaders(b, &editor.root_module);
 
     b.installArtifact(editor);
     if (target.result.os.tag == .windows) {
@@ -136,7 +135,7 @@ pub fn build(b: *std.Build) !void {
     run_step.dependOn(&run_cmd.step);
 }
 
-fn compile_all_shaders(b: *std.Build, mod: *std.Build.Module) void {
+fn compile_all_shaders(b: *std.Build) void {
     const shaders_dir =
         b.build_root.handle.openDir("shaders", .{ .iterate = true }) catch @panic("Failed to open shaders directory");
 
@@ -149,13 +148,13 @@ fn compile_all_shaders(b: *std.Build, mod: *std.Build.Module) void {
                 const name = basename[0 .. basename.len - ext.len];
 
                 std.debug.print("Found shader file to compile: {s}. Compiling with name: {s}\n", .{ entry.name, name });
-                add_shader(b, mod, name);
+                add_shader(b, name);
             }
         }
     }
 }
 
-fn add_shader(b: *std.Build, mod: *std.Build.Module, name: []const u8) void {
+fn add_shader(b: *std.Build, name: []const u8) void {
     const source = std.fmt.allocPrint(b.allocator, "shaders/{s}.glsl", .{name}) catch @panic("OOM");
     const outpath = std.fmt.allocPrint(b.allocator, ".shader-cache/{s}.spv", .{name}) catch @panic("OOM");
 
@@ -166,6 +165,4 @@ fn add_shader(b: *std.Build, mod: *std.Build.Module, name: []const u8) void {
     shader_compilation.addFileArg(b.path(source));
 
     b.getInstallStep().dependOn(&b.addInstallFileWithDir(output, .{ .custom = "../" }, outpath).step);
-
-    mod.addAnonymousImport(name, .{ .root_source_file = output });
 }
