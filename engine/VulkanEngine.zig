@@ -1266,13 +1266,12 @@ pub fn loadScene(self: *Self, s: *scene.Scene) !void {
     var old_scene = self.scene;
     self.scene = s;
     var iter = self.scene.dfs() catch @panic("OOM");
+    defer iter.deinit();
     while (try iter.next()) |next| {
-        std.log.debug("here {s}", .{next.name});
         if (next.getComponent(Camera)) |camera| {
-            std.log.debug("cam on {s}", .{next.name});
             self.main_camera = camera;
+            break;
         }
-
         next.deref();
     }
     old_scene.deinit();
@@ -1287,6 +1286,10 @@ pub fn deinit(self: *Self) void {
         self.allocator.free(entry.value_ptr.vertices);
     }
 
+    if (self.main_camera) |main_camera| {
+        main_camera.object.deref();
+        self.main_camera = null;
+    }
     self.scene.deinit();
 
     self.textures.deinit();

@@ -84,7 +84,7 @@ pub const Dfs = struct {
         var self = Self{
             .stack = try std.ArrayList(*Object).initCapacity(allocator, 1),
         };
-        self.stack.appendAssumeCapacity(root);
+        self.stack.appendAssumeCapacity(root.ref());
         return self;
     }
 
