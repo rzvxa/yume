@@ -28,12 +28,19 @@ pub fn deinit(ptr: *anyopaque) void {
 
 pub fn edit(_: *anyopaque, _: *Object, comp: *Component) void {
     const mr = @as(*MeshRenderer, @ptrCast(@alignCast(comp.ptr)));
-    var urn = mr.mesh.uuid.urn();
+    var urn = mr.mesh.uuid.urnZ();
     _ = c.ImGui_InputText("##mesh-reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);
     c.ImGui_SameLine();
     _ = c.ImGui_Button("...");
     c.ImGui_SameLine();
     _ = c.ImGui_Text("Mesh");
+
+    var material_urn = mr.material.uuid.urnZ();
+    _ = c.ImGui_InputText("##material-reference", &material_urn, 37, c.ImGuiInputTextFlags_ReadOnly);
+    c.ImGui_SameLine();
+    _ = c.ImGui_Button("...");
+    c.ImGui_SameLine();
+    _ = c.ImGui_Text("Material");
 }
 
 pub fn asComponentEditor() ComponentEditor {

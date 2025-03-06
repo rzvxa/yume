@@ -301,6 +301,7 @@ pub const AssetsDatabase = struct {
         const pipeline = pipeline_builder.build(instance.engine.device, instance.engine.render_pass);
 
         material.* = Material{
+            .uuid = Uuid.new(),
             .pipeline = pipeline,
             .pipeline_layout = pipeline_layout,
         };

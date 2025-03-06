@@ -3,6 +3,7 @@ const c = @import("clibs");
 const std = @import("std");
 
 const utils = @import("utils.zig");
+const Uuid = @import("uuid.zig");
 
 const vki = @import("vulkan_init.zig");
 const check_vk = vki.check_vk;
@@ -46,6 +47,7 @@ pub const AllocatedImage = struct {
 
 // Scene management
 pub const Material = struct {
+    uuid: Uuid,
     texture_set: c.VkDescriptorSet = VK_NULL_HANDLE,
     pipeline: c.VkPipeline,
     pipeline_layout: c.VkPipelineLayout,
