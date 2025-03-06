@@ -112,7 +112,7 @@ pub fn init(ctx: *GameApp) Self {
         }) catch @panic("OOM");
         defer monkey.deref();
         monkey.addComponent(MeshRenderer, .{
-            .mesh = AssetsDatabase.getOrLoadMesh("builtin://assets/builtin/u.obj") catch @panic("Failed to get monkey mesh"),
+            .mesh = AssetsDatabase.getOrLoadMesh("builtin://u.obj") catch @panic("Failed to get monkey mesh"),
             .material = ctx.engine.materials.getPtr("default_mesh") orelse @panic("Failed to get default mesh material"),
         });
         apes.addChildren(monkey);
@@ -123,7 +123,7 @@ pub fn init(ctx: *GameApp) Self {
         }) catch @panic("OOM");
         defer empire.deref();
         // var empire_material = ctx.engine.materials.getPtr("textured_mesh") orelse @panic("Failed to get default mesh material");
-        var empire_material = AssetsDatabase.getOrLoadMaterial("textured_mesh") catch @panic("Failed to get default mesh material");
+        var empire_material = AssetsDatabase.getOrLoadMaterial("builtin://materials/default.mat.json") catch @panic("Failed to get default mesh material");
 
         // Allocate descriptor set for signle-texture to use on the material
         const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
@@ -149,7 +149,7 @@ pub fn init(ctx: *GameApp) Self {
         check_vk(c.vkCreateSampler(ctx.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
         ctx.engine.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("Out of memory");
 
-        const lost_empire_tex_handle = AssetsDatabase.loadTexture("builtin://assets/builtin/lost_empire-RGBA.png") catch @panic("Failed to load texture");
+        const lost_empire_tex_handle = AssetsDatabase.loadTexture("builtin://lost_empire-RGBA.png") catch @panic("Failed to load texture");
         const lost_empire_tex = AssetsDatabase.getTexture(lost_empire_tex_handle) catch @panic("Failed to get empire texture");
         // const lost_empire_tex = (ctx.engine.textures.get("empire_diffuse") orelse @panic("Failed to get empire texture"));
 
@@ -171,7 +171,7 @@ pub fn init(ctx: *GameApp) Self {
         c.vkUpdateDescriptorSets(ctx.engine.device, 1, &write_descriptor_set, 0, null);
 
         empire.addComponent(MeshRenderer, .{
-            .mesh = AssetsDatabase.getOrLoadMesh("builtin://assets/builtin/lost_empire.obj") catch @panic("Failed to get triangle mesh"),
+            .mesh = AssetsDatabase.getOrLoadMesh("builtin://lost_empire.obj") catch @panic("Failed to get triangle mesh"),
             .material = empire_material,
         });
     }

@@ -134,25 +134,10 @@ pub fn build(b: *std.Build) !void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
-
-    // const unit_tests = b.addTest(.{
-    //     .root_source_file = b.path("editor/main.zig"),
-    //     .target = target,
-    //     .optimize = optimize,
-    // });
-
-    // const run_unit_tests = b.addRunArtifact(unit_tests);
-
-    // const test_step = b.step("test", "Run unit tests");
-    // test_step.dependOn(&run_unit_tests.step);
 }
 
 fn compile_all_shaders(b: *std.Build, mod: *std.Build.Module) void {
-    // This is a fix for a change between zig 0.11 and 0.12
-
-    const shaders_dir = if (@hasDecl(@TypeOf(b.build_root.handle), "openIterableDir"))
-        b.build_root.handle.openIterableDir("shaders", .{}) catch @panic("Failed to open shaders directory")
-    else
+    const shaders_dir =
         b.build_root.handle.openDir("shaders", .{ .iterate = true }) catch @panic("Failed to open shaders directory");
 
     var file_it = shaders_dir.iterate();
@@ -172,13 +157,15 @@ fn compile_all_shaders(b: *std.Build, mod: *std.Build.Module) void {
 
 fn add_shader(b: *std.Build, mod: *std.Build.Module, name: []const u8) void {
     const source = std.fmt.allocPrint(b.allocator, "shaders/{s}.glsl", .{name}) catch @panic("OOM");
-    const outpath = std.fmt.allocPrint(b.allocator, "shaders/{s}.spv", .{name}) catch @panic("OOM");
+    const outpath = std.fmt.allocPrint(b.allocator, ".shader-cache/{s}.spv", .{name}) catch @panic("OOM");
 
     const shader_compilation = b.addSystemCommand(&.{"glslangValidator"});
     shader_compilation.addArg("-V");
     shader_compilation.addArg("-o");
     const output = shader_compilation.addOutputFileArg(outpath);
     shader_compilation.addFileArg(b.path(source));
+
+    b.getInstallStep().dependOn(&b.addInstallFileWithDir(output, .{ .custom = "../" }, outpath).step);
 
     mod.addAnonymousImport(name, .{ .root_source_file = output });
 }

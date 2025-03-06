@@ -57,7 +57,8 @@ pub const AssetsDatabase = struct {
             return TextureAssetHandle.fromAssetHandleUnsafe(cached);
         }
         const handle = TextureAssetHandle{ .uuid = Uuid.new() };
-        const filepath = resolveUri(uri);
+        const filepath = try resolveUri(instance.allocator, uri);
+        defer instance.allocator.free(filepath);
 
         const image = try texs.load_image_from_file(instance.engine, filepath);
 
@@ -109,7 +110,8 @@ pub const AssetsDatabase = struct {
             return MeshAssetHandle.fromAssetHandleUnsafe(cached);
         }
         const handle = MeshAssetHandle{ .uuid = Uuid.new() };
-        const filepath = resolveUri(uri);
+        const filepath = try resolveUri(instance.allocator, uri);
+        defer instance.allocator.free(filepath);
 
         const mesh = try instance.allocator.create(Mesh);
         mesh.* = load_from_obj(instance.allocator, filepath);
@@ -135,7 +137,23 @@ pub const AssetsDatabase = struct {
             return MaterialAssetHandle.fromAssetHandleUnsafe(cached);
         }
         const handle = MaterialAssetHandle{ .uuid = Uuid.new() };
-        // const filepath = resolveUri(uri);
+        const filepath = try resolveUri(instance.allocator, uri);
+        defer instance.allocator.free(filepath);
+        log.debug("{s}", .{filepath});
+
+        const matfile = try std.fs.cwd().openFile(filepath, .{});
+        defer matfile.close();
+
+        const matjson = try matfile.readToEndAlloc(instance.allocator, 20_000);
+        defer instance.allocator.free(matjson);
+
+        const matparsed = std.json.parseFromSlice(
+            MaterialDef,
+            instance.allocator,
+            matjson,
+            .{},
+        ) catch @panic("Failed to parse the material json");
+        defer matparsed.deinit();
 
         const material = try instance.allocator.create(Material);
 
@@ -226,11 +244,15 @@ pub const AssetsDatabase = struct {
         pipeline_builder.vertex_input_state.pVertexBindingDescriptions = vertex_descritpion.bindings.ptr;
         pipeline_builder.vertex_input_state.vertexBindingDescriptionCount = @as(u32, @intCast(vertex_descritpion.bindings.len));
 
-        const tri_mesh_vert_code align(4) = @embedFile("tri_mesh.vert").*;
-        const tri_mesh_vert_module = instance.engine.createShaderModule(&tri_mesh_vert_code) orelse null;
-        defer c.vkDestroyShaderModule(instance.engine.device, tri_mesh_vert_module, Engine.vk_alloc_cbs);
+        const vert_path = try resolveUri(instance.allocator, matparsed.value.passes.vertex);
+        log.debug("HERE {s}", .{vert_path});
+        var vert_file = try std.fs.cwd().openFile(vert_path, .{});
+        defer vert_file.close();
+        const vert_code = try vert_file.readToEndAlloc(instance.allocator, 20_000);
+        const vert_module = instance.engine.createShaderModule(vert_code) orelse null;
+        defer c.vkDestroyShaderModule(instance.engine.device, vert_module, Engine.vk_alloc_cbs);
 
-        if (tri_mesh_vert_module != null) log.info("Tri-mesh vert module loaded successfully", .{});
+        if (vert_module != null) log.info("vert module loaded successfully", .{});
 
         // New layout for push constants
         const push_constant_range = std.mem.zeroInit(c.VkPushConstantRange, .{
@@ -264,7 +286,7 @@ pub const AssetsDatabase = struct {
         const textured_lit_frag = instance.engine.createShaderModule(&textured_lit_frag_code) orelse null;
         defer c.vkDestroyShaderModule(instance.engine.device, textured_lit_frag, Engine.vk_alloc_cbs);
 
-        pipeline_builder.shader_stages[0].module = tri_mesh_vert_module;
+        pipeline_builder.shader_stages[0].module = vert_module;
         pipeline_builder.shader_stages[1].module = textured_lit_frag;
         pipeline_builder.pipeline_layout = pipeline_layout;
         const pipeline = pipeline_builder.build(instance.engine.device, instance.engine.render_pass);
@@ -374,11 +396,73 @@ const LoadedAsset = struct {
     }
 };
 
-fn resolveUri(uri: []const u8) []const u8 {
+const Passes = struct {
+    vertex: []const u8,
+    fragment: []const u8,
+};
+
+const SetLayout = enum {
+    global,
+    object,
+    single_texture,
+};
+
+const MaterialDef = struct {
+    name: []const u8,
+    passes: Passes,
+    set_layouts: []SetLayout,
+};
+
+fn parseJson(json_str: []const u8, allocator: *std.mem.Allocator) !Material {
+    const json = std.json.parse(json_str, allocator) catch return error.InvalidJson;
+    return Material{
+        .name = json.get([]const u8, "name") catch return error.MissingKey,
+        .passes = Passes{
+            .vertex = json.get([]const u8, "passes").get([]const u8, "vertex") catch return error.MissingKey,
+            .fragment = json.get([]const u8, "passes").get([]const u8, "fragment") catch return error.MissingKey,
+        },
+        .set_layouts = try json.get([]const u8, "set_layouts").map(setLayoutFromString),
+    };
+}
+
+fn setLayoutFromString(layout: []const u8) !SetLayout {
+    if (std.mem.eql(u8, layout, "global")) {
+        return SetLayout.global;
+    } else if (std.mem.eql(u8, layout, "object")) {
+        return SetLayout.object;
+    } else if (std.mem.eql(u8, layout, "single_texture")) {
+        return SetLayout.single_texture;
+    } else unreachable;
+}
+
+// called must free the allocated string
+fn resolveUri(allocator: std.mem.Allocator, uri: []const u8) ![]const u8 {
     const BUILTIN_SCHEMA = "builtin://";
+    const BUILTIN_PREFIX = "assets/builtin";
+    const SHADER_PREFIX = "shaders";
+    var prefix_len: usize = 0;
+    var path: []const u8 = undefined;
     if (uri.len > BUILTIN_SCHEMA.len and std.mem.eql(u8, uri[0..BUILTIN_SCHEMA.len], BUILTIN_SCHEMA)) {
-        return uri[BUILTIN_SCHEMA.len..];
+        prefix_len = BUILTIN_SCHEMA.len;
+        path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ BUILTIN_PREFIX, uri[BUILTIN_SCHEMA.len..] });
     } else {
         @panic("Not Implemented");
     }
+
+    const ext = std.fs.path.extension(path);
+    log.debug("this {s} {s}", .{ path, ext });
+    if (std.mem.eql(u8, ext, ".glsl") and
+        uri.len - prefix_len > SHADER_PREFIX.len and
+        std.mem.eql(u8, uri[prefix_len .. prefix_len + SHADER_PREFIX.len], SHADER_PREFIX))
+    {
+        const slice = uri[prefix_len + SHADER_PREFIX.len + 1 .. uri.len - 5];
+        const cache_path = try std.fmt.allocPrint(allocator, ".shader-cache/{s}.spv", .{slice});
+        log.debug("other {s} {s}", .{
+            path,
+            cache_path,
+        });
+        allocator.free(path);
+        return cache_path;
+    }
+    return path;
 }
