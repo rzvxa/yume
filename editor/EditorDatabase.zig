@@ -1,27 +1,17 @@
 const std = @import("std");
 
-const KvStorage = @import("yume").KvStorage;
+const Self = @This();
 
-const EditorDatabase = struct {
-
-};
+const EditorDatabase = struct {};
 
 var allocator: std.mem.Allocator = undefined;
 var loaded: bool = false;
 var file: std.fs.File = undefined;
-var parsed: std.json.Parsed(Storage) = undefined;
+var parsed: std.json.Parsed(EditorDatabase) = undefined;
 
-pub fn init(allocator: std.mem.Allocator) void {
-    storage = KvStorage.init(allocator, "~/.yumed/db") catch @panic("OOM");
-}
-
-pub fn deinit() void {
-    storage.deinit();
-}
-
-pub fn init(allocator: std.mem.Allocator, filepath: []const u8) !Self {
+pub fn init(a: std.mem.Allocator, filepath: []const u8) !Self {
     var self = .{
-        .allocator = allocator,
+        .allocator = a,
         .file = try std.fs.cwd().openFile(filepath, .{}),
     };
     self.load();
@@ -33,7 +23,7 @@ pub fn deinit(self: *Self) void {
     self.file.close();
 }
 
-pub fn storage(self: *Self) *Storage {
+pub fn storage(self: *Self) *EditorDatabase {
     std.debug.assert(self.loaded);
     return &self.parsed.value;
 }
@@ -50,5 +40,5 @@ fn load(self: *Self) !void {
     if (self.loaded) {
         self.parsed.deinit();
     }
-    self.parsed = try std.json.parseFromSlice(Storage, self.allocator, buf, .{});
+    self.parsed = try std.json.parseFromSlice(EditorDatabase, self.allocator, buf, .{});
 }

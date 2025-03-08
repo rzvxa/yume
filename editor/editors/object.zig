@@ -3,6 +3,7 @@ const c = @import("clibs");
 const std = @import("std");
 
 const Object = @import("yume").Object;
+const imutils = @import("../imutils.zig");
 
 const Self = @This();
 
@@ -26,21 +27,6 @@ pub fn deinit(self: *Self) void {
 
 pub fn edit(self: *Self, _: *Object, icon: c.VkDescriptorSet) void {
     // self.allocator.realloc()
-    const Callback = struct {
-        buf: *std.ArrayList(u8),
-        fn InputTextCallback(data: [*c]c.ImGuiInputTextCallbackData) callconv(.C) c_int {
-            const user_data = @as(*@This(), @ptrCast(@alignCast(data.*.UserData)));
-            if (data.*.EventFlag == c.ImGuiInputTextFlags_CallbackResize) {
-                // Resize string callback
-                // If for some reason we refuse the new length (BufTextLen) and/or capacity (BufSize) we need to set them back to what we want.
-                // std::string* str = user_data->Str;
-                std.debug.assert(data.*.Buf == user_data.buf.items.ptr);
-                user_data.buf.resize(@intCast(data.*.BufTextLen)) catch @panic("OOM");
-                data.*.Buf = user_data.buf.items.ptr;
-            }
-            return 0;
-        }
-    };
 
     const avail = c.ImGui_GetContentRegionAvail();
     const old_pad_y = c.ImGui_GetStyle().*.FramePadding.y;
@@ -60,13 +46,13 @@ pub fn edit(self: *Self, _: *Object, icon: c.VkDescriptorSet) void {
     _ = c.ImGui_Checkbox("###enabled", &enabled);
     c.ImGui_SameLine();
 
-    var callback = Callback{ .buf = &self.name };
+    var callback = imutils.ArrayListU8ResizeCallback{ .buf = &self.name };
     _ = c.ImGui_InputTextEx(
         "###Name",
         self.name.items.ptr,
         self.name.capacity,
         c.ImGuiInputTextFlags_CallbackResize,
-        Callback.InputTextCallback,
+        imutils.ArrayListU8ResizeCallback.InputTextCallback,
         &callback,
     );
 

@@ -9,6 +9,8 @@ const check_vk = @import("yume").vki.check_vk;
 const Editors = @import("editors/editors.zig");
 const AssetsDatabase = @import("yume").AssetsDatabase;
 
+const imutils = @import("imutils.zig");
+
 const textures = @import("yume").textures;
 const Texture = textures.Texture;
 
@@ -34,6 +36,8 @@ const VmaBufferDeleter = @import("yume").VmaBufferDeleter;
 const VulkanDeleter = @import("yume").VulkanDeleter;
 
 const Engine = @import("yume").VulkanEngine;
+
+const NewProjectModal = @import("NewProjectModal.zig");
 
 const ManipulationTool = enum {
     move,
@@ -81,23 +85,15 @@ is_scene_window_focused: bool = false,
 
 first_time: bool = true,
 
-// assets
-
-play_icon_ds: c.VkDescriptorSet = undefined,
-pause_icon_ds: c.VkDescriptorSet = undefined,
-stop_icon_ds: c.VkDescriptorSet = undefined,
-fast_forward_icon_ds: c.VkDescriptorSet = undefined,
-folder_icon_ds: c.VkDescriptorSet = undefined,
-file_icon_ds: c.VkDescriptorSet = undefined,
-object_icon_ds: c.VkDescriptorSet = undefined,
-move_tool_icon_ds: c.VkDescriptorSet = undefined,
-rotate_tool_icon_ds: c.VkDescriptorSet = undefined,
-scale_tool_icon_ds: c.VkDescriptorSet = undefined,
+new_project_modal: NewProjectModal,
 
 pub fn init(ctx: *GameApp) Self {
-    var self = Self{ .editors = Editors.init(ctx.allocator) };
+    var self = Self{
+        .editors = Editors.init(ctx.allocator),
+        .new_project_modal = NewProjectModal.init(ctx.allocator),
+    };
     self.init_descriptors(&ctx.engine);
-    self.init_imgui(&ctx.engine);
+    init_imgui(&ctx.engine);
     var scene = Scene.init(ctx.allocator) catch @panic("OOM");
 
     {
@@ -192,6 +188,7 @@ pub fn init(ctx: *GameApp) Self {
 
 pub fn deinit(self: *Self, ctx: *GameApp) void {
     self.editors.deinit();
+    self.new_project_modal.deinit();
     check_vk(c.vkDeviceWaitIdle(ctx.engine.device)) catch @panic("Failed to wait for device idle");
     c.cImGui_ImplVulkan_Shutdown();
 }
@@ -303,12 +300,22 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         c.ImGui_ShowDemoWindow(&self.imgui_demo_open);
     }
 
+    self.new_project_modal.show();
+
     if (c.ImGui_BeginMainMenuBar()) {
-        if (c.ImGui_BeginMenu("File")) {
-            if (c.ImGui_MenuItem("New")) {}
+        if (c.ImGui_BeginMenu("Project")) {
+            if (c.ImGui_MenuItem("New")) {
+                self.new_project_modal.open();
+            }
             if (c.ImGui_MenuItem("Open")) {}
             if (c.ImGui_MenuItem("Save")) {}
             if (c.ImGui_MenuItem("Quit")) {}
+            c.ImGui_EndMenu();
+        }
+        if (c.ImGui_BeginMenu("Scene")) {
+            if (c.ImGui_MenuItem("New")) {}
+            if (c.ImGui_MenuItem("Load")) {}
+            if (c.ImGui_MenuItem("Save")) {}
             c.ImGui_EndMenu();
         }
         if (c.ImGui_BeginMenu("Edit")) {
@@ -327,11 +334,11 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             c.ImGui_EndMenu();
         }
         c.ImGui_SetCursorPosX((c.ImGui_GetCursorPosX() - (13 * 3)) + (GameApp.window_extent.width / 2) - c.ImGui_GetCursorPosX());
-        if (c.ImGui_ImageButton("Play", if (self.play) self.stop_icon_ds else self.play_icon_ds, c.ImVec2{ .x = 13, .y = 13 })) {
+        if (c.ImGui_ImageButton("Play", if (self.play) stop_icon_ds else play_icon_ds, c.ImVec2{ .x = 13, .y = 13 })) {
             self.play = !self.play;
         }
-        _ = c.ImGui_ImageButton("Pause", self.pause_icon_ds, c.ImVec2{ .x = 13, .y = 13 });
-        _ = c.ImGui_ImageButton("Next", self.fast_forward_icon_ds, c.ImVec2{ .x = 13, .y = 13 });
+        _ = c.ImGui_ImageButton("Pause", pause_icon_ds, c.ImVec2{ .x = 13, .y = 13 });
+        _ = c.ImGui_ImageButton("Next", fast_forward_icon_ds, c.ImVec2{ .x = 13, .y = 13 });
         c.ImGui_EndMainMenuBar();
     }
 
@@ -395,261 +402,267 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
 
     c.ImGui_End();
 
-    _ = c.ImGui_Begin("Hierarchy", null, 0);
-    {
-        var i: usize = 0;
-        while (i < ctx.engine.scene.root.children.items.len) : (i += 1) {
-            self.drawHierarchyNode(ctx.engine.scene.root.children.items[i]);
-        }
-    }
-    var avail = c.ImGui_GetContentRegionAvail();
-    _ = c.ImGui_InvisibleButton("outside-the-tree", c.ImVec2{ .x = avail.x, .y = avail.y }, 0);
-    if (c.ImGui_BeginDragDropTarget()) {
-        if (c.ImGui_AcceptDragDropPayload("Object", 0)) |payload| {
-            const payload_obj: ?**Object = @ptrCast(@alignCast(payload.*.Data.?));
-            if (payload_obj) |p| {
-                _ = p.*.ref();
-                p.*.parent.?.removeChildren(p.*);
-                ctx.engine.scene.root.addChildren(p.*);
-                p.*.deref();
+    if (c.ImGui_Begin("Hierarchy", null, 0)) {
+        {
+            var i: usize = 0;
+            while (i < ctx.engine.scene.root.children.items.len) : (i += 1) {
+                self.drawHierarchyNode(ctx.engine.scene.root.children.items[i]);
             }
         }
-        c.ImGui_EndDragDropTarget();
-    }
-    c.ImGui_End();
-
-    _ = c.ImGui_Begin("Project", null, 0);
-    const item_sz = 64;
-    const bread_crumb_height = c.ImGui_GetFrameHeight() + (2 * c.ImGui_GetStyle().*.FramePadding.y);
-    const col_count = @max(1, c.ImGui_GetContentRegionAvail().x / (item_sz + 32));
-    avail = c.ImGui_GetContentRegionAvail();
-    const grid_size = c.ImVec2{ .x = avail.x, .y = avail.y - bread_crumb_height };
-    _ = c.ImGui_BeginChildFrameEx(c.ImGui_GetID("files grid"), grid_size, c.ImGuiWindowFlags_NoBackground);
-    c.ImGui_ColumnsEx(@intFromFloat(col_count), "dir", false);
-    const ItemDrawer = struct {
-        fn draw(icon: c.VkDescriptorSet, name: []const u8, arg: usize) void {
-            c.ImGui_Spacing();
-            c.ImGui_Spacing();
-            c.ImGui_Spacing();
-            const text_size = c.ImGui_CalcTextSize(name.ptr);
-            const btn_size = c.ImVec2{
-                .x = @max(item_sz, text_size.x) + (2 * c.ImGui_GetStyle().*.FramePadding.x),
-                .y = item_sz + text_size.y + (2 * c.ImGui_GetStyle().*.FramePadding.y),
-            };
-            const cursor = c.ImGui_GetCursorPos();
-            _ = c.ImGui_ButtonEx("###name", btn_size);
-            c.ImGui_SetCursorPos(cursor);
-            c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - item_sz) / 2));
-            _ = c.ImGui_Image(icon, c.ImVec2{ .x = item_sz, .y = item_sz });
-            c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - text_size.x) / 2));
-            _ = c.ImGui_Text(name.ptr, arg);
-            c.ImGui_Spacing();
-            c.ImGui_Spacing();
-            c.ImGui_Spacing();
+        const avail = c.ImGui_GetContentRegionAvail();
+        _ = c.ImGui_InvisibleButton("outside-the-tree", c.ImVec2{ .x = avail.x, .y = avail.y }, 0);
+        if (c.ImGui_BeginDragDropTarget()) {
+            if (c.ImGui_AcceptDragDropPayload("Object", 0)) |payload| {
+                const payload_obj: ?**Object = @ptrCast(@alignCast(payload.*.Data.?));
+                if (payload_obj) |p| {
+                    _ = p.*.ref();
+                    p.*.parent.?.removeChildren(p.*);
+                    ctx.engine.scene.root.addChildren(p.*);
+                    p.*.deref();
+                }
+            }
+            c.ImGui_EndDragDropTarget();
         }
-    };
-    for (0..10) |i| {
-        const is_dir = i < 3;
-        const name = if (is_dir) "New Folder (%d)" else "Script-%d.lua";
-        const icon = if (is_dir) self.folder_icon_ds else self.file_icon_ds;
-        ItemDrawer.draw(icon, name, i + 1);
-        c.ImGui_NextColumn();
-    }
-    c.ImGui_EndChildFrame();
-    const crumbs = [3][]const u8{ "Project", "Directory one", "Dir2" };
-    for (crumbs) |crumb| {
-        _ = c.ImGui_Button(crumb.ptr);
-        c.ImGui_SameLineEx(0, 0);
-        c.ImGui_BeginDisabled(true);
-        _ = c.ImGui_ArrowButton("sep", c.ImGuiDir_Right);
-        c.ImGui_EndDisabled();
-        c.ImGui_SameLineEx(0, 0);
-    }
-
-    _ = c.ImGui_Text("[You are here]");
-    c.ImGui_End();
-
-    _ = c.ImGui_Begin("Properties", null, 0);
-    if (self.selection) |selection| {
-        self.drawProperties(selection);
     }
     c.ImGui_End();
 
-    _ = c.ImGui_Begin("Game", null, 0);
-    self.is_game_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
-    const game_image = c.ImGui_GetWindowDrawList();
-    self.game_view_size = c.ImGui_GetWindowSize();
+    if (c.ImGui_Begin("Project", null, 0)) {
+        const item_sz = 64;
+        const bread_crumb_height = c.ImGui_GetFrameHeight() + (2 * c.ImGui_GetStyle().*.FramePadding.y);
+        const col_count = @max(1, c.ImGui_GetContentRegionAvail().x / (item_sz + 32));
+        const avail = c.ImGui_GetContentRegionAvail();
+        const grid_size = c.ImVec2{ .x = avail.x, .y = avail.y - bread_crumb_height };
+        if (c.ImGui_BeginChildFrameEx(c.ImGui_GetID("files grid"), grid_size, c.ImGuiWindowFlags_NoBackground)) {
+            c.ImGui_ColumnsEx(@intFromFloat(col_count), "dir", false);
+            const ItemDrawer = struct {
+                fn draw(icon: c.VkDescriptorSet, name: []const u8, arg: usize) void {
+                    c.ImGui_Spacing();
+                    c.ImGui_Spacing();
+                    c.ImGui_Spacing();
+                    const text_size = c.ImGui_CalcTextSize(name.ptr);
+                    const btn_size = c.ImVec2{
+                        .x = @max(item_sz, text_size.x) + (2 * c.ImGui_GetStyle().*.FramePadding.x),
+                        .y = item_sz + text_size.y + (2 * c.ImGui_GetStyle().*.FramePadding.y),
+                    };
+                    const cursor = c.ImGui_GetCursorPos();
+                    _ = c.ImGui_ButtonEx("###name", btn_size);
+                    c.ImGui_SetCursorPos(cursor);
+                    c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - item_sz) / 2));
+                    _ = c.ImGui_Image(icon, c.ImVec2{ .x = item_sz, .y = item_sz });
+                    c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - text_size.x) / 2));
+                    _ = c.ImGui_Text(name.ptr, arg);
+                    c.ImGui_Spacing();
+                    c.ImGui_Spacing();
+                    c.ImGui_Spacing();
+                }
+            };
+            for (0..10) |i| {
+                const is_dir = i < 3;
+                const name = if (is_dir) "New Folder (%d)" else "Script-%d.lua";
+                const icon = if (is_dir) folder_icon_ds else file_icon_ds;
+                ItemDrawer.draw(icon, name, i + 1);
+                c.ImGui_NextColumn();
+            }
+            c.ImGui_EndChildFrame();
+        }
+        const crumbs = [3][]const u8{ "Project", "Directory one", "Dir2" };
+        for (crumbs) |crumb| {
+            _ = c.ImGui_Button(crumb.ptr);
+            c.ImGui_SameLineEx(0, 0);
+            c.ImGui_BeginDisabled(true);
+            _ = c.ImGui_ArrowButton("sep", c.ImGuiDir_Right);
+            c.ImGui_EndDisabled();
+            c.ImGui_SameLineEx(0, 0);
+        }
+
+        _ = c.ImGui_Text("[You are here]");
+    }
+    c.ImGui_End();
+
+    if (c.ImGui_Begin("Properties", null, 0)) {
+        if (self.selection) |selection| {
+            self.drawProperties(selection);
+        }
+    }
+    c.ImGui_End();
+
     const FrameData = struct { app: *GameApp, cmd: GameApp.RenderCommand, d: *Self };
     var frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .d = self };
-    c.ImDrawList_AddCallback(game_image, extern struct {
-        fn f(dl: [*c]const c.ImDrawList, dc: [*c]const c.ImDrawCmd) callconv(.C) void {
-            _ = dl;
-            const me: *FrameData = @alignCast(@ptrCast(dc.*.UserCallbackData));
-            const cr = dc.*.ClipRect;
-            me.d.game_window_rect = cr;
-            const w = cr.z - cr.x;
-            const h = cr.w - cr.y;
+    if (c.ImGui_Begin("Game", null, 0)) {
+        self.is_game_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
+        const game_image = c.ImGui_GetWindowDrawList();
+        self.game_view_size = c.ImGui_GetWindowSize();
+        c.ImDrawList_AddCallback(game_image, extern struct {
+            fn f(dl: [*c]const c.ImDrawList, dc: [*c]const c.ImDrawCmd) callconv(.C) void {
+                _ = dl;
+                const me: *FrameData = @alignCast(@ptrCast(dc.*.UserCallbackData));
+                const cr = dc.*.ClipRect;
+                me.d.game_window_rect = cr;
+                const w = cr.z - cr.x;
+                const h = cr.w - cr.y;
 
-            me.app.engine.beginAdditiveRenderPass(me.cmd);
+                me.app.engine.beginAdditiveRenderPass(me.cmd);
 
-            c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
-                .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
-                .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
-            }});
+                c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
+                    .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
+                    .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
+                }});
 
-            const vx = if (cr.x > 0) cr.x else cr.z - me.d.game_view_size.x;
-            c.vkCmdSetViewport(me.cmd, 0, 1, &[_]c.VkViewport{.{
-                .x = vx,
-                .y = cr.y,
-                .width = me.d.game_view_size.x,
-                .height = me.d.game_view_size.y,
-                .minDepth = 0.0,
-                .maxDepth = 1.0,
-            }});
+                const vx = if (cr.x > 0) cr.x else cr.z - me.d.game_view_size.x;
+                c.vkCmdSetViewport(me.cmd, 0, 1, &[_]c.VkViewport{.{
+                    .x = vx,
+                    .y = cr.y,
+                    .width = me.d.game_view_size.x,
+                    .height = me.d.game_view_size.y,
+                    .minDepth = 0.0,
+                    .maxDepth = 1.0,
+                }});
 
-            const aspect = me.d.game_view_size.x / me.d.game_view_size.y;
-            if (me.app.engine.main_camera) |main_camera| {
-                main_camera.updateMatrices(
-                    main_camera.object.transform.position(),
-                    Vec3.ZERO,
-                    aspect,
-                );
+                const aspect = me.d.game_view_size.x / me.d.game_view_size.y;
+                if (me.app.engine.main_camera) |main_camera| {
+                    main_camera.updateMatrices(
+                        main_camera.object.transform.position(),
+                        Vec3.ZERO,
+                        aspect,
+                    );
+                    me.app.engine.drawObjects(
+                        me.cmd,
+                        me.app.engine.scene.renderables.items,
+                        me.app.engine.camera_and_scene_buffer,
+                        me.app.engine.camera_and_scene_set,
+                        main_camera,
+                    );
+                }
+
+                c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
+                    .offset = .{ .x = 0, .y = 0 },
+                    .extent = GameApp.window_extent,
+                }});
+            }
+        }.f, &frame_userdata);
+        c.ImDrawList_AddCallback(game_image, c.ImDrawCallback_ResetRenderState, null);
+        if (ctx.engine.main_camera == null) {
+            const text = "No Camera";
+            const size = c.ImGui_CalcTextSize(text);
+            const avail = c.ImGui_GetContentRegionAvail();
+            const style = c.ImGui_GetStyle();
+            c.ImGui_SetCursorPos(c.ImVec2{
+                .x = (avail.x - size.x) / 2,
+                .y = (avail.y - size.y + style.*.WindowPadding.y) / 2,
+            });
+            c.ImGui_Text(text);
+        }
+    }
+    c.ImGui_End();
+
+    if (c.ImGui_Begin("Scene", null, 0)) {
+        self.is_scene_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
+        const editor_image = c.ImGui_GetWindowDrawList();
+        self.scene_view_size = c.ImGui_GetWindowSize();
+
+        c.ImDrawList_AddCallback(editor_image, extern struct {
+            fn f(dl: [*c]const c.ImDrawList, dc: [*c]const c.ImDrawCmd) callconv(.C) void {
+                _ = dl;
+                const me: *FrameData = @alignCast(@ptrCast(dc.*.UserCallbackData));
+                const cr = dc.*.ClipRect;
+                me.d.scene_window_rect = cr;
+                const w = cr.z - cr.x;
+                const h = cr.w - cr.y;
+
+                me.app.engine.beginAdditiveRenderPass(me.cmd);
+                c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
+                    .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
+                    .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
+                }});
+
+                const vx = if (cr.x > 0) cr.x else cr.z - me.d.scene_view_size.x;
+                c.vkCmdSetViewport(me.cmd, 0, 1, &[_]c.VkViewport{.{
+                    .x = vx,
+                    .y = cr.y,
+                    .width = me.d.scene_view_size.x,
+                    .height = me.d.scene_view_size.y,
+                    .minDepth = 0.0,
+                    .maxDepth = 1.0,
+                }});
+
+                const aspect = me.d.scene_view_size.x / me.d.scene_view_size.y;
+                me.d.camera.updateMatrices(me.d.camera_pos, me.d.camera_rot, aspect);
                 me.app.engine.drawObjects(
                     me.cmd,
                     me.app.engine.scene.renderables.items,
-                    me.app.engine.camera_and_scene_buffer,
-                    me.app.engine.camera_and_scene_set,
-                    main_camera,
+                    me.d.editor_camera_and_scene_buffer,
+                    me.d.editor_camera_and_scene_set,
+                    &me.d.camera,
                 );
+
+                c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
+                    .offset = .{ .x = 0, .y = 0 },
+                    .extent = GameApp.window_extent,
+                }});
             }
+        }.f, &frame_userdata);
+        c.ImDrawList_AddCallback(editor_image, c.ImDrawCallback_ResetRenderState, null);
 
-            c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
-                .offset = .{ .x = 0, .y = 0 },
-                .extent = GameApp.window_extent,
-            }});
-        }
-    }.f, &frame_userdata);
-    c.ImDrawList_AddCallback(game_image, c.ImDrawCallback_ResetRenderState, null);
-    if (ctx.engine.main_camera == null) {
-        const text = "No Camera";
-        const size = c.ImGui_CalcTextSize(text);
-        avail = c.ImGui_GetContentRegionAvail();
-        const style = c.ImGui_GetStyle();
-        c.ImGui_SetCursorPos(c.ImVec2{
-            .x = (avail.x - size.x) / 2,
-            .y = (avail.y - size.y + style.*.WindowPadding.y) / 2,
-        });
-        c.ImGui_Text(text);
-    }
-    c.ImGui_End();
-
-    _ = c.ImGui_Begin("Scene", null, 0);
-    self.is_scene_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
-    const editor_image = c.ImGui_GetWindowDrawList();
-    self.scene_view_size = c.ImGui_GetWindowSize();
-
-    c.ImDrawList_AddCallback(editor_image, extern struct {
-        fn f(dl: [*c]const c.ImDrawList, dc: [*c]const c.ImDrawCmd) callconv(.C) void {
-            _ = dl;
-            const me: *FrameData = @alignCast(@ptrCast(dc.*.UserCallbackData));
-            const cr = dc.*.ClipRect;
-            me.d.scene_window_rect = cr;
-            const w = cr.z - cr.x;
-            const h = cr.w - cr.y;
-
-            me.app.engine.beginAdditiveRenderPass(me.cmd);
-            c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
-                .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
-                .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
-            }});
-
-            const vx = if (cr.x > 0) cr.x else cr.z - me.d.scene_view_size.x;
-            c.vkCmdSetViewport(me.cmd, 0, 1, &[_]c.VkViewport{.{
-                .x = vx,
-                .y = cr.y,
-                .width = me.d.scene_view_size.x,
-                .height = me.d.scene_view_size.y,
-                .minDepth = 0.0,
-                .maxDepth = 1.0,
-            }});
-
-            const aspect = me.d.scene_view_size.x / me.d.scene_view_size.y;
-            me.d.camera.updateMatrices(me.d.camera_pos, me.d.camera_rot, aspect);
-            me.app.engine.drawObjects(
-                me.cmd,
-                me.app.engine.scene.renderables.items,
-                me.d.editor_camera_and_scene_buffer,
-                me.d.editor_camera_and_scene_set,
-                &me.d.camera,
+        const icon_sz = c.ImVec2{ .x = 16, .y = 16 };
+        const normal_col = c.ImGui_GetStyle().*.Colors[c.ImGuiCol_Button];
+        const active_col = c.ImGui_GetStyle().*.Colors[c.ImGuiCol_ButtonHovered];
+        if (c.ImGui_BeginChildFrame(c.ImGui_GetID("##toolbox"), c.ImVec2{
+            .x = icon_sz.x + (c.ImGui_GetStyle().*.FramePadding.x * 4),
+            .y = (icon_sz.y + c.ImGui_GetStyle().*.FramePadding.y * 4) * 3,
+        })) {
+            var clicked = false;
+            c.ImGui_PushStyleColorImVec4(
+                c.ImGuiCol_Button,
+                if (self.active_tool == .move) active_col else normal_col,
             );
 
-            c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
-                .offset = .{ .x = 0, .y = 0 },
-                .extent = GameApp.window_extent,
-            }});
-        }
-    }.f, &frame_userdata);
-    c.ImDrawList_AddCallback(editor_image, c.ImDrawCallback_ResetRenderState, null);
+            clicked = c.ImGui_ImageButton("##move-tool", move_tool_icon_ds, icon_sz);
+            c.ImGui_PopStyleColor();
+            if (clicked) {
+                self.active_tool = .move;
+            }
 
-    const icon_sz = c.ImVec2{ .x = 16, .y = 16 };
-    const normal_col = c.ImGui_GetStyle().*.Colors[c.ImGuiCol_Button];
-    const active_col = c.ImGui_GetStyle().*.Colors[c.ImGuiCol_ButtonHovered];
-    if (c.ImGui_BeginChildFrame(c.ImGui_GetID("##toolbox"), c.ImVec2{
-        .x = icon_sz.x + (c.ImGui_GetStyle().*.FramePadding.x * 4),
-        .y = (icon_sz.y + c.ImGui_GetStyle().*.FramePadding.y * 4) * 3,
-    })) {
-        var clicked = false;
-        c.ImGui_PushStyleColorImVec4(
-            c.ImGuiCol_Button,
-            if (self.active_tool == .move) active_col else normal_col,
-        );
+            c.ImGui_PushStyleColorImVec4(
+                c.ImGuiCol_Button,
+                if (self.active_tool == .rotate) active_col else normal_col,
+            );
+            clicked = c.ImGui_ImageButton("##rotate-tool", rotate_tool_icon_ds, icon_sz);
+            c.ImGui_PopStyleColor();
+            if (clicked) {
+                self.active_tool = .rotate;
+            }
 
-        clicked = c.ImGui_ImageButton("##move-tool", self.move_tool_icon_ds, icon_sz);
-        c.ImGui_PopStyleColor();
-        if (clicked) {
-            self.active_tool = .move;
-        }
+            c.ImGui_PushStyleColorImVec4(
+                c.ImGuiCol_Button,
+                if (self.active_tool == .scale) active_col else normal_col,
+            );
+            clicked = c.ImGui_ImageButton("##scale-tool", scale_tool_icon_ds, icon_sz);
+            c.ImGui_PopStyleColor();
+            if (clicked) {
+                self.active_tool = .scale;
+            }
 
-        c.ImGui_PushStyleColorImVec4(
-            c.ImGuiCol_Button,
-            if (self.active_tool == .rotate) active_col else normal_col,
-        );
-        clicked = c.ImGui_ImageButton("##rotate-tool", self.rotate_tool_icon_ds, icon_sz);
-        c.ImGui_PopStyleColor();
-        if (clicked) {
-            self.active_tool = .rotate;
+            c.ImGui_EndChildFrame();
         }
 
-        c.ImGui_PushStyleColorImVec4(
-            c.ImGuiCol_Button,
-            if (self.active_tool == .scale) active_col else normal_col,
-        );
-        clicked = c.ImGui_ImageButton("##scale-tool", self.scale_tool_icon_ds, icon_sz);
-        c.ImGui_PopStyleColor();
-        if (clicked) {
-            self.active_tool = .scale;
-        }
+        gizmo.newFrame(editor_image, self.camera.view, self.camera.view_projection, .{
+            .x = self.scene_window_rect.x,
+            .y = self.scene_window_rect.y,
+            .width = self.scene_view_size.x,
+            .height = self.scene_view_size.y,
+        });
 
-        c.ImGui_EndChildFrame();
+        if (self.selection) |selection| {
+            gizmo.drawBoundingBox(selection.bounds()) catch @panic("error");
+            const transform = &selection.transform;
+            gizmo.manipulate(
+                transform.position(),
+                transform.rotation(),
+                transform.scale(),
+            ) catch @panic("error");
+        }
+        gizmo.endFrame();
     }
-
-    gizmo.newFrame(editor_image, self.camera.view, self.camera.view_projection, .{
-        .x = self.scene_window_rect.x,
-        .y = self.scene_window_rect.y,
-        .width = self.scene_view_size.x,
-        .height = self.scene_view_size.y,
-    });
-
-    if (self.selection) |selection| {
-        gizmo.drawBoundingBox(selection.bounds()) catch @panic("error");
-        const transform = &selection.transform;
-        gizmo.manipulate(
-            transform.position(),
-            transform.rotation(),
-            transform.scale(),
-        ) catch @panic("error");
-    }
-    gizmo.endFrame();
     c.ImGui_End();
 
     c.ImGui_Render();
@@ -722,7 +735,7 @@ fn init_descriptors(self: *Self, engine: *Engine) void {
     c.vkUpdateDescriptorSets(engine.device, @as(u32, @intCast(editor_camera_and_scene_writes.len)), &editor_camera_and_scene_writes[0], 0, null);
 }
 
-fn init_imgui(self: *Self, engine: *Engine) void {
+fn init_imgui(engine: *Engine) void {
     const pool_sizes = [_]c.VkDescriptorPoolSize{
         .{
             .type = c.VK_DESCRIPTOR_TYPE_SAMPLER,
@@ -797,21 +810,25 @@ fn init_imgui(self: *Self, engine: *Engine) void {
     });
 
     const io = c.ImGui_GetIO();
-    _ = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/editor/fonts/roboto.ttf", 14, null, null);
+    roboto14 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/editor/fonts/roboto.ttf", 14, null, null);
+    roboto24 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/editor/fonts/roboto.ttf", 24, null, null);
+    roboto32 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/editor/fonts/roboto.ttf", 32, null, null);
 
     _ = c.cImGui_ImplVulkan_Init(&init_info, engine.render_pass);
     _ = c.cImGui_ImplVulkan_CreateFontsTexture();
 
-    self.play_icon_ds = create_imgui_texture("assets/editor/icons/play.png", engine);
-    self.pause_icon_ds = create_imgui_texture("assets/editor/icons/pause.png", engine);
-    self.stop_icon_ds = create_imgui_texture("assets/editor/icons/stop.png", engine);
-    self.fast_forward_icon_ds = create_imgui_texture("assets/editor/icons/fast-forward.png", engine);
-    self.folder_icon_ds = create_imgui_texture("assets/editor/icons/folder.png", engine);
-    self.file_icon_ds = create_imgui_texture("assets/editor/icons/file.png", engine);
-    self.object_icon_ds = create_imgui_texture("assets/editor/icons/object.png", engine);
-    self.move_tool_icon_ds = create_imgui_texture("assets/editor/icons/move-tool.png", engine);
-    self.rotate_tool_icon_ds = create_imgui_texture("assets/editor/icons/rotate-tool.png", engine);
-    self.scale_tool_icon_ds = create_imgui_texture("assets/editor/icons/scale-tool.png", engine);
+    play_icon_ds = create_imgui_texture("assets/editor/icons/play.png", engine);
+    pause_icon_ds = create_imgui_texture("assets/editor/icons/pause.png", engine);
+    stop_icon_ds = create_imgui_texture("assets/editor/icons/stop.png", engine);
+    fast_forward_icon_ds = create_imgui_texture("assets/editor/icons/fast-forward.png", engine);
+    folder_icon_ds = create_imgui_texture("assets/editor/icons/folder.png", engine);
+    file_icon_ds = create_imgui_texture("assets/editor/icons/file.png", engine);
+    object_icon_ds = create_imgui_texture("assets/editor/icons/object.png", engine);
+    move_tool_icon_ds = create_imgui_texture("assets/editor/icons/move-tool.png", engine);
+    rotate_tool_icon_ds = create_imgui_texture("assets/editor/icons/rotate-tool.png", engine);
+    scale_tool_icon_ds = create_imgui_texture("assets/editor/icons/scale-tool.png", engine);
+    close_icon_ds = create_imgui_texture("assets/editor/icons/close.png", engine);
+    browse_icon_ds = create_imgui_texture("assets/editor/icons/browse.png", engine);
 
     engine.deletion_queue.append(VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool)) catch @panic("Out of memory");
 
@@ -888,7 +905,7 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
     }
 
     c.ImGui_SameLine();
-    c.ImGui_Image(self.object_icon_ds, c.ImVec2{ .x = c.ImGui_GetFontSize(), .y = c.ImGui_GetFontSize() });
+    c.ImGui_Image(object_icon_ds, c.ImVec2{ .x = c.ImGui_GetFontSize(), .y = c.ImGui_GetFontSize() });
     c.ImGui_SameLine();
     c.ImGui_Text(obj.name.ptr);
     if (open) {
@@ -917,7 +934,7 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
 fn drawProperties(self: *Self, obj: *Object) void {
     c.ImGui_PushID(&obj.uuid.urn());
     defer c.ImGui_PopID();
-    self.editors.editObjectMeta(obj, self.object_icon_ds);
+    self.editors.editObjectMeta(obj, object_icon_ds);
     c.ImGui_Spacing();
     c.ImGui_Separator();
     c.ImGui_Spacing();
@@ -1098,3 +1115,22 @@ fn loadImGuiTheme() void {
     style.*.Colors[c.ImGuiCol_NavWindowingDimBg] = c.ImVec4{ .x = 0.800000011920929, .y = 0.800000011920929, .z = 0.800000011920929, .w = 0.2000000029802322 };
     style.*.Colors[c.ImGuiCol_ModalWindowDimBg] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
 }
+
+pub var roboto14: *c.ImFont = undefined;
+pub var roboto24: *c.ImFont = undefined;
+pub var roboto32: *c.ImFont = undefined;
+
+// assets
+
+pub var play_icon_ds: c.VkDescriptorSet = undefined;
+pub var pause_icon_ds: c.VkDescriptorSet = undefined;
+pub var stop_icon_ds: c.VkDescriptorSet = undefined;
+pub var fast_forward_icon_ds: c.VkDescriptorSet = undefined;
+pub var folder_icon_ds: c.VkDescriptorSet = undefined;
+pub var file_icon_ds: c.VkDescriptorSet = undefined;
+pub var object_icon_ds: c.VkDescriptorSet = undefined;
+pub var move_tool_icon_ds: c.VkDescriptorSet = undefined;
+pub var rotate_tool_icon_ds: c.VkDescriptorSet = undefined;
+pub var scale_tool_icon_ds: c.VkDescriptorSet = undefined;
+pub var close_icon_ds: c.VkDescriptorSet = undefined;
+pub var browse_icon_ds: c.VkDescriptorSet = undefined;
