@@ -227,7 +227,7 @@ pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
     engine.initInstance();
 
     // Create the window surface
-    utils.checkSdlBool(c.SDL_Vulkan_CreateSurface(window, engine.instance, vk_alloc_cbs, &engine.surface));
+    utils.checkSdl(c.SDL_Vulkan_CreateSurface(window, engine.instance, vk_alloc_cbs, &engine.surface));
 
     engine.initDevice();
 

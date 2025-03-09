@@ -100,6 +100,11 @@ CIMGUI_IMPL_API bool cimgui::cImGui_ImplSDL3_InitForSDLRenderer(cimgui::SDL_Wind
     return ::ImGui_ImplSDL3_InitForSDLRenderer(reinterpret_cast<::SDL_Window*>(window), reinterpret_cast<::SDL_Renderer*>(renderer));
 }
 
+CIMGUI_IMPL_API bool cimgui::cImGui_ImplSDL3_InitForSDLGPU(cimgui::SDL_Window* window)
+{
+    return ::ImGui_ImplSDL3_InitForSDLGPU(reinterpret_cast<::SDL_Window*>(window));
+}
+
 CIMGUI_IMPL_API bool cimgui::cImGui_ImplSDL3_InitForOther(cimgui::SDL_Window* window)
 {
     return ::ImGui_ImplSDL3_InitForOther(reinterpret_cast<::SDL_Window*>(window));
@@ -118,6 +123,16 @@ CIMGUI_IMPL_API void cimgui::cImGui_ImplSDL3_NewFrame(void)
 CIMGUI_IMPL_API bool cimgui::cImGui_ImplSDL3_ProcessEvent(const SDL_Event* event)
 {
     return ::ImGui_ImplSDL3_ProcessEvent(event);
+}
+
+CIMGUI_IMPL_API void cimgui::cImGui_ImplSDL3_SetGamepadMode(cimgui::ImGui_ImplSDL3_GamepadMode mode)
+{
+    ::ImGui_ImplSDL3_SetGamepadMode(static_cast<::ImGui_ImplSDL3_GamepadMode>(mode));
+}
+
+CIMGUI_IMPL_API void cimgui::cImGui_ImplSDL3_SetGamepadModeEx(cimgui::ImGui_ImplSDL3_GamepadMode mode, cimgui::SDL_Gamepad** manual_gamepads_array, int manual_gamepads_count)
+{
+    ::ImGui_ImplSDL3_SetGamepadMode(static_cast<::ImGui_ImplSDL3_GamepadMode>(mode), reinterpret_cast<::SDL_Gamepad**>(manual_gamepads_array), manual_gamepads_count);
 }
 
 #endif // #ifndef IMGUI_DISABLE

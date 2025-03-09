@@ -33,7 +33,7 @@ pub fn inputFilePath(
     c.ImGui_PushItemWidth(c.ImGui_CalcItemWidth() - (browseButtonSize + (4 * c.ImGui_GetStyle().*.FramePadding.x)));
     const changed = c.ImGui_InputTextEx(label, path_buf, buf_size, flags | c.ImGuiInputTextFlags_ReadOnly, callback, user_data);
     c.ImGui_SameLine();
-    if (c.ImGui_ImageButton("browse", Editor.browse_icon_ds, c.ImVec2{ .x = browseButtonSize, .y = browseButtonSize })) {}
+    if (c.ImGui_ImageButton("browse", @intFromPtr(Editor.browse_icon_ds), c.ImVec2{ .x = browseButtonSize, .y = browseButtonSize })) {}
     c.ImGui_PopItemWidth();
 
     return changed;

@@ -16,6 +16,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    engine_c_libs.use_clang = true;
     engine_c_libs.addIncludeDir("vendor/ufbx/");
     engine_c_libs.addIncludeDir("vendor/sdl3/include");
     engine_c_libs.addIncludeDir("vendor/vma/");
@@ -102,6 +103,7 @@ pub fn build(b: *std.Build) !void {
     if (env_map.get("VK_SDK_PATH")) |path| {
         imgui_lib.addIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM") });
     }
+    imgui_lib.defineCMacro("IMGUI_USE_LEGACY_CRC32_ADLER", null);
     imgui_lib.addIncludePath(b.path("vendor/imgui/"));
     imgui_lib.addIncludePath(b.path("vendor/sdl3/include/"));
     imgui_lib.linkLibCpp();

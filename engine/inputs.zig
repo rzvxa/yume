@@ -267,8 +267,10 @@ pub const KeyState = enum(u1) {
 
 pub const InputContext = struct {
     const Self = @This();
-    const ScancodeStates = [c.SDL_NUM_SCANCODES]KeyState;
+    const ScancodeStates = [c.SDL_SCANCODE_COUNT]KeyState;
     const MouseButtonStates = [3]KeyState; // Assuming left, middle, and right mouse buttons
+
+    window: *c.SDL_Window,
 
     by_scancode: ScancodeStates = std.mem.zeroes(ScancodeStates),
     by_mouse_button: MouseButtonStates = std.mem.zeroes(MouseButtonStates),
@@ -285,10 +287,10 @@ pub const InputContext = struct {
     pub fn push(self: *Self, e: *c.SDL_Event) void {
         switch (e.type) {
             c.SDL_EVENT_KEY_DOWN => {
-                self.by_scancode[e.key.keysym.scancode] = KeyState.Down;
+                self.by_scancode[e.key.scancode] = KeyState.Down;
             },
             c.SDL_EVENT_KEY_UP => {
-                self.by_scancode[e.key.keysym.scancode] = KeyState.Up;
+                self.by_scancode[e.key.scancode] = KeyState.Up;
             },
             c.SDL_EVENT_MOUSE_WHEEL => {
                 self.mouse_wheel = Vec2.make(e.wheel.x, e.wheel.y);
@@ -316,7 +318,7 @@ pub const InputContext = struct {
                 self.mouse_delta = new_mouse_pos.sub(self.mouse_pos);
                 self.mouse_pos = new_mouse_pos;
 
-                if (c.SDL_GetRelativeMouseMode() == c.SDL_TRUE) {
+                if (c.SDL_GetWindowRelativeMouseMode(self.window)) {
                     self.mouse_rel = Vec2.make(e.motion.xrel, e.motion.yrel);
                 }
             },
@@ -368,23 +370,22 @@ pub const InputContext = struct {
     }
 
     pub inline fn setRelativeMouseMode(self: *Self, enabled: bool) void {
-        _ = self;
-        if (c.SDL_GetRelativeMouseMode() != c.SDL_TRUE) {
+        if (!c.SDL_GetWindowRelativeMouseMode(self.window)) {
             _ = c.SDL_GetRelativeMouseState(null, null);
         }
-        _ = c.SDL_SetRelativeMouseMode(if (enabled) c.SDL_TRUE else c.SDL_FALSE);
+        _ = c.SDL_SetWindowRelativeMouseMode(self.window, enabled);
     }
 };
 
 // singleton global context
 var context: ?InputContext = null;
 
-pub fn init() error{AlreadyInitialized}!*InputContext {
+pub fn init(window: *c.SDL_Window) error{AlreadyInitialized}!*InputContext {
     if (context != null) {
         return error.AlreadyInitialized;
     }
 
-    context = .{};
+    context = .{ .window = window };
     return &context.?;
 }
 

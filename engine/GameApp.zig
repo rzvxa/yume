@@ -43,7 +43,7 @@ pub fn init(a: std.mem.Allocator, window_title: []const u8) *Self {
         .window_title = window_title,
         .allocator = a,
         .window = window,
-        .inputs = inputs.init() catch @panic("Failed to initialize input manager"),
+        .inputs = inputs.init(window) catch @panic("Failed to initialize input manager"),
         .engine = engine,
     };
 
@@ -62,7 +62,7 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
         if (comptime canDispatch(Dispatcher, "newFrame")) {
             d.newFrame(self);
         }
-        while (c.SDL_PollEvent(&event) != 0) {
+        while (c.SDL_PollEvent(&event)) {
             if (event.type == c.SDL_EVENT_MOUSE_MOTION) {
                 self.mouse.x = event.motion.x;
                 self.mouse.y = event.motion.y;

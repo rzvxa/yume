@@ -47,7 +47,7 @@ const ManipulationTool = enum {
 
 const Self = @This();
 
-inputs: InputsContext = .{},
+inputs: InputsContext,
 
 selection: ?*Object = null,
 
@@ -89,6 +89,7 @@ new_project_modal: NewProjectModal,
 
 pub fn init(ctx: *GameApp) Self {
     var self = Self{
+        .inputs = InputsContext{ .window = ctx.window },
         .editors = Editors.init(ctx.allocator),
         .new_project_modal = NewProjectModal.init(ctx.allocator),
     };
@@ -201,7 +202,7 @@ pub fn processEvent(self: *Self, ctx: *GameApp, event: *c.SDL_Event) bool {
     _ = c.cImGui_ImplSDL3_ProcessEvent(event);
     switch (event.type) {
         c.SDL_EVENT_KEY_UP => {
-            if (event.key.keysym.scancode == c.SDL_SCANCODE_ESCAPE) {
+            if (event.key.scancode == c.SDL_SCANCODE_ESCAPE) {
                 c.ImGui_FocusWindow(null, c.ImGuiFocusRequestFlags_None);
             }
         },
@@ -334,11 +335,11 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             c.ImGui_EndMenu();
         }
         c.ImGui_SetCursorPosX((c.ImGui_GetCursorPosX() - (13 * 3)) + (GameApp.window_extent.width / 2) - c.ImGui_GetCursorPosX());
-        if (c.ImGui_ImageButton("Play", if (self.play) stop_icon_ds else play_icon_ds, c.ImVec2{ .x = 13, .y = 13 })) {
+        if (c.ImGui_ImageButton("Play", @intFromPtr(if (self.play) stop_icon_ds else play_icon_ds), c.ImVec2{ .x = 13, .y = 13 })) {
             self.play = !self.play;
         }
-        _ = c.ImGui_ImageButton("Pause", pause_icon_ds, c.ImVec2{ .x = 13, .y = 13 });
-        _ = c.ImGui_ImageButton("Next", fast_forward_icon_ds, c.ImVec2{ .x = 13, .y = 13 });
+        _ = c.ImGui_ImageButton("Pause", @intFromPtr(pause_icon_ds), c.ImVec2{ .x = 13, .y = 13 });
+        _ = c.ImGui_ImageButton("Next", @intFromPtr(fast_forward_icon_ds), c.ImVec2{ .x = 13, .y = 13 });
         c.ImGui_EndMainMenuBar();
     }
 
@@ -448,7 +449,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
                     _ = c.ImGui_ButtonEx("###name", btn_size);
                     c.ImGui_SetCursorPos(cursor);
                     c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - item_sz) / 2));
-                    _ = c.ImGui_Image(icon, c.ImVec2{ .x = item_sz, .y = item_sz });
+                    _ = c.ImGui_Image(@intFromPtr(icon), c.ImVec2{ .x = item_sz, .y = item_sz });
                     c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - text_size.x) / 2));
                     _ = c.ImGui_Text(name.ptr, arg);
                     c.ImGui_Spacing();
@@ -616,7 +617,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
                 if (self.active_tool == .move) active_col else normal_col,
             );
 
-            clicked = c.ImGui_ImageButton("##move-tool", move_tool_icon_ds, icon_sz);
+            clicked = c.ImGui_ImageButton("##move-tool", @intFromPtr(move_tool_icon_ds), icon_sz);
             c.ImGui_PopStyleColor();
             if (clicked) {
                 self.active_tool = .move;
@@ -626,7 +627,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
                 c.ImGuiCol_Button,
                 if (self.active_tool == .rotate) active_col else normal_col,
             );
-            clicked = c.ImGui_ImageButton("##rotate-tool", rotate_tool_icon_ds, icon_sz);
+            clicked = c.ImGui_ImageButton("##rotate-tool", @intFromPtr(rotate_tool_icon_ds), icon_sz);
             c.ImGui_PopStyleColor();
             if (clicked) {
                 self.active_tool = .rotate;
@@ -636,7 +637,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
                 c.ImGuiCol_Button,
                 if (self.active_tool == .scale) active_col else normal_col,
             );
-            clicked = c.ImGui_ImageButton("##scale-tool", scale_tool_icon_ds, icon_sz);
+            clicked = c.ImGui_ImageButton("##scale-tool", @intFromPtr(scale_tool_icon_ds), icon_sz);
             c.ImGui_PopStyleColor();
             if (clicked) {
                 self.active_tool = .scale;
@@ -801,6 +802,7 @@ fn init_imgui(engine: *Engine) void {
         .Instance = engine.instance,
         .PhysicalDevice = engine.physical_device,
         .Device = engine.device,
+        .RenderPass = engine.render_pass,
         .QueueFamily = engine.graphics_queue_family,
         .Queue = engine.graphics_queue,
         .DescriptorPool = imgui_pool,
@@ -814,7 +816,7 @@ fn init_imgui(engine: *Engine) void {
     roboto24 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/editor/fonts/roboto.ttf", 24, null, null);
     roboto32 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/editor/fonts/roboto.ttf", 32, null, null);
 
-    _ = c.cImGui_ImplVulkan_Init(&init_info, engine.render_pass);
+    _ = c.cImGui_ImplVulkan_Init(&init_info);
     _ = c.cImGui_ImplVulkan_CreateFontsTexture();
 
     play_icon_ds = create_imgui_texture("assets/editor/icons/play.png", engine);
@@ -905,7 +907,7 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
     }
 
     c.ImGui_SameLine();
-    c.ImGui_Image(object_icon_ds, c.ImVec2{ .x = c.ImGui_GetFontSize(), .y = c.ImGui_GetFontSize() });
+    c.ImGui_Image(@intFromPtr(object_icon_ds), c.ImVec2{ .x = c.ImGui_GetFontSize(), .y = c.ImGui_GetFontSize() });
     c.ImGui_SameLine();
     c.ImGui_Text(obj.name.ptr);
     if (open) {
@@ -1056,7 +1058,6 @@ fn loadImGuiTheme() void {
     style.*.GrabRounding = 0.0;
     style.*.TabRounding = 0.0;
     style.*.TabBorderSize = 0.0;
-    style.*.TabMinWidthForCloseButton = 0.0;
     style.*.ColorButtonPosition = c.ImGuiDir_Right;
     style.*.ButtonTextAlign = c.ImVec2{ .x = 0.5, .y = 0.5 };
     style.*.SelectableTextAlign = c.ImVec2{ .x = 0.0, .y = 0.0 };

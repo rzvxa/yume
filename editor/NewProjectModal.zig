@@ -59,7 +59,7 @@ pub fn show(self: *Self) void {
         const close_btn_size = 32;
         c.ImGui_SetCursorPosX(avail.x - (padding_x + close_btn_size));
         c.ImGui_SetCursorPosY(cursor.y + (padding_y + close_btn_size));
-        if (c.ImGui_ImageButton("##close-btn", Editor.close_icon_ds, c.ImVec2{ .x = close_btn_size, .y = close_btn_size })) {
+        if (c.ImGui_ImageButton("##close-btn", @intFromPtr(Editor.close_icon_ds), c.ImVec2{ .x = close_btn_size, .y = close_btn_size })) {
             self.close();
         }
 
