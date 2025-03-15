@@ -47,8 +47,6 @@ const ManipulationTool = enum {
 
 const Self = @This();
 
-inputs: InputsContext,
-
 selection: ?*Object = null,
 
 play: bool = false,
@@ -88,10 +86,10 @@ first_time: bool = true,
 new_project_modal: NewProjectModal,
 
 pub fn init(ctx: *GameApp) Self {
+    inputs = InputsContext{ .window = ctx.window };
     var self = Self{
-        .inputs = InputsContext{ .window = ctx.window },
         .editors = Editors.init(ctx.allocator),
-        .new_project_modal = NewProjectModal.init(ctx.allocator),
+        .new_project_modal = NewProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `NewProjectModal`"),
     };
     self.init_descriptors(&ctx.engine);
     init_imgui(&ctx.engine);
@@ -194,8 +192,8 @@ pub fn deinit(self: *Self, ctx: *GameApp) void {
     c.cImGui_ImplVulkan_Shutdown();
 }
 
-pub fn newFrame(self: *Self, _: *GameApp) void {
-    self.inputs.clear();
+pub fn newFrame(_: *Self, _: *GameApp) void {
+    inputs.clear();
 }
 
 pub fn processEvent(self: *Self, ctx: *GameApp, event: *c.SDL_Event) bool {
@@ -212,7 +210,7 @@ pub fn processEvent(self: *Self, ctx: *GameApp, event: *c.SDL_Event) bool {
     if (self.is_game_window_focused) {
         ctx.inputs.push(event);
     } else if (self.is_scene_window_focused) {
-        self.inputs.push(event);
+        inputs.push(event);
     }
 
     return true;
@@ -243,36 +241,36 @@ pub fn update(self: *Self, ctx: *GameApp) void {
     const left = rot_quat.mulVec3(Vec3.make(-1, 0, 0)).normalized();
     const up = Vec3.cross(left, forward).normalized();
 
-    if (self.inputs.isMouseButtonDown(MouseButton.Middle)) {
-        self.inputs.setRelativeMouseMode(true);
+    if (inputs.isMouseButtonDown(MouseButton.Middle)) {
+        inputs.setRelativeMouseMode(true);
         // Shift + MMB for panning
-        if (self.inputs.isKeyDown(ScanCode.LeftShift)) {
-            const mouse_delta = self.inputs.mouseDelta();
+        if (inputs.isKeyDown(ScanCode.LeftShift)) {
+            const mouse_delta = inputs.mouseDelta();
             input = input.add(left.mulf(mouse_delta.x));
             input = input.add(up.mulf(mouse_delta.y));
         } else { // Camera rotation handling (MMB for orbiting)
-            const mouse_delta = self.inputs.mouseRelative();
+            const mouse_delta = inputs.mouseRelative();
             input_rot.y += mouse_delta.x;
             input_rot.x += mouse_delta.y;
         }
         // Handle translation inputs (W, A, S, D for panning) relative to view
-        input = input.add(forward.mulf(if (self.inputs.isKeyDown(ScanCode.W)) 1 else 0));
-        input = input.sub(forward.mulf(if (self.inputs.isKeyDown(ScanCode.S)) 1 else 0));
-        input = input.add(left.mulf(if (self.inputs.isKeyDown(ScanCode.A)) 1 else 0));
-        input = input.sub(left.mulf(if (self.inputs.isKeyDown(ScanCode.D)) 1 else 0));
-        input = input.add(up.mulf(if (self.inputs.isKeyDown(ScanCode.E)) 1 else 0));
-        input = input.sub(up.mulf(if (self.inputs.isKeyDown(ScanCode.Q)) 1 else 0));
+        input = input.add(forward.mulf(if (inputs.isKeyDown(ScanCode.W)) 1 else 0));
+        input = input.sub(forward.mulf(if (inputs.isKeyDown(ScanCode.S)) 1 else 0));
+        input = input.add(left.mulf(if (inputs.isKeyDown(ScanCode.A)) 1 else 0));
+        input = input.sub(left.mulf(if (inputs.isKeyDown(ScanCode.D)) 1 else 0));
+        input = input.add(up.mulf(if (inputs.isKeyDown(ScanCode.E)) 1 else 0));
+        input = input.sub(up.mulf(if (inputs.isKeyDown(ScanCode.Q)) 1 else 0));
     } else {
-        self.inputs.setRelativeMouseMode(false);
+        inputs.setRelativeMouseMode(false);
     }
 
     // Normalize movement speed
     input = input.normalized().mulf(5);
 
-    if (self.inputs.isKeyDown(ScanCode.LeftCtrl)) {
+    if (inputs.isKeyDown(ScanCode.LeftCtrl)) {
         // Mouse wheel for zooming in and out relative to view direction
-        const wheel = self.inputs.mouseWheel();
-        const scroll_speed: f32 = if (self.inputs.isKeyDown(ScanCode.LeftShift)) 5 else 20;
+        const wheel = inputs.mouseWheel();
+        const scroll_speed: f32 = if (inputs.isKeyDown(ScanCode.LeftShift)) 5 else 20;
         if (wheel.y > 0) {
             input = input.add(forward.mulf(scroll_speed));
         } else if (wheel.y < 0) {
@@ -436,22 +434,24 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         if (c.ImGui_BeginChildFrameEx(c.ImGui_GetID("files grid"), grid_size, c.ImGuiWindowFlags_NoBackground)) {
             c.ImGui_ColumnsEx(@intFromFloat(col_count), "dir", false);
             const ItemDrawer = struct {
-                fn draw(icon: c.VkDescriptorSet, name: []const u8, arg: usize) void {
+                fn draw(icon: c.VkDescriptorSet, name: []const u8) void {
                     c.ImGui_Spacing();
                     c.ImGui_Spacing();
                     c.ImGui_Spacing();
+                    c.ImGui_PushID(name.ptr);
                     const text_size = c.ImGui_CalcTextSize(name.ptr);
                     const btn_size = c.ImVec2{
                         .x = @max(item_sz, text_size.x) + (2 * c.ImGui_GetStyle().*.FramePadding.x),
                         .y = item_sz + text_size.y + (2 * c.ImGui_GetStyle().*.FramePadding.y),
                     };
                     const cursor = c.ImGui_GetCursorPos();
-                    _ = c.ImGui_ButtonEx("###name", btn_size);
+                    _ = c.ImGui_ButtonEx("##name", btn_size);
                     c.ImGui_SetCursorPos(cursor);
                     c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - item_sz) / 2));
                     _ = c.ImGui_Image(@intFromPtr(icon), c.ImVec2{ .x = item_sz, .y = item_sz });
                     c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - text_size.x) / 2));
-                    _ = c.ImGui_Text(name.ptr, arg);
+                    _ = c.ImGui_Text(name.ptr);
+                    c.ImGui_PopID();
                     c.ImGui_Spacing();
                     c.ImGui_Spacing();
                     c.ImGui_Spacing();
@@ -459,9 +459,15 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             };
             for (0..10) |i| {
                 const is_dir = i < 3;
-                const name = if (is_dir) "New Folder (%d)" else "Script-%d.lua";
                 const icon = if (is_dir) folder_icon_ds else file_icon_ds;
-                ItemDrawer.draw(icon, name, i + 1);
+                var name = std.mem.zeroes([256]u8);
+
+                if (is_dir) {
+                    _ = std.fmt.bufPrintZ(&name, "New Folder ({d})", .{i + 1}) catch @panic("buf overflow");
+                } else {
+                    _ = std.fmt.bufPrintZ(&name, "Script-{d}.lua", .{i + 1}) catch @panic("buf overflow");
+                }
+                ItemDrawer.draw(icon, &name);
                 c.ImGui_NextColumn();
             }
             c.ImGui_EndChildFrame();
@@ -1116,6 +1122,8 @@ fn loadImGuiTheme() void {
     style.*.Colors[c.ImGuiCol_NavWindowingDimBg] = c.ImVec4{ .x = 0.800000011920929, .y = 0.800000011920929, .z = 0.800000011920929, .w = 0.2000000029802322 };
     style.*.Colors[c.ImGuiCol_ModalWindowDimBg] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
 }
+
+pub var inputs: InputsContext = undefined;
 
 pub var roboto14: *c.ImFont = undefined;
 pub var roboto24: *c.ImFont = undefined;

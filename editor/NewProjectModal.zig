@@ -1,9 +1,11 @@
 const c = @import("clibs");
 
+const builtin = @import("builtin");
 const std = @import("std");
 
 const imutils = @import("imutils.zig");
 const Editor = @import("Editor.zig");
+const utils = @import("yume").utils;
 
 const Self = @This();
 
@@ -15,13 +17,26 @@ is_open: bool = true,
 project_name: std.ArrayList(u8),
 project_path: std.ArrayList(u8),
 
-pub fn init(allocator: std.mem.Allocator) Self {
+const yume_projects_root = switch (builtin.os.tag) {
+    .windows => "Documents\\Yume Projects",
+    .macos => "Documents/Yume Projects",
+    else => "Yume Projects",
+};
+
+pub fn init(allocator: std.mem.Allocator) !Self {
+    const default_project_name = "New Project";
+    const home_dir = try utils.getHomeDirectoryOwned(allocator);
+    defer allocator.free(home_dir);
+    const default_project_path = try std.fs.path.join(allocator, &[_][]const u8{ home_dir, yume_projects_root });
+    defer allocator.free(default_project_path);
     var self = Self{
         .allocator = allocator,
-        .project_name = std.ArrayList(u8).initCapacity(allocator, 1) catch @panic("OOM"),
-        .project_path = std.ArrayList(u8).initCapacity(allocator, 1) catch @panic("OOM"),
+        .project_name = std.ArrayList(u8).initCapacity(allocator, default_project_name.len + 1) catch @panic("OOM"),
+        .project_path = std.ArrayList(u8).initCapacity(allocator, default_project_path.len + 1) catch @panic("OOM"),
     };
+    self.project_name.appendSliceAssumeCapacity(default_project_name);
     self.project_name.appendAssumeCapacity(0);
+    self.project_path.appendSliceAssumeCapacity(default_project_path);
     self.project_path.appendAssumeCapacity(0);
     return self;
 }
@@ -91,13 +106,17 @@ pub fn show(self: *Self) void {
         callback = imutils.ArrayListU8ResizeCallback{ .buf = &self.project_path };
         c.ImGui_PushItemWidth(-padding_x);
         c.ImGui_PushFont(Editor.roboto24);
-        _ = imutils.inputFilePath(
+        _ = imutils.inputDirPath(
             "##new_project-project_path",
+            Editor.inputs.window,
             self.project_path.items.ptr,
             self.project_path.capacity,
             c.ImGuiInputTextFlags_CallbackResize,
             imutils.ArrayListU8ResizeCallback.InputTextCallback,
             &callback,
+            &onPathSelect,
+            self,
+            false,
         );
         c.ImGui_PopItemWidth();
         c.ImGui_PopFont();
@@ -109,7 +128,9 @@ pub fn show(self: *Self) void {
         cursor = c.ImGui_GetCursorPos();
         c.ImGui_SetCursorPosX(avail.x - (padding_x + create_label_size.x));
         c.ImGui_SetCursorPosY(end_y);
-        _ = c.ImGui_Button(create_label);
+        if (c.ImGui_Button(create_label)) {
+            self.onCreateClick() catch @panic("failed to create the template project");
+        }
         c.ImGui_PopFont();
         for (0..3) |_| c.ImGui_Unindent();
         c.ImGui_EndDisabled();
@@ -117,6 +138,32 @@ pub fn show(self: *Self) void {
     }
 }
 
-pub fn haveValidParams(self: *Self) bool {
+fn onCreateClick(self: *Self) !void {
+    const end: []const u8 = "/";
+    const fullpath = try std.fs.path.join(self.allocator, &[_][]const u8{ self.project_path.items, self.project_name.items, end });
+    defer self.allocator.free(fullpath);
+    if (try utils.pathExists(fullpath)) {
+        return error.PathAlreadyExists;
+    }
+    std.debug.print("Creating directory {s} OK? \n", .{fullpath});
+    // std.fs.makeDirAbsolute
+}
+
+fn onPathSelect(user_data: ?*anyopaque, paths: [*c]const [*c]const u8, _: c_int) callconv(.C) void {
+    var me: *Self = @ptrCast(@alignCast(user_data));
+    if (paths == null) {
+        std.debug.print("SDL error {s}\n", .{c.SDL_GetError()});
+        return;
+    }
+    if (paths[0] == null) {
+        std.debug.print("empty selection\n", .{});
+        return;
+    }
+    me.project_path.clearRetainingCapacity();
+    me.project_path.appendSlice(std.mem.span(paths[0])) catch @panic("OOM");
+    me.project_path.append(0) catch @panic("OOM");
+}
+
+fn haveValidParams(self: *Self) bool {
     return (self.project_name.items.len > 0 and self.project_name.items[0] != 0) and (self.project_path.items.len > 0 and self.project_path.items[0] != 0);
 }
