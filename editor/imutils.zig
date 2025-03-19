@@ -46,3 +46,19 @@ pub fn inputDirPath(
 
     return changed;
 }
+
+pub fn alignHorizontal(item_width: f32, alignment: f32) void {
+    const avail = c.ImGui_GetContentRegionAvail().x;
+
+    const off = (avail - item_width) * alignment;
+    if (off > 0.0) {
+        c.ImGui_SetCursorPosX(c.ImGui_GetCursorPosX() + off);
+    }
+}
+
+pub fn buttonCenteredOnLine(label: [*c]const u8, alignment: f32) bool {
+    const style = c.ImGui_GetStyle();
+    const size = c.ImGui_CalcTextSize(label).x + style.*.FramePadding.x * 2.0;
+    alignHorizontal(size, alignment);
+    return c.ImGui_Button(label);
+}

@@ -38,6 +38,7 @@ const VulkanDeleter = @import("yume").VulkanDeleter;
 const Engine = @import("yume").VulkanEngine;
 
 const NewProjectModal = @import("NewProjectModal.zig");
+const HelloModal = @import("HelloModal.zig");
 
 const ManipulationTool = enum {
     move,
@@ -83,110 +84,113 @@ is_scene_window_focused: bool = false,
 
 first_time: bool = true,
 
+hello_modal: HelloModal,
 new_project_modal: NewProjectModal,
 
-pub fn init(ctx: *GameApp) Self {
+pub fn init(ctx: *GameApp) *Self {
     inputs = InputsContext{ .window = ctx.window };
-    var self = Self{
+    singleton = Self{
         .editors = Editors.init(ctx.allocator),
+        .hello_modal = HelloModal.init() catch @panic("Failed to initialize `HelloModal`"),
         .new_project_modal = NewProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `NewProjectModal`"),
     };
-    self.init_descriptors(&ctx.engine);
+    singleton.init_descriptors(&ctx.engine);
     init_imgui(&ctx.engine);
-    var scene = Scene.init(ctx.allocator) catch @panic("OOM");
-
-    {
-        const main_camera = scene.newObject(.{
-            .name = "Main Camera",
-            .transform = Mat4.translation(Vec3.make(0, 1, 0)),
-        }) catch @panic("OOM");
-        defer main_camera.deref();
-        main_camera.addComponent(Camera, .{
-            .perspective = .{
-                .fovy_rad = std.math.degreesToRadians(70.0),
-                .far = 200,
-                .near = 0.1,
-            },
-        });
-        const apes = scene.newObject(.{
-            .name = "Apes Together Strong!",
-            .transform = Mat4.translation(Vec3.make(0, 3, 0)),
-        }) catch @panic("OOM");
-        defer apes.deref();
-        var monkey = scene.newObject(.{
-            .name = "Monkey",
-            .transform = Mat4.translation(Vec3.make(-5, 3, 0)),
-        }) catch @panic("OOM");
-        defer monkey.deref();
-        monkey.addComponent(MeshRenderer, .{
-            .mesh = AssetsDatabase.getOrLoadMesh("builtin://u.obj") catch @panic("Failed to get monkey mesh"),
-            .material = AssetsDatabase.getOrLoadMaterial("builtin://materials/none.mat.json") catch @panic("Failed to get none material"),
-        });
-        apes.addChildren(monkey);
-
-        const empire = scene.newObject(.{
-            .name = "Lost Empire",
-            .transform = Mat4.translation(Vec3.make(5.0, -10.0, 0.0)),
-        }) catch @panic("OOM");
-        defer empire.deref();
-        var empire_material = AssetsDatabase.getOrLoadMaterial("builtin://materials/default.mat.json") catch @panic("Failed to get default mesh material");
-
-        // Allocate descriptor set for signle-texture to use on the material
-        const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
-            .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-            .descriptorPool = ctx.engine.descriptor_pool,
-            .descriptorSetCount = 1,
-            .pSetLayouts = &ctx.engine.single_texture_set_layout,
-        });
-
-        check_vk(c.vkAllocateDescriptorSets(ctx.engine.device, &descriptor_set_alloc_info, &empire_material.texture_set)) catch @panic("Failed to allocate descriptor set");
-
-        // Sampler
-        const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
-            .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-            .magFilter = c.VK_FILTER_NEAREST,
-            .minFilter = c.VK_FILTER_NEAREST,
-            .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-        });
-
-        var sampler: c.VkSampler = undefined;
-        check_vk(c.vkCreateSampler(ctx.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
-        ctx.engine.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("Out of memory");
-
-        const lost_empire_tex_handle = AssetsDatabase.loadTexture("builtin://lost_empire-RGBA.png") catch @panic("Failed to load texture");
-        const lost_empire_tex = AssetsDatabase.getTexture(lost_empire_tex_handle) catch @panic("Failed to get empire texture");
-        // const lost_empire_tex = (ctx.engine.textures.get("empire_diffuse") orelse @panic("Failed to get empire texture"));
-
-        const descriptor_image_info = std.mem.zeroInit(c.VkDescriptorImageInfo, .{
-            .sampler = sampler,
-            .imageView = lost_empire_tex.image_view,
-            .imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        });
-
-        const write_descriptor_set = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
-            .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = empire_material.texture_set,
-            .dstBinding = 0,
-            .descriptorCount = 1,
-            .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &descriptor_image_info,
-        });
-
-        c.vkUpdateDescriptorSets(ctx.engine.device, 1, &write_descriptor_set, 0, null);
-
-        empire.addComponent(MeshRenderer, .{
-            .mesh = AssetsDatabase.getOrLoadMesh("builtin://lost_empire.obj") catch @panic("Failed to get triangle mesh"),
-            .material = empire_material,
-        });
-    }
-    ctx.engine.loadScene(scene) catch @panic("Failed to load default scene");
-    return self;
+    // var scene = Scene.init(ctx.allocator) catch @panic("OOM");
+    //
+    // {
+    //     const main_camera = scene.newObject(.{
+    //         .name = "Main Camera",
+    //         .transform = Mat4.translation(Vec3.make(0, 1, 0)),
+    //     }) catch @panic("OOM");
+    //     defer main_camera.deref();
+    //     main_camera.addComponent(Camera, .{
+    //         .perspective = .{
+    //             .fovy_rad = std.math.degreesToRadians(70.0),
+    //             .far = 200,
+    //             .near = 0.1,
+    //         },
+    //     });
+    //     const apes = scene.newObject(.{
+    //         .name = "Apes Together Strong!",
+    //         .transform = Mat4.translation(Vec3.make(0, 3, 0)),
+    //     }) catch @panic("OOM");
+    //     defer apes.deref();
+    //     var monkey = scene.newObject(.{
+    //         .name = "Monkey",
+    //         .transform = Mat4.translation(Vec3.make(-5, 3, 0)),
+    //     }) catch @panic("OOM");
+    //     defer monkey.deref();
+    //     monkey.addComponent(MeshRenderer, .{
+    //         .mesh = AssetsDatabase.getOrLoadMesh("builtin://u.obj") catch @panic("Failed to get monkey mesh"),
+    //         .material = AssetsDatabase.getOrLoadMaterial("builtin://materials/none.mat.json") catch @panic("Failed to get none material"),
+    //     });
+    //     apes.addChildren(monkey);
+    //
+    //     const empire = scene.newObject(.{
+    //         .name = "Lost Empire",
+    //         .transform = Mat4.translation(Vec3.make(5.0, -10.0, 0.0)),
+    //     }) catch @panic("OOM");
+    //     defer empire.deref();
+    //     var empire_material = AssetsDatabase.getOrLoadMaterial("builtin://materials/default.mat.json") catch @panic("Failed to get default mesh material");
+    //
+    //     // Allocate descriptor set for signle-texture to use on the material
+    //     const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
+    //         .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+    //         .descriptorPool = ctx.engine.descriptor_pool,
+    //         .descriptorSetCount = 1,
+    //         .pSetLayouts = &ctx.engine.single_texture_set_layout,
+    //     });
+    //
+    //     check_vk(c.vkAllocateDescriptorSets(ctx.engine.device, &descriptor_set_alloc_info, &empire_material.texture_set)) catch @panic("Failed to allocate descriptor set");
+    //
+    //     // Sampler
+    //     const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
+    //         .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+    //         .magFilter = c.VK_FILTER_NEAREST,
+    //         .minFilter = c.VK_FILTER_NEAREST,
+    //         .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+    //         .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+    //         .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+    //     });
+    //
+    //     var sampler: c.VkSampler = undefined;
+    //     check_vk(c.vkCreateSampler(ctx.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
+    //     ctx.engine.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("Out of memory");
+    //
+    //     const lost_empire_tex_handle = AssetsDatabase.loadTexture("builtin://lost_empire-RGBA.png") catch @panic("Failed to load texture");
+    //     const lost_empire_tex = AssetsDatabase.getTexture(lost_empire_tex_handle) catch @panic("Failed to get empire texture");
+    //     // const lost_empire_tex = (ctx.engine.textures.get("empire_diffuse") orelse @panic("Failed to get empire texture"));
+    //
+    //     const descriptor_image_info = std.mem.zeroInit(c.VkDescriptorImageInfo, .{
+    //         .sampler = sampler,
+    //         .imageView = lost_empire_tex.image_view,
+    //         .imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    //     });
+    //
+    //     const write_descriptor_set = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
+    //         .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+    //         .dstSet = empire_material.texture_set,
+    //         .dstBinding = 0,
+    //         .descriptorCount = 1,
+    //         .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    //         .pImageInfo = &descriptor_image_info,
+    //     });
+    //
+    //     c.vkUpdateDescriptorSets(ctx.engine.device, 1, &write_descriptor_set, 0, null);
+    //
+    //     empire.addComponent(MeshRenderer, .{
+    //         .mesh = AssetsDatabase.getOrLoadMesh("builtin://lost_empire.obj") catch @panic("Failed to get triangle mesh"),
+    //         .material = empire_material,
+    //     });
+    // }
+    // ctx.engine.loadScene(scene) catch @panic("Failed to load default scene");
+    return &singleton;
 }
 
 pub fn deinit(self: *Self, ctx: *GameApp) void {
     self.editors.deinit();
+    self.hello_modal.deinit();
     self.new_project_modal.deinit();
     check_vk(c.vkDeviceWaitIdle(ctx.engine.device)) catch @panic("Failed to wait for device idle");
     c.cImGui_ImplVulkan_Shutdown();
@@ -298,8 +302,6 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
     if (self.imgui_demo_open) {
         c.ImGui_ShowDemoWindow(&self.imgui_demo_open);
     }
-
-    self.new_project_modal.show();
 
     if (c.ImGui_BeginMainMenuBar()) {
         if (c.ImGui_BeginMenu("Project")) {
@@ -670,6 +672,10 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         }
         gizmo.endFrame();
     }
+
+    self.hello_modal.show();
+    self.new_project_modal.show(ctx);
+
     c.ImGui_End();
 
     c.ImGui_Render();
@@ -993,6 +999,18 @@ fn drawProperties(self: *Self, obj: *Object) void {
     }
 }
 
+pub fn instance() *Self {
+    return &singleton;
+}
+
+pub fn newProject(self: *Self) void {
+    self.new_project_modal.open();
+}
+
+pub fn openProject(self: *Self) void {
+    self.new_project_modal.open();
+}
+
 fn create_imgui_texture(filepath: []const u8, engine: *Engine) c.VkDescriptorSet {
     const img = textures.load_image_from_file(engine, filepath) catch @panic("Failed to load image");
     engine.image_deletion_queue.append(VmaImageDeleter{ .image = img }) catch @panic("Out of memory");
@@ -1122,6 +1140,8 @@ fn loadImGuiTheme() void {
     style.*.Colors[c.ImGuiCol_NavWindowingDimBg] = c.ImVec4{ .x = 0.800000011920929, .y = 0.800000011920929, .z = 0.800000011920929, .w = 0.2000000029802322 };
     style.*.Colors[c.ImGuiCol_ModalWindowDimBg] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
 }
+
+var singleton: Self = undefined;
 
 pub var inputs: InputsContext = undefined;
 

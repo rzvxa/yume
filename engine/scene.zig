@@ -73,6 +73,14 @@ pub const Scene = struct {
     pub fn dfs(self: *Scene) std.mem.Allocator.Error!Dfs {
         return try Dfs.init(self.allocator, self.root);
     }
+
+    pub fn jsonStringify(self: Self, jws: anytype) !void {
+        try jws.beginObject();
+
+        try jws.objectField("root");
+        try self.root.jsonStringifyGraph(jws);
+        try jws.endObject();
+    }
 };
 
 pub const Dfs = struct {
@@ -273,6 +281,38 @@ pub const Object = struct {
         }
         return bb.translate(self.transform.matrix);
     }
+
+    pub fn jsonStringify(self: Self, jws: anytype) !void {
+        return jws.write(self.uuid.urn());
+    }
+
+    pub fn jsonStringifyGraph(self: Self, jws: anytype) !void {
+        try jws.beginObject();
+
+        try jws.objectField("uuid");
+        try jws.write(self.uuid.urn());
+
+        try jws.objectField("name");
+        try jws.write(self.name);
+
+        try jws.objectField("transform");
+        try jws.write(self.transform);
+
+        try jws.objectField("parent");
+        try jws.write(self.parent);
+
+        // try jws.objectField("components");
+        // try jws.write(self.components.items);
+
+        try jws.objectField("children");
+        try jws.beginArray();
+        for (self.children.items) |child| {
+            try child.jsonStringifyGraph(jws);
+        }
+        try jws.endArray();
+
+        try jws.endObject();
+    }
 };
 
 pub const Transform = struct {
@@ -330,6 +370,21 @@ pub const Transform = struct {
 
     pub inline fn updateMatrices(self: *Self) void {
         self.matrix = Mat4.compose(self.position(), Quat.fromEuler(self.rotation()), self.scale());
+    }
+
+    pub fn jsonStringify(self: Self, jws: anytype) !void {
+        try jws.beginObject();
+
+        try jws.objectField("position");
+        try jws.write(self.raw.position);
+
+        try jws.objectField("rotation");
+        try jws.write(self.raw.rotation);
+
+        try jws.objectField("scale");
+        try jws.write(self.raw.scale);
+
+        try jws.endObject();
     }
 };
 

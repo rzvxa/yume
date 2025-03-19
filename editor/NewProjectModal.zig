@@ -3,8 +3,22 @@ const c = @import("clibs");
 const builtin = @import("builtin");
 const std = @import("std");
 
+const Uuid = @import("yume").Uuid;
+const Scene = @import("yume").scene_graph.Scene;
+
+const GameApp = @import("yume").GameApp;
+const Engine = @import("yume").VulkanEngine;
+const VulkanDeleter = @import("yume").VulkanDeleter;
+const check_vk = @import("yume").vki.check_vk;
+const Camera = @import("yume").Camera;
+const MeshRenderer = @import("yume").MeshRenderer;
+const AssetsDatabase = @import("yume").AssetsDatabase;
+const Vec3 = @import("yume").Vec3;
+const Mat4 = @import("yume").Mat4;
+
 const imutils = @import("imutils.zig");
 const Editor = @import("Editor.zig");
+const Project = @import("Project.zig");
 const utils = @import("yume").utils;
 
 const Self = @This();
@@ -12,7 +26,7 @@ const Self = @This();
 allocator: std.mem.Allocator,
 
 id: c.ImGuiID = undefined,
-is_open: bool = true,
+is_open: bool = false,
 
 project_name: std.ArrayList(u8),
 project_path: std.ArrayList(u8),
@@ -31,8 +45,8 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     defer allocator.free(default_project_path);
     var self = Self{
         .allocator = allocator,
-        .project_name = std.ArrayList(u8).initCapacity(allocator, default_project_name.len + 1) catch @panic("OOM"),
-        .project_path = std.ArrayList(u8).initCapacity(allocator, default_project_path.len + 1) catch @panic("OOM"),
+        .project_name = try std.ArrayList(u8).initCapacity(allocator, default_project_name.len + 1),
+        .project_path = try std.ArrayList(u8).initCapacity(allocator, default_project_path.len + 1),
     };
     self.project_name.appendSliceAssumeCapacity(default_project_name);
     self.project_name.appendAssumeCapacity(0);
@@ -55,8 +69,10 @@ pub fn close(self: *Self) void {
     self.is_open = false;
 }
 
-pub fn show(self: *Self) void {
+pub fn show(self: *Self, ctx: *GameApp) void {
     if (!self.is_open) return;
+    c.ImGui_PushID("new-project-modal");
+    defer c.ImGui_PopID();
     const viewport = c.ImGui_GetMainViewport();
     c.ImGui_SetNextWindowPos(viewport.*.Pos, c.ImGuiCond_Always);
     c.ImGui_SetNextWindowSize(viewport.*.Size, c.ImGuiCond_Always);
@@ -129,7 +145,7 @@ pub fn show(self: *Self) void {
         c.ImGui_SetCursorPosX(avail.x - (padding_x + create_label_size.x));
         c.ImGui_SetCursorPosY(end_y);
         if (c.ImGui_Button(create_label)) {
-            self.onCreateClick() catch @panic("failed to create the template project");
+            self.onCreateClick(ctx) catch @panic("failed to create the template project");
         }
         c.ImGui_PopFont();
         for (0..3) |_| c.ImGui_Unindent();
@@ -138,15 +154,148 @@ pub fn show(self: *Self) void {
     }
 }
 
-fn onCreateClick(self: *Self) !void {
-    const end: []const u8 = "/";
-    const fullpath = try std.fs.path.join(self.allocator, &[_][]const u8{ self.project_path.items, self.project_name.items, end });
+fn onCreateClick(self: *Self, ctx: *GameApp) !void {
+    const project_name = self.project_name.items[0 .. self.project_name.items.len - 1];
+    const fullpath = try std.fs.path.join(self.allocator, &[_][]const u8{
+        self.project_path.items[0 .. self.project_path.items.len - 1],
+        project_name,
+    });
     defer self.allocator.free(fullpath);
-    if (try utils.pathExists(fullpath)) {
-        return error.PathAlreadyExists;
+    const scene_directory_path = try std.fs.path.join(self.allocator, &[_][]const u8{
+        fullpath,
+        "scenes",
+    });
+    defer self.allocator.free(scene_directory_path);
+    const projfile = try std.fs.path.join(self.allocator, &[_][]const u8{ fullpath, "yume.json" });
+    defer self.allocator.free(projfile);
+    const default_scene_file = try std.fs.path.join(self.allocator, &[_][]const u8{ fullpath, "scenes", "Default.scene" });
+    defer self.allocator.free(default_scene_file);
+
+    try std.fs.cwd().makePath(scene_directory_path);
+
+    var project = Project{
+        .allocator = self.allocator,
+
+        .project_name = project_name,
+        .scenes = std.ArrayList(Uuid).init(self.allocator),
+        .default_scene = Uuid.new(),
+
+        .resources = std.AutoHashMap(Uuid, Project.Resource).init(self.allocator),
+    };
+    defer project.unload();
+
+    try project.resources.put(
+        project.default_scene,
+        Project.Resource{
+            .id = project.default_scene,
+            .path = try self.allocator.dupe(u8, "scenes/Default Scene.scene"),
+        },
+    );
+
+    var scene = try Scene.init(self.allocator);
+    defer scene.deinit();
+
+    {
+        const main_camera = scene.newObject(.{
+            .name = "Main Camera",
+            .transform = Mat4.translation(Vec3.make(0, 1, 0)),
+        }) catch @panic("OOM");
+        defer main_camera.deref();
+        main_camera.addComponent(Camera, .{
+            .perspective = .{
+                .fovy_rad = std.math.degreesToRadians(70.0),
+                .far = 200,
+                .near = 0.1,
+            },
+        });
+        const apes = scene.newObject(.{
+            .name = "Apes Together Strong!",
+            .transform = Mat4.translation(Vec3.make(0, 3, 0)),
+        }) catch @panic("OOM");
+        defer apes.deref();
+        var monkey = scene.newObject(.{
+            .name = "Monkey",
+            .transform = Mat4.translation(Vec3.make(-5, 3, 0)),
+        }) catch @panic("OOM");
+        defer monkey.deref();
+        monkey.addComponent(MeshRenderer, .{
+            .mesh = AssetsDatabase.getOrLoadMesh("builtin://u.obj") catch @panic("Failed to get monkey mesh"),
+            .material = AssetsDatabase.getOrLoadMaterial("builtin://materials/none.mat.json") catch @panic("Failed to get none material"),
+        });
+        apes.addChildren(monkey);
+
+        const empire = scene.newObject(.{
+            .name = "Lost Empire",
+            .transform = Mat4.translation(Vec3.make(5.0, -10.0, 0.0)),
+        }) catch @panic("OOM");
+        defer empire.deref();
+        var empire_material = AssetsDatabase.getOrLoadMaterial("builtin://materials/default.mat.json") catch @panic("Failed to get default mesh material");
+
+        // Allocate descriptor set for signle-texture to use on the material
+        const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
+            .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = ctx.engine.descriptor_pool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &ctx.engine.single_texture_set_layout,
+        });
+
+        check_vk(c.vkAllocateDescriptorSets(ctx.engine.device, &descriptor_set_alloc_info, &empire_material.texture_set)) catch @panic("Failed to allocate descriptor set");
+
+        // Sampler
+        const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
+            .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .magFilter = c.VK_FILTER_NEAREST,
+            .minFilter = c.VK_FILTER_NEAREST,
+            .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        });
+
+        var sampler: c.VkSampler = undefined;
+        check_vk(c.vkCreateSampler(ctx.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
+        ctx.engine.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("Out of memory");
+
+        const lost_empire_tex_handle = AssetsDatabase.loadTexture("builtin://lost_empire-RGBA.png") catch @panic("Failed to load texture");
+        const lost_empire_tex = AssetsDatabase.getTexture(lost_empire_tex_handle) catch @panic("Failed to get empire texture");
+        // const lost_empire_tex = (ctx.engine.textures.get("empire_diffuse") orelse @panic("Failed to get empire texture"));
+
+        const descriptor_image_info = std.mem.zeroInit(c.VkDescriptorImageInfo, .{
+            .sampler = sampler,
+            .imageView = lost_empire_tex.image_view,
+            .imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        });
+
+        const write_descriptor_set = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
+            .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = empire_material.texture_set,
+            .dstBinding = 0,
+            .descriptorCount = 1,
+            .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &descriptor_image_info,
+        });
+
+        c.vkUpdateDescriptorSets(ctx.engine.device, 1, &write_descriptor_set, 0, null);
+
+        empire.addComponent(MeshRenderer, .{
+            .mesh = AssetsDatabase.getOrLoadMesh("builtin://lost_empire.obj") catch @panic("Failed to get triangle mesh"),
+            .material = empire_material,
+        });
     }
-    std.debug.print("Creating directory {s} OK? \n", .{fullpath});
-    // std.fs.makeDirAbsolute
+
+    const scene_json = try std.json.stringifyAlloc(self.allocator, scene, .{ .whitespace = .indent_4 });
+    defer self.allocator.free(scene_json);
+    var scene_file = try std.fs.cwd().createFile(default_scene_file, .{});
+    defer scene_file.close();
+    try scene_file.writeAll(scene_json);
+
+    const json = try std.json.stringifyAlloc(self.allocator, project, .{ .whitespace = .indent_4 });
+    defer self.allocator.free(json);
+    var file = try std.fs.cwd().createFile(projfile, .{});
+    defer file.close();
+    try file.writeAll(json);
+
+    try Project.load(self.allocator, projfile);
+    self.close();
 }
 
 fn onPathSelect(user_data: ?*anyopaque, paths: [*c]const [*c]const u8, _: c_int) callconv(.C) void {

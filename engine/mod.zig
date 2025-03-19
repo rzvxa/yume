@@ -1,3 +1,5 @@
+pub const version = @import("cfg").version;
+
 pub const Uuid = @import("uuid.zig");
 
 pub const GameApp = @import("GameApp.zig");

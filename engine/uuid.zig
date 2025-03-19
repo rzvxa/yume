@@ -11,6 +11,14 @@ pub inline fn new() Self {
     return .{ .raw = uuid_zig.v4.new() };
 }
 
+pub inline fn fromUrn(u: Urn) !Self {
+    return fromUrnSlice(&u);
+}
+
+pub inline fn fromUrnSlice(s: []const u8) !Self {
+    return Self{ .raw = try uuid_zig.urn.deserialize(s) };
+}
+
 pub inline fn urn(self: Self) Urn {
     return uuid_zig.urn.serialize(self.raw);
 }
@@ -21,4 +29,21 @@ pub inline fn urnZ(self: Self) [37]u8 {
     @memcpy(buf[0..36], &u);
     buf[36] = 0;
     return buf;
+}
+
+pub fn jsonStringify(self: Self, jws: anytype) !void {
+    return jws.write(self.urn());
+}
+
+pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, _: anytype) !Self {
+    const tk = try jrs.nextAlloc(a, .alloc_if_needed);
+
+    const s = switch (tk) {
+        inline .string, .allocated_string => |slice| slice,
+        else => {
+            return error.UnexpectedToken;
+        },
+    };
+
+    return fromUrnSlice(s) catch error.UnexpectedToken;
 }

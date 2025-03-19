@@ -59,7 +59,7 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
     var d = Dispatcher.init(self);
     while (!quit) {
         self.newFrame();
-        if (comptime canDispatch(Dispatcher, "newFrame")) {
+        if (comptime std.meta.hasMethod(Dispatcher, "newFrame")) {
             d.newFrame(self);
         }
         while (c.SDL_PollEvent(&event)) {
@@ -67,16 +67,16 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
                 self.mouse.x = event.motion.x;
                 self.mouse.y = event.motion.y;
             }
-            if (comptime canDispatch(Dispatcher, "processEvent")) {
+            if (comptime std.meta.hasMethod(Dispatcher, "processEvent")) {
                 quit = !d.processEvent(self, &event);
             }
         }
 
         self.update();
-        if (comptime canDispatch(Dispatcher, "update")) {
+        if (comptime std.meta.hasMethod(Dispatcher, "update")) {
             d.update(self);
         }
-        if (comptime canDispatch(Dispatcher, "draw")) {
+        if (comptime std.meta.hasMethod(Dispatcher, "draw")) {
             d.draw(self);
         }
 
@@ -98,7 +98,7 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
             defer self.allocator.free(new_title);
             _ = c.SDL_SetWindowTitle(self.window, new_title.ptr);
         }
-        if (comptime canDispatch(Dispatcher, "endFrame")) {
+        if (comptime std.meta.hasMethod(Dispatcher, "endFrame")) {
             d.endFrame(self);
         }
     }
@@ -130,18 +130,4 @@ fn update(self: *Self) void {
         var transform = &self.engine.main_camera.?.object.transform;
         transform.setPosition(transform.position().add(camera_delta));
     }
-}
-
-inline fn canDispatch(comptime Dispatcher: anytype, comptime method: []const u8) bool {
-    switch (comptime @typeInfo(Dispatcher)) {
-        .Struct => |struct_| {
-            inline for (struct_.decls) |decl| {
-                if (comptime std.mem.eql(u8, decl.name, method)) {
-                    return true;
-                }
-            }
-        },
-        else => @compileError("expected a struct type as the `Dispatcher`"),
-    }
-    return false;
 }

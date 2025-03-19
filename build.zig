@@ -5,11 +5,15 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const cfg = std.Build.Step.Options.create(b);
+    cfg.addOption(std.SemanticVersion, "version", std.SemanticVersion{ .major = 0, .minor = 0, .patch = 1 });
+
     const yume = b.addModule("yume", .{
         .root_source_file = b.path("engine/mod.zig"),
         .target = target,
         .optimize = optimize,
     });
+    yume.addOptions("cfg", cfg);
 
     const engine_c_libs = b.addTranslateC(.{
         .root_source_file = b.path("engine/clibs.c"),
