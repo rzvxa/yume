@@ -7,6 +7,7 @@ const gizmo = @import("gizmo.zig");
 const check_vk = @import("yume").vki.check_vk;
 
 const Editors = @import("editors/editors.zig");
+const Project = @import("Project.zig");
 const AssetsDatabase = @import("yume").AssetsDatabase;
 
 const imutils = @import("imutils.zig");
@@ -192,6 +193,9 @@ pub fn deinit(self: *Self, ctx: *GameApp) void {
     self.editors.deinit();
     self.hello_modal.deinit();
     self.new_project_modal.deinit();
+    if (Project.current()) |p| {
+        p.unload();
+    }
     check_vk(c.vkDeviceWaitIdle(ctx.engine.device)) catch @panic("Failed to wait for device idle");
     c.cImGui_ImplVulkan_Shutdown();
 }

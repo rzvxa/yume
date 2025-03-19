@@ -22,7 +22,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     defer file.close();
     const s = try file.readToEndAlloc(allocator, 30_000_000);
     defer allocator.free(s);
-    instance = (try std.json.parseFromSlice(Self, allocator, s, .{})).value;
+    instance = (try std.json.parseFromSliceLeaky(Self, allocator, s, .{}));
 }
 
 pub fn unload(self: *Self) void {
@@ -79,7 +79,7 @@ pub fn jsonParse(a: std.mem.Allocator, jrs: *std.json.Scanner, o: anytype) !Self
     if (tk != .object_begin) return error.UnexpectedEndOfInput;
 
     var result = Self{
-        .allocator = undefined,
+        .allocator = a,
         .yume_version = undefined,
         .project_name = undefined,
         .scenes = undefined,
@@ -188,9 +188,8 @@ fn parseResources(a: std.mem.Allocator, jrs: *std.json.Scanner) !std.AutoHashMap
                 resource.id = try Uuid.jsonParse(a, jrs, null);
                 uuid = resource.id;
             } else if (std.mem.eql(u8, field_name, "path")) {
-                tk = try jrs.next();
+                tk = try jrs.nextAlloc(a, .alloc_always);
                 resource.path = switch (tk) {
-                    inline .string => |slice| try a.dupe(u8, slice),
                     inline .allocated_string => |slice| slice,
                     else => return error.UnexpectedToken,
                 };
