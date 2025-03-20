@@ -41,6 +41,7 @@ pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, _: anytype) !Self {
     const s = switch (tk) {
         inline .string, .allocated_string => |slice| slice,
         else => {
+            std.debug.print("{}\n", .{tk});
             return error.UnexpectedToken;
         },
     };

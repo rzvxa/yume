@@ -68,7 +68,7 @@ pub const AssetsDatabase = struct {
         if (instance.loaded_ids.contains(id)) {
             return TextureAssetHandle.fromAssetIdUnsafe(id);
         }
-        const handle = TextureAssetHandle{ .uuid = Uuid.new() };
+        const handle = TextureAssetHandle{ .uuid = id };
 
         const bytes = try instance.loader(instance.allocator, id, default_max_bytes);
         const image = try texs.load_image(instance.engine, bytes, id.urn());
@@ -102,7 +102,8 @@ pub const AssetsDatabase = struct {
         check_vk(c.vkCreateImageView(instance.engine.device, &image_view_ci, Engine.vk_alloc_cbs, &texture.image_view)) catch @panic("Failed to create image view");
 
         const loaded = LoadedAsset{ .data = .{ .texture = texture } };
-        instance.loaded_assets.put(handle.toAssetHandle(), loaded) catch @panic("Out of memory");
+        try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
+        try instance.loaded_ids.put(id, {});
         return handle;
     }
 
@@ -120,7 +121,7 @@ pub const AssetsDatabase = struct {
         if (instance.loaded_ids.contains(id)) {
             return MeshAssetHandle.fromAssetIdUnsafe(id);
         }
-        const handle = MeshAssetHandle{ .uuid = Uuid.new() };
+        const handle = MeshAssetHandle{ .uuid = id };
         const bytes = try instance.loader(instance.allocator, id, default_max_bytes);
 
         const mesh = try instance.allocator.create(Mesh);
@@ -128,7 +129,8 @@ pub const AssetsDatabase = struct {
         instance.engine.uploadMesh(mesh);
 
         const loaded = LoadedAsset{ .data = .{ .mesh = mesh } };
-        instance.loaded_assets.put(handle.toAssetHandle(), loaded) catch @panic("Out of memory");
+        try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
+        try instance.loaded_ids.put(id, {});
         return handle;
     }
 
@@ -146,7 +148,7 @@ pub const AssetsDatabase = struct {
         if (instance.loaded_ids.contains(id)) {
             return MaterialAssetHandle.fromAssetIdUnsafe(id);
         }
-        const handle = MaterialAssetHandle{ .uuid = Uuid.new() };
+        const handle = MaterialAssetHandle{ .uuid = id };
         const matjson = try instance.loader(instance.allocator, id, 20_000);
         defer instance.allocator.free(matjson);
 
@@ -303,7 +305,8 @@ pub const AssetsDatabase = struct {
         };
 
         const loaded = LoadedAsset{ .data = .{ .material = material } };
-        instance.loaded_assets.put(handle.toAssetHandle(), loaded) catch @panic("Out of memory");
+        try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
+        try instance.loaded_ids.put(id, {});
         return handle;
     }
 
@@ -321,10 +324,17 @@ pub const AssetsDatabase = struct {
         if (instance.loaded_ids.contains(id)) {
             return SceneAssetHandle.fromAssetIdUnsafe(id);
         }
-        const handle = MaterialAssetHandle{ .uuid = Uuid.new() };
+        const handle = SceneAssetHandle{ .uuid = id };
         const bytes = try instance.loader(instance.allocator, id, default_max_bytes);
-        _ = handle;
         defer instance.allocator.free(bytes);
+
+        const scene = try Scene.fromJson(instance.allocator, bytes, .{});
+        std.debug.print("{?}\n", .{scene});
+
+        const loaded = LoadedAsset{ .data = .{ .scene = scene } };
+        try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
+        try instance.loaded_ids.put(id, {});
+        return handle;
     }
 
     pub fn getLoadedAsset(hndl: AssetHandle, ty: AssetType) !LoadedAsset {

@@ -45,10 +45,6 @@ pub const Scene = struct {
         self.allocator.destroy(self);
     }
 
-    pub fn fromJSON(allocator: std.mem.Allocator, json: []u8) Self {
-        std.json.parseFromSlice(Self, allocator, json, .{});
-    }
-
     pub fn newObject(self: *Scene, options: struct {
         name: []const u8 = "Object",
         parent: ?*Object = null,
@@ -72,6 +68,54 @@ pub const Scene = struct {
 
     pub fn dfs(self: *Scene) std.mem.Allocator.Error!Dfs {
         return try Dfs.init(self.allocator, self.root);
+    }
+
+    pub fn fromJson(
+        allocator: std.mem.Allocator,
+        json: []const u8,
+        o: std.json.ParseOptions,
+    ) !*Self {
+        var scanner = std.json.Scanner.initCompleteInput(allocator, json);
+        defer scanner.deinit();
+
+        var jrs = &scanner;
+
+        var tk = try jrs.next();
+        if (tk != .object_begin) return error.UnexpectedEndOfInput;
+
+        var result = try allocator.create(Self);
+        result.* = Self{
+            .allocator = allocator,
+            .renderables = std.ArrayList(*MeshRenderer).init(allocator),
+            .live_object = std.ArrayList(*Object).init(allocator),
+            .root = undefined,
+        };
+
+        while (true) {
+            tk = try jrs.nextAlloc(allocator, .alloc_if_needed);
+            if (tk == .object_end) break;
+
+            const field_name = switch (tk) {
+                inline .string, .allocated_string => |slice| slice,
+                else => {
+                    std.debug.print("{}\n", .{tk});
+                    return error.UnexpectedToken;
+                },
+            };
+
+            if (std.mem.eql(u8, field_name, "root")) {
+                var ptrmap = std.AutoHashMap(Uuid, *anyopaque).init(allocator);
+                defer ptrmap.deinit();
+                result.root = try Object.jsonParseGraph(allocator, jrs, o, .{
+                    .scene = result,
+                    .ptrmap = &ptrmap,
+                });
+            } else {
+                try jrs.skipValue();
+            }
+        }
+
+        return result;
     }
 
     pub fn jsonStringify(self: Self, jws: anytype) !void {
@@ -313,6 +357,76 @@ pub const Object = struct {
 
         try jws.endObject();
     }
+
+    pub fn jsonParseGraph(
+        a: std.mem.Allocator,
+        jrs: anytype,
+        o: anytype,
+        ctx: struct {
+            scene: *Scene,
+            ptrmap: *std.AutoHashMap(Uuid, *anyopaque),
+        },
+    ) !*Self {
+        var tk = try jrs.next();
+        if (tk != .object_begin) return error.UnexpectedEndOfInput;
+
+        const result = try a.create(Object);
+        result.* = .{
+            .uuid = undefined,
+            .name = undefined,
+            .transform = undefined,
+            .children = std.ArrayList(*Object).init(a),
+            .components = std.ArrayList(Component).init(a),
+            .components_deinit_handles = std.ArrayList(ComponentDeinitializer).init(a),
+
+            .scene = ctx.scene,
+        };
+
+        while (true) {
+            tk = try jrs.nextAlloc(a, .alloc_if_needed);
+            if (tk == .object_end) break;
+
+            const field_name = switch (tk) {
+                inline .string, .allocated_string => |slice| slice,
+                else => {
+                    std.debug.print("{}\n", .{tk});
+                    return error.UnexpectedToken;
+                },
+            };
+
+            if (std.mem.eql(u8, field_name, "uuid")) {
+                result.uuid = try Uuid.jsonParse(a, jrs, o);
+            } else if (std.mem.eql(u8, field_name, "name")) {
+                result.name = switch (try jrs.nextAlloc(a, .alloc_if_needed)) {
+                    inline .string, .allocated_string => |slice| slice,
+                    else => {
+                        std.debug.print("{}\n", .{tk});
+                        return error.UnexpectedToken;
+                    },
+                };
+            } else if (std.mem.eql(u8, field_name, "transform")) {
+                result.transform = try Transform.jsonParse(a, jrs, o);
+            } else if (std.mem.eql(u8, field_name, "parent")) {
+                if (try jrs.peekNextTokenType() == .null) {
+                    _ = try jrs.next();
+                    result.parent = null;
+                    continue;
+                }
+                const parent_id = try Uuid.jsonParse(a, jrs, o);
+                const ptr = ctx.ptrmap.get(parent_id);
+                if (ptr) |p| {
+                    result.parent = @as(*Self, @ptrCast(@alignCast(p)));
+                }
+                std.debug.print("Failed to resolve reference {s}", .{parent_id.urn()});
+                return error.UnexpectedToken;
+            } else {
+                try jrs.skipValue();
+            }
+        }
+
+        try ctx.ptrmap.put(result.uuid, result);
+        return result;
+    }
 };
 
 pub const Transform = struct {
@@ -385,6 +499,43 @@ pub const Transform = struct {
         try jws.write(self.raw.scale);
 
         try jws.endObject();
+    }
+
+    pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, o: anytype) !Self {
+        var tk = try jrs.next();
+        if (tk != .object_begin) return error.UnexpectedEndOfInput;
+
+        var result = Self{
+            .matrix = undefined,
+            .raw = undefined,
+        };
+
+        while (true) {
+            tk = try jrs.nextAlloc(a, .alloc_if_needed);
+            if (tk == .object_end) break;
+
+            const field_name = switch (tk) {
+                inline .string, .allocated_string => |slice| slice,
+                else => {
+                    std.debug.print("{}\n", .{tk});
+                    return error.UnexpectedToken;
+                },
+            };
+
+            if (std.mem.eql(u8, field_name, "position")) {
+                result.raw.position = try Vec3.jsonParse(a, jrs, o);
+            } else if (std.mem.eql(u8, field_name, "rotation")) {
+                result.raw.rotation = try Vec3.jsonParse(a, jrs, o);
+            } else if (std.mem.eql(u8, field_name, "scale")) {
+                result.raw.scale = try Vec3.jsonParse(a, jrs, o);
+            } else {
+                try jrs.skipValue();
+            }
+        }
+
+        result.updateMatrices();
+
+        return result;
     }
 };
 

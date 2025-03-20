@@ -116,15 +116,14 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
 }
 
 pub fn deinit(self: *Self) void {
-    self.scene.deinit();
+    // self.scene.deinit();
     assets.AssetsDatabase.deinit();
     self.engine.deinit();
     self.allocator.destroy(self);
 }
 
-// pub fn loadScene(self: *Self, scene_id: Uuid) !void {
-pub fn loadScene(self: *Self, s: *Scene) !void {
-    // const s = try AssetsDatabase.getOrLoadScene(scene_id);
+pub fn loadScene(self: *Self, scene_id: Uuid) !void {
+    const s = try AssetsDatabase.getOrLoadScene(scene_id);
     var old_scene = self.scene;
     self.scene = s;
     var iter = self.scene.dfs() catch @panic("OOM");

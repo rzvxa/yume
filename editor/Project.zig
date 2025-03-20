@@ -24,13 +24,17 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     if (instance) |*ins| {
         ins.unload();
     }
-    var file = try std.fs.cwd().openFile(path, .{});
+    var file = try std.fs.openFileAbsolute(path, .{});
     defer file.close();
     const s = try file.readToEndAlloc(allocator, 30_000_000);
     defer allocator.free(s);
     instance = (try std.json.parseFromSliceLeaky(Self, allocator, s, .{}));
     instance.?.resources_index = std.StringHashMap(Uuid).init(allocator);
     instance.?.resources_builtins = std.AutoHashMap(Uuid, Resource).init(allocator);
+
+    var project_root = try std.fs.openDirAbsolute(std.fs.path.dirname(path) orelse return error.InvalidPath, .{});
+    defer project_root.close();
+    try project_root.setAsCwd();
 
     try addBuiltin("3e21192b-6c22-4a4f-98ca-a4a43f675986", "materials/default.mat");
     try addBuiltin("e732bb0c-19bb-492b-a79d-24fde85964d2", "materials/none.mat");
@@ -105,7 +109,7 @@ pub fn jsonStringify(self: Self, jws: anytype) !void {
     try jws.endObject();
 }
 
-pub fn jsonParse(a: std.mem.Allocator, jrs: *std.json.Scanner, o: anytype) !Self {
+pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, o: anytype) !Self {
     var tk = try jrs.next();
     if (tk != .object_begin) return error.UnexpectedEndOfInput;
 
@@ -131,7 +135,6 @@ pub fn jsonParse(a: std.mem.Allocator, jrs: *std.json.Scanner, o: anytype) !Self
                 return error.UnexpectedToken;
             },
         };
-        std.debug.print("{s}\n", .{field_name});
 
         if (std.mem.eql(u8, field_name, "yume_version")) {
             result.yume_version = try parseYumeVersion(jrs);
@@ -252,6 +255,7 @@ pub fn getResourceId(self: *Self, path: []const u8) !Uuid {
 pub fn getResourcePath(id: Uuid) ![]const u8 {
     const res = instance.?.resources.get(id);
     if (res) |r| {
+        std.debug.print("{}\n", .{res.?});
         return r.path;
     } else {
         return error.ResourceNotFound;

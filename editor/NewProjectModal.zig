@@ -298,7 +298,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
     try file.writeAll(json);
 
     try Project.load(self.allocator, projfile);
-    try ctx.loadScene(scene);
+    try ctx.loadScene(project.default_scene);
     self.close();
 }
 
