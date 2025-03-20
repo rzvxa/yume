@@ -1,6 +1,8 @@
 const std = @import("std");
 const Uuid = @import("yume").Uuid;
 
+const AssetLoader = @import("yume").assets.AssetLoader;
+
 const Self = @This();
 
 var instance: ?Self = null;
@@ -14,6 +16,10 @@ default_scene: Uuid,
 
 resources: std.AutoHashMap(Uuid, Resource),
 
+// unserialized data
+resources_index: std.StringHashMap(Uuid),
+resources_builtins: std.AutoHashMap(Uuid, Resource),
+
 pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     if (instance) |*ins| {
         ins.unload();
@@ -23,15 +29,40 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     const s = try file.readToEndAlloc(allocator, 30_000_000);
     defer allocator.free(s);
     instance = (try std.json.parseFromSliceLeaky(Self, allocator, s, .{}));
+    instance.?.resources_index = std.StringHashMap(Uuid).init(allocator);
+    instance.?.resources_builtins = std.AutoHashMap(Uuid, Resource).init(allocator);
+
+    try addBuiltin("3e21192b-6c22-4a4f-98ca-a4a43f675986", "materials/default.mat");
+    try addBuiltin("e732bb0c-19bb-492b-a79d-24fde85964d2", "materials/none.mat");
+    try addBuiltin("ad4bc22b-3765-4a9d-bab7-7984e101428a", "lost_empire-RGBA.png");
+    try addBuiltin("ac6b9d14-0a56-458a-a7cc-fd36ede79468", "lost_empire.obj");
+    try addBuiltin("acc02aef-7ac0-46e7-b006-378c36ac1b27", "u.obj");
+    try addBuiltin("17c0ee4b-8fa0-43a7-a3d8-8bf7b5e73bb9", "u.mtl");
 }
 
 pub fn unload(self: *Self) void {
     self.scenes.deinit();
-    var it = self.resources.iterator();
-    while (it.next()) |kv| {
-        self.allocator.free(kv.value_ptr.path);
+    {
+        var it = self.resources_index.iterator();
+        while (it.next()) |kv| {
+            self.allocator.free(kv.key_ptr.*);
+        }
+    }
+    self.resources_index.deinit();
+    {
+        var it = self.resources.iterator();
+        while (it.next()) |kv| {
+            self.allocator.free(kv.value_ptr.path);
+        }
     }
     self.resources.deinit();
+    {
+        var it = self.resources_builtins.iterator();
+        while (it.next()) |kv| {
+            self.allocator.free(kv.value_ptr.path);
+        }
+    }
+    self.resources_builtins.deinit();
 }
 
 pub fn current() ?*Self {
@@ -85,6 +116,8 @@ pub fn jsonParse(a: std.mem.Allocator, jrs: *std.json.Scanner, o: anytype) !Self
         .scenes = undefined,
         .default_scene = undefined,
         .resources = undefined,
+        .resources_index = undefined,
+        .resources_builtins = undefined,
     };
 
     while (true) {
@@ -203,6 +236,39 @@ fn parseResources(a: std.mem.Allocator, jrs: *std.json.Scanner) !std.AutoHashMap
     }
 
     return resources;
+}
+
+pub fn getResourceId(self: *Self, path: []const u8) !Uuid {
+    // TODO: add an index
+    var it = self.resources.iterator();
+    while (it.next()) |next| {
+        if (std.mem.eql(u8, next.value_ptr.path, path)) {
+            return next.key_ptr.*;
+        }
+    }
+    return error.ResourceNotFound;
+}
+
+pub fn getResourcePath(id: Uuid) ![]const u8 {
+    const res = instance.?.resources.get(id);
+    if (res) |r| {
+        return r.path;
+    } else {
+        return error.ResourceNotFound;
+    }
+}
+
+pub fn readAssetAlloc(allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) ![]u8 {
+    var file = std.fs.cwd().openFile(try getResourcePath(id), .{}) catch return error.FailedToOpenResource;
+    defer file.close();
+    return file.readToEndAlloc(allocator, max_bytes) catch return error.FailedToReadResource;
+}
+
+fn addBuiltin(urn: []const u8, path: []const u8) !void {
+    const id = try Uuid.fromUrnSlice(urn);
+    try instance.?.resources_builtins.put(id, Resource{ .id = id, .path = try instance.?.allocator.dupe(u8, path) });
+    const uri = try std.fmt.allocPrint(instance.?.allocator, "builtin://{s}", .{path});
+    try instance.?.resources_index.put(uri, id);
 }
 
 pub const Resource = struct {

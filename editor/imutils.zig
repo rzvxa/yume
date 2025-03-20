@@ -19,6 +19,38 @@ pub const ArrayListU8ResizeCallback = struct {
     }
 };
 
+pub fn inputFilePath(
+    label: [*c]const u8,
+    window: *c.SDL_Window,
+    path_buf: [*c]u8,
+    buf_size: usize,
+    flags: c.ImGuiInputTextFlags,
+    text_callback: c.ImGuiInputTextCallback,
+    text_user_data: ?*anyopaque,
+    fs_callback: c.SDL_DialogFileCallback,
+    fs_user_data: ?*anyopaque,
+    allow_many: bool,
+) bool {
+    c.ImGui_PushID(label);
+    defer c.ImGui_PopID();
+    const browseButtonSize = c.ImGui_GetFontSize();
+    c.ImGui_PushItemWidth(c.ImGui_CalcItemWidth() - (browseButtonSize + (4 * c.ImGui_GetStyle().*.FramePadding.x)));
+    c.ImGui_BeginDisabled(true);
+    const changed = c.ImGui_InputTextEx(label, path_buf, buf_size, flags | c.ImGuiInputTextFlags_ReadOnly, text_callback, text_user_data);
+    c.ImGui_EndDisabled();
+    c.ImGui_SameLine();
+    if (c.ImGui_ImageButton("browse", @intFromPtr(Editor.browse_icon_ds), c.ImVec2{ .x = browseButtonSize, .y = browseButtonSize })) {
+        const filters = [_]c.SDL_DialogFileFilter{.{
+            .name = "Yume Project File",
+            .pattern = "json",
+        }};
+        c.SDL_ShowOpenFileDialog(fs_callback, fs_user_data, window, &filters, filters.len, path_buf, allow_many);
+    }
+    c.ImGui_PopItemWidth();
+
+    return changed;
+}
+
 pub fn inputDirPath(
     label: [*c]const u8,
     window: *c.SDL_Window,

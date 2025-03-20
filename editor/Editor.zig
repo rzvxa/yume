@@ -6,6 +6,7 @@ const gizmo = @import("gizmo.zig");
 
 const check_vk = @import("yume").vki.check_vk;
 
+const Uuid = @import("yume").Uuid;
 const Editors = @import("editors/editors.zig");
 const Project = @import("Project.zig");
 const AssetsDatabase = @import("yume").AssetsDatabase;
@@ -39,6 +40,7 @@ const VulkanDeleter = @import("yume").VulkanDeleter;
 const Engine = @import("yume").VulkanEngine;
 
 const NewProjectModal = @import("NewProjectModal.zig");
+const OpenProjectModal = @import("OpenProjectModal.zig");
 const HelloModal = @import("HelloModal.zig");
 
 const ManipulationTool = enum {
@@ -87,6 +89,7 @@ first_time: bool = true,
 
 hello_modal: HelloModal,
 new_project_modal: NewProjectModal,
+open_project_modal: OpenProjectModal,
 
 pub fn init(ctx: *GameApp) *Self {
     inputs = InputsContext{ .window = ctx.window };
@@ -94,6 +97,7 @@ pub fn init(ctx: *GameApp) *Self {
         .editors = Editors.init(ctx.allocator),
         .hello_modal = HelloModal.init() catch @panic("Failed to initialize `HelloModal`"),
         .new_project_modal = NewProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `NewProjectModal`"),
+        .open_project_modal = OpenProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `OpenProjectModal`"),
     };
     singleton.init_descriptors(&ctx.engine);
     init_imgui(&ctx.engine);
@@ -193,6 +197,7 @@ pub fn deinit(self: *Self, ctx: *GameApp) void {
     self.editors.deinit();
     self.hello_modal.deinit();
     self.new_project_modal.deinit();
+    self.open_project_modal.deinit();
     if (Project.current()) |p| {
         p.unload();
     }
@@ -312,7 +317,9 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             if (c.ImGui_MenuItem("New")) {
                 self.new_project_modal.open();
             }
-            if (c.ImGui_MenuItem("Open")) {}
+            if (c.ImGui_MenuItem("Open")) {
+                self.open_project_modal.open();
+            }
             if (c.ImGui_MenuItem("Save")) {}
             if (c.ImGui_MenuItem("Quit")) {}
             c.ImGui_EndMenu();
@@ -410,8 +417,8 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
     if (c.ImGui_Begin("Hierarchy", null, 0)) {
         {
             var i: usize = 0;
-            while (i < ctx.engine.scene.root.children.items.len) : (i += 1) {
-                self.drawHierarchyNode(ctx.engine.scene.root.children.items[i]);
+            while (i < ctx.scene.root.children.items.len) : (i += 1) {
+                self.drawHierarchyNode(ctx.scene.root.children.items[i]);
             }
         }
         const avail = c.ImGui_GetContentRegionAvail();
@@ -422,7 +429,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
                 if (payload_obj) |p| {
                     _ = p.*.ref();
                     p.*.parent.?.removeChildren(p.*);
-                    ctx.engine.scene.root.addChildren(p.*);
+                    ctx.scene.root.addChildren(p.*);
                     p.*.deref();
                 }
             }
@@ -540,7 +547,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
                     );
                     me.app.engine.drawObjects(
                         me.cmd,
-                        me.app.engine.scene.renderables.items,
+                        me.app.scene.renderables.items,
                         me.app.engine.camera_and_scene_buffer,
                         me.app.engine.camera_and_scene_set,
                         main_camera,
@@ -602,7 +609,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
                 me.d.camera.updateMatrices(me.d.camera_pos, me.d.camera_rot, aspect);
                 me.app.engine.drawObjects(
                     me.cmd,
-                    me.app.engine.scene.renderables.items,
+                    me.app.scene.renderables.items,
                     me.d.editor_camera_and_scene_buffer,
                     me.d.editor_camera_and_scene_set,
                     &me.d.camera,
@@ -679,6 +686,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
 
     self.hello_modal.show();
     self.new_project_modal.show(ctx);
+    self.open_project_modal.show(ctx);
 
     c.ImGui_End();
 
@@ -1012,11 +1020,15 @@ pub fn newProject(self: *Self) void {
 }
 
 pub fn openProject(self: *Self) void {
-    self.new_project_modal.open();
+    self.open_project_modal.open();
 }
 
 fn create_imgui_texture(filepath: []const u8, engine: *Engine) c.VkDescriptorSet {
-    const img = textures.load_image_from_file(engine, filepath) catch @panic("Failed to load image");
+    var file = std.fs.cwd().openFile(filepath, .{}) catch @panic("Failed to open the file");
+    defer file.close();
+    const content = file.readToEndAlloc(engine.allocator, 30_000_000) catch @panic("OOM");
+    defer engine.allocator.free(content);
+    const img = textures.load_image(engine, content, Uuid.new().urn()) catch @panic("Failed to load image");
     engine.image_deletion_queue.append(VmaImageDeleter{ .image = img }) catch @panic("Out of memory");
 
     // Create the Image View

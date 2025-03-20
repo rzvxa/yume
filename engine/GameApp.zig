@@ -8,9 +8,15 @@ pub const RenderCommand = VulkanEngine.RenderCommand;
 const context = @import("context.zig");
 pub const window_extent = context.window_extent;
 const utils = @import("utils.zig");
+const Uuid = @import("uuid.zig");
 
 const math3d = @import("math3d.zig");
 const Vec3 = math3d.Vec3;
+
+const AssetsDatabase = @import("assets.zig").AssetsDatabase;
+
+const Scene = @import("scene.zig").Scene;
+const Camera = @import("components/Camera.zig");
 
 const inputs = @import("inputs.zig");
 const assets = @import("assets.zig");
@@ -26,9 +32,11 @@ window: *c.SDL_Window = undefined,
 inputs: *inputs.InputContext,
 engine: VulkanEngine,
 
+scene: *Scene,
+
 delta: f32 = 0.016,
 
-pub fn init(a: std.mem.Allocator, window_title: []const u8) *Self {
+pub fn init(a: std.mem.Allocator, loader: assets.AssetLoader, window_title: []const u8) *Self {
     utils.checkSdl(c.SDL_Init(c.SDL_INIT_VIDEO));
 
     const window = c.SDL_CreateWindow(window_title.ptr, window_extent.width, window_extent.height, c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE) orelse @panic("Failed to create SDL window");
@@ -40,6 +48,7 @@ pub fn init(a: std.mem.Allocator, window_title: []const u8) *Self {
     const self = a.create(Self) catch @panic("OOM");
 
     self.* = Self{
+        .scene = Scene.init(a) catch @panic("failed to create default scene"),
         .window_title = window_title,
         .allocator = a,
         .window = window,
@@ -47,7 +56,7 @@ pub fn init(a: std.mem.Allocator, window_title: []const u8) *Self {
         .engine = engine,
     };
 
-    assets.AssetsDatabase.init(a, &self.engine);
+    assets.AssetsDatabase.init(a, &self.engine, loader);
     return self;
 }
 
@@ -107,9 +116,27 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
 }
 
 pub fn deinit(self: *Self) void {
+    self.scene.deinit();
     assets.AssetsDatabase.deinit();
     self.engine.deinit();
     self.allocator.destroy(self);
+}
+
+// pub fn loadScene(self: *Self, scene_id: Uuid) !void {
+pub fn loadScene(self: *Self, s: *Scene) !void {
+    // const s = try AssetsDatabase.getOrLoadScene(scene_id);
+    var old_scene = self.scene;
+    self.scene = s;
+    var iter = self.scene.dfs() catch @panic("OOM");
+    defer iter.deinit();
+    while (try iter.next()) |next| {
+        if (next.getComponent(Camera)) |camera| {
+            self.engine.main_camera = camera;
+            break;
+        }
+        next.deref();
+    }
+    old_scene.deinit();
 }
 
 fn newFrame(self: *Self) void {

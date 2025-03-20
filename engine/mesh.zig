@@ -102,8 +102,8 @@ pub const Mesh = struct {
 
 const obj_loader = @import("obj_loader.zig");
 
-pub fn load_from_obj(allocator: std.mem.Allocator, filepath: []const u8) Mesh {
-    var obj_mesh = obj_loader.parse_file(allocator, filepath) catch |err| {
+pub fn load_from_obj(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
+    var obj_mesh = obj_loader.parse(allocator, buffer, ":memory:") catch |err| {
         std.log.err("Failed to load obj file: {s}", .{@errorName(err)});
         unreachable;
     };

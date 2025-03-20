@@ -11,8 +11,6 @@ const mesh_mod = @import("mesh.zig");
 const Mesh = mesh_mod.Mesh;
 const BoundingBox = mesh_mod.BoundingBox;
 
-const scene = @import("scene.zig");
-
 const math3d = @import("math3d.zig");
 const Vec2 = math3d.Vec2;
 const Vec3 = math3d.Vec3;
@@ -97,8 +95,6 @@ const UploadContext = struct {
 };
 
 pub const FRAME_OVERLAP = 2;
-
-scene: *scene.Scene,
 
 // Data
 //
@@ -216,7 +212,6 @@ pub const VmaImageDeleter = struct {
 
 pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
     var engine = Self{
-        .scene = scene.Scene.init(a) catch @panic("OOM"),
         .window = window,
         .allocator = a,
         .deletion_queue = std.ArrayList(VulkanDeleter).init(a),
@@ -1031,21 +1026,6 @@ pub fn createShaderModule(self: *Self, code: []const u8) ?c.VkShaderModule {
     return shader_module;
 }
 
-pub fn loadScene(self: *Self, s: *scene.Scene) !void {
-    var old_scene = self.scene;
-    self.scene = s;
-    var iter = self.scene.dfs() catch @panic("OOM");
-    defer iter.deinit();
-    while (try iter.next()) |next| {
-        if (next.getComponent(Camera)) |camera| {
-            self.main_camera = camera;
-            break;
-        }
-        next.deref();
-    }
-    old_scene.deinit();
-}
-
 pub fn deinit(self: *Self) void {
     check_vk(c.vkDeviceWaitIdle(self.device)) catch @panic("Failed to wait for device idle");
 
@@ -1053,7 +1033,6 @@ pub fn deinit(self: *Self) void {
         main_camera.object.deref();
         self.main_camera = null;
     }
-    self.scene.deinit();
 
     for (self.buffer_deletion_queue.items) |*entry| {
         entry.delete(self);

@@ -3,6 +3,7 @@ const c = @import("clibs");
 
 const Engine = @import("VulkanEngine.zig");
 const check_vk = @import("vulkan_init.zig").check_vk;
+const Urn = @import("Uuid.zig").Urn;
 
 const log = std.log.scoped(.textures);
 
@@ -11,23 +12,18 @@ pub const Texture = struct {
     image_view: c.VkImageView,
 };
 
-pub fn load_image_from_file(engine: *Engine, filepath: []const u8) !Engine.AllocatedImage {
+pub fn load_image(engine: *Engine, buffer: []const u8, urn: Urn) !Engine.AllocatedImage {
     var width: c_int = undefined;
     var height: c_int = undefined;
     var channels: c_int = undefined;
 
-    // This is just to make the API more zig friendly. Conver to C 0-term string
-    // on the stack.
-    var buffer: [512]u8 = undefined;
-    const filepathz = try std.fmt.bufPrintZ(buffer[0..], "{s}", .{filepath});
-
-    const image_data = c.stbi_load(filepathz.ptr, &width, &height, &channels, c.STBI_rgb_alpha);
+    const image_data = c.stbi_load_from_memory(buffer.ptr, @intCast(buffer.len), &width, &height, &channels, c.STBI_rgb_alpha);
     if (image_data == null) {
         return error.failed_to_load_image;
     }
     defer c.stbi_image_free(image_data);
 
-    log.info("Loaded image from file to ram: {s}", .{filepath});
+    log.info("Loaded image from memory: {s}", .{urn});
 
     const image_size = @as(c.VkDeviceSize, @intCast(width * height * 4));
     const format = c.VK_FORMAT_R8G8B8A8_UNORM;
@@ -77,7 +73,7 @@ pub fn load_image_from_file(engine: *Engine, filepath: []const u8) !Engine.Alloc
         return error.failed_to_create_image;
     }
 
-    log.info("Create vkimage and gpu memory for image: {s}", .{filepath});
+    log.info("Create vkimage and gpu memory for image: {s}", .{urn});
 
     // Tranfer CPU memory to GPU memory
     //
