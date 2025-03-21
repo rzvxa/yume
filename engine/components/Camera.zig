@@ -2,6 +2,7 @@ const std = @import("std");
 
 const Object = @import("../scene.zig").Object;
 const Component = @import("../scene.zig").Component;
+const ComponentDefinition = @import("../scene.zig").ComponentDefinition;
 const typeId = @import("../utils.zig").typeId;
 const math3d = @import("../math3d.zig");
 const Vec2 = math3d.Vec2;
@@ -219,10 +220,47 @@ inline fn updateViewProjection(self: *Self) void {
     self.view_projection = self.projection.mul(self.view);
 }
 
+fn default(allocator: std.mem.Allocator, obj: *Object) !Component {
+    const self = try allocator.create(Self);
+    self.* = init(obj, .{
+        .perspective = .{
+            .fovy_rad = std.math.degreesToRadians(70.0),
+            .far = 200,
+            .near = 0.1,
+        },
+    });
+    return self.asComponent();
+}
+
+fn destroy(allocator: std.mem.Allocator, ptr: *Self) void {
+    allocator.destroy(ptr);
+}
+
+fn fromJson(s: []const u8, ptr: *Self) !void {
+    _ = s;
+    _ = ptr;
+}
+
+fn toJson(self: *Self) []u8 {
+    _ = self;
+    return &[_]u8{};
+}
+
 pub fn asComponent(self: *Self) Component {
     return .{
         .type_id = typeId(Self),
         .name = "Camera",
         .ptr = self,
+    };
+}
+
+pub fn definition() ComponentDefinition {
+    return .{
+        .type_id = typeId(Self),
+        .name = "Camera",
+        .create_default = @ptrCast(&Self.default),
+        .destroy = @ptrCast(&Self.destroy),
+        .fromJson = @ptrCast(&Self.fromJson),
+        .toJson = @ptrCast(&Self.toJson),
     };
 }

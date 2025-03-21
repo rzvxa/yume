@@ -71,6 +71,7 @@ pub const AssetsDatabase = struct {
         const handle = TextureAssetHandle{ .uuid = id };
 
         const bytes = try instance.loader(instance.allocator, id, default_max_bytes);
+        defer instance.allocator.free(bytes);
         const image = try texs.load_image(instance.engine, bytes, id.urn());
 
         const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
@@ -123,6 +124,7 @@ pub const AssetsDatabase = struct {
         }
         const handle = MeshAssetHandle{ .uuid = id };
         const bytes = try instance.loader(instance.allocator, id, default_max_bytes);
+        defer instance.allocator.free(bytes);
 
         const mesh = try instance.allocator.create(Mesh);
         mesh.* = load_from_obj(instance.allocator, bytes);
@@ -329,7 +331,6 @@ pub const AssetsDatabase = struct {
         defer instance.allocator.free(bytes);
 
         const scene = try Scene.fromJson(instance.allocator, bytes, .{});
-        std.debug.print("{?}\n", .{scene});
 
         const loaded = LoadedAsset{ .data = .{ .scene = scene } };
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);

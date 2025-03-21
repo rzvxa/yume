@@ -53,9 +53,9 @@ pub fn build(b: *std.Build) !void {
     yume.addLibraryPath(.{ .cwd_relative = "vendor/sdl3/lib" });
     const env_map = try std.process.getEnvMap(b.allocator);
     if (env_map.get("VK_SDK_PATH")) |path| {
-        yume.addLibraryPath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/lib", .{path}) catch @panic("OOM") });
-        yume.addIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM") });
-        engine_c_libs.addIncludeDir(std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM"));
+        yume.addLibraryPath(.{ .cwd_relative = try std.fmt.allocPrint(b.allocator, "{s}/lib", .{path}) });
+        yume.addIncludePath(.{ .cwd_relative = try std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) });
+        engine_c_libs.addIncludeDir(try std.fmt.allocPrint(b.allocator, "{s}/include", .{path}));
     }
     yume.addCSourceFile(.{ .file = b.path("engine/vk_mem_alloc.cpp"), .flags = &.{""} });
     yume.addCSourceFile(.{ .file = b.path("engine/stb_image.c"), .flags = &.{""} });
@@ -68,8 +68,6 @@ pub fn build(b: *std.Build) !void {
     const engine_c_mod = engine_c_libs.createModule();
     yume.addImport("clibs", engine_c_mod);
 
-    compile_all_shaders(b);
-
     const editor = b.addExecutable(.{
         .name = "yume editor",
         .root_source_file = b.path("editor/main.zig"),
@@ -80,7 +78,7 @@ pub fn build(b: *std.Build) !void {
     editor.root_module.addImport("clibs", engine_c_mod);
 
     if (env_map.get("VK_SDK_PATH")) |path| {
-        editor.addIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM") });
+        editor.addIncludePath(.{ .cwd_relative = try std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) });
     }
     editor.addIncludePath(.{ .cwd_relative = "vendor/sdl3/include" });
     editor.addIncludePath(b.path("vendor/vma/"));
@@ -105,7 +103,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     if (env_map.get("VK_SDK_PATH")) |path| {
-        imgui_lib.addIncludePath(.{ .cwd_relative = std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) catch @panic("OOM") });
+        imgui_lib.addIncludePath(.{ .cwd_relative = try std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) });
     }
     imgui_lib.defineCMacro("IMGUI_USE_LEGACY_CRC32_ADLER", null);
     imgui_lib.addIncludePath(b.path("vendor/imgui/"));
@@ -139,36 +137,69 @@ pub fn build(b: *std.Build) !void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+
+    try build_all_assets(b, .prefix, "assets", "assets");
+    try build_all_shaders(b, .prefix, "shaders", "shaders");
 }
 
-fn compile_all_shaders(b: *std.Build) void {
-    const shaders_dir =
-        b.build_root.handle.openDir("shaders", .{ .iterate = true }) catch @panic("Failed to open shaders directory");
+fn build_all_assets(
+    b: *std.Build,
+    installdir: std.Build.InstallDir,
+    srcdir: []const u8,
+    outdir: []const u8,
+) !void {
+    const dir = try b.build_root.handle.openDir(srcdir, .{ .iterate = true });
+
+    var file_it = dir.iterate();
+    while (try file_it.next()) |entry| {
+        const basename = std.fs.path.basename(entry.name);
+        const src = try std.fs.path.join(b.allocator, &[_][]const u8{ srcdir, basename });
+        const out = try std.fs.path.join(b.allocator, &[_][]const u8{ outdir, basename });
+        switch (entry.kind) {
+            .file => {
+                b.getInstallStep().dependOn(&b.addInstallFileWithDir(.{ .cwd_relative = src }, installdir, out).step);
+            },
+            .directory => {
+                try build_all_assets(b, installdir, src, out);
+            },
+            else => {},
+        }
+    }
+}
+
+fn build_all_shaders(
+    b: *std.Build,
+    installdir: std.Build.InstallDir,
+    srcdir: []const u8,
+    outdir: []const u8,
+) !void {
+    const shader_ext = "glsl";
+    const built_shader_ext = "spv";
+
+    const shaders_dir = try b.build_root.handle.openDir(srcdir, .{ .iterate = true });
 
     var file_it = shaders_dir.iterate();
-    while (file_it.next() catch @panic("Failed to iterate shader directory")) |entry| {
+    while (try file_it.next()) |entry| {
         if (entry.kind == .file) {
             const ext = std.fs.path.extension(entry.name);
-            if (std.mem.eql(u8, ext, ".glsl")) {
+            if (ext.len > 1 and std.mem.eql(u8, ext[1..], shader_ext)) {
                 const basename = std.fs.path.basename(entry.name);
                 const name = basename[0 .. basename.len - ext.len];
-
-                std.debug.print("Found shader file to compile: {s}. Compiling with name: {s}\n", .{ entry.name, name });
-                add_shader(b, name);
+                std.debug.print("Found shader file to compile: {s}.\n", .{entry.name});
+                const src = try std.fmt.allocPrint(b.allocator, "{s}/{s}.{s}", .{ srcdir, name, shader_ext });
+                const out = try std.fmt.allocPrint(b.allocator, "{s}/{s}.{s}", .{ outdir, name, built_shader_ext });
+                build_shader(b, installdir, src, out);
             }
         }
     }
 }
 
-fn add_shader(b: *std.Build, name: []const u8) void {
-    const source = std.fmt.allocPrint(b.allocator, "shaders/{s}.glsl", .{name}) catch @panic("OOM");
-    const outpath = std.fmt.allocPrint(b.allocator, ".shader-cache/{s}.spv", .{name}) catch @panic("OOM");
-
+fn build_shader(b: *std.Build, installdir: std.Build.InstallDir, src: []const u8, out: []const u8) void {
     const shader_compilation = b.addSystemCommand(&.{"glslangValidator"});
     shader_compilation.addArg("-V");
     shader_compilation.addArg("-o");
-    const output = shader_compilation.addOutputFileArg(outpath);
-    shader_compilation.addFileArg(b.path(source));
+    const output = shader_compilation.addOutputFileArg(out);
+    shader_compilation.addFileArg(b.path(src));
 
-    b.getInstallStep().dependOn(&b.addInstallFileWithDir(output, .{ .custom = "../" }, outpath).step);
+    b.getInstallStep().dependOn(&b.addInstallFileWithDir(output, installdir, out).step);
 }

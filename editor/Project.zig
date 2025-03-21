@@ -42,6 +42,11 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     try addBuiltin("ac6b9d14-0a56-458a-a7cc-fd36ede79468", "lost_empire.obj");
     try addBuiltin("acc02aef-7ac0-46e7-b006-378c36ac1b27", "u.obj");
     try addBuiltin("17c0ee4b-8fa0-43a7-a3d8-8bf7b5e73bb9", "u.mtl");
+    try addBuiltin("23400ade-52d7-416b-9679-884a49de1722", "cube.obj");
+
+    try addBuiltinShader("cf64bfc9-703c-43b0-9d01-c8032706872c", "tri_mesh.vert.glsl");
+    try addBuiltinShader("8b4db7d0-33a6-4f42-96cc-7b1d88566f27", "default_lit.frag.glsl");
+    try addBuiltinShader("9939ab1b-d72c-4463-b039-58211f2d6531", "textured_lit.frag.glsl");
 }
 
 pub fn unload(self: *Self) void {
@@ -253,9 +258,13 @@ pub fn getResourceId(self: *Self, path: []const u8) !Uuid {
 }
 
 pub fn getResourcePath(id: Uuid) ![]const u8 {
-    const res = instance.?.resources.get(id);
+    const ins = instance.?;
+    if (ins.resources_builtins.get(id)) |b| {
+        return b.path;
+    }
+
+    const res = ins.resources.get(id);
     if (res) |r| {
-        std.debug.print("{}\n", .{res.?});
         return r.path;
     } else {
         return error.ResourceNotFound;
@@ -263,6 +272,7 @@ pub fn getResourcePath(id: Uuid) ![]const u8 {
 }
 
 pub fn readAssetAlloc(allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) ![]u8 {
+    std.debug.print("readAssetAlloc ({s}) :: {s}\n", .{ id.urn(), try getResourcePath(id) });
     var file = std.fs.cwd().openFile(try getResourcePath(id), .{}) catch return error.FailedToOpenResource;
     defer file.close();
     return file.readToEndAlloc(allocator, max_bytes) catch return error.FailedToReadResource;
@@ -270,7 +280,28 @@ pub fn readAssetAlloc(allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) 
 
 fn addBuiltin(urn: []const u8, path: []const u8) !void {
     const id = try Uuid.fromUrnSlice(urn);
-    try instance.?.resources_builtins.put(id, Resource{ .id = id, .path = try instance.?.allocator.dupe(u8, path) });
+    const exe_path = try std.fs.selfExeDirPathAlloc(instance.?.allocator);
+    defer instance.?.allocator.free(exe_path);
+    const dirname = std.fs.path.dirname(std.fs.path.dirname(exe_path) orelse return error.InvalidPath) orelse return error.InvalidPath;
+    try instance.?.resources_builtins.put(id, Resource{
+        .id = id,
+        .path = try std.fs.path.join(instance.?.allocator, &[_][]const u8{ dirname, "assets", "builtin", path }),
+    });
+    const uri = try std.fmt.allocPrint(instance.?.allocator, "builtin://{s}", .{path});
+    try instance.?.resources_index.put(uri, id);
+}
+
+fn addBuiltinShader(urn: []const u8, path: []const u8) !void {
+    const id = try Uuid.fromUrnSlice(urn);
+    const exe_path = try std.fs.selfExeDirPathAlloc(instance.?.allocator);
+    defer instance.?.allocator.free(exe_path);
+    const dirname = std.fs.path.dirname(exe_path) orelse return error.InvalidPath;
+    const pathspv = try std.fmt.allocPrint(instance.?.allocator, "{s}.{s}", .{ path[0 .. path.len - ".glsl".len], "spv" });
+    defer instance.?.allocator.free(pathspv);
+    try instance.?.resources_builtins.put(id, Resource{
+        .id = id,
+        .path = try std.fs.path.join(instance.?.allocator, &[_][]const u8{ dirname, "shaders", pathspv }),
+    });
     const uri = try std.fmt.allocPrint(instance.?.allocator, "builtin://{s}", .{path});
     try instance.?.resources_index.put(uri, id);
 }

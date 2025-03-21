@@ -501,7 +501,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
 
     if (c.ImGui_Begin("Properties", null, 0)) {
         if (self.selection) |selection| {
-            self.drawProperties(selection);
+            self.drawProperties(selection, ctx);
         }
     }
     c.ImGui_End();
@@ -957,7 +957,7 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
     }
 }
 
-fn drawProperties(self: *Self, obj: *Object) void {
+fn drawProperties(self: *Self, obj: *Object, ctx: *GameApp) void {
     c.ImGui_PushID(&obj.uuid.urn());
     defer c.ImGui_PopID();
     self.editors.editObjectMeta(obj, object_icon_ds);
@@ -1000,6 +1000,15 @@ fn drawProperties(self: *Self, obj: *Object) void {
         var query: [1024]u8 = undefined;
         query[0] = 0;
         _ = c.ImGui_InputText("###component_name", &query, 1024, 0);
+        {
+            var iter = ctx.components.iterator();
+            while (iter.next()) |it| {
+                if (c.ImGui_Button(it.key_ptr.ptr)) {
+                    c.ImGui_CloseCurrentPopup();
+                    self.selection.?.addComponentDynamic(it.value_ptr);
+                }
+            }
+        }
         if (c.ImGui_Button("Add###add_component")) {
             c.ImGui_CloseCurrentPopup();
         }

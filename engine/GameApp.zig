@@ -16,7 +16,9 @@ const Vec3 = math3d.Vec3;
 const AssetsDatabase = @import("assets.zig").AssetsDatabase;
 
 const Scene = @import("scene.zig").Scene;
+const ComponentDefinition = @import("scene.zig").ComponentDefinition;
 const Camera = @import("components/Camera.zig");
+const MeshRenderer = @import("components/MeshRenderer.zig");
 
 const inputs = @import("inputs.zig");
 const assets = @import("assets.zig");
@@ -31,6 +33,8 @@ window: *c.SDL_Window = undefined,
 
 inputs: *inputs.InputContext,
 engine: VulkanEngine,
+
+components: std.StringHashMap(ComponentDefinition),
 
 scene: *Scene,
 
@@ -54,9 +58,12 @@ pub fn init(a: std.mem.Allocator, loader: assets.AssetLoader, window_title: []co
         .window = window,
         .inputs = inputs.init(window) catch @panic("Failed to initialize input manager"),
         .engine = engine,
+        .components = std.StringHashMap(ComponentDefinition).init(a),
     };
 
     assets.AssetsDatabase.init(a, &self.engine, loader);
+    self.components.put("Camera", Camera.definition()) catch @panic("OOM");
+    self.components.put("MeshRenderer", MeshRenderer.definition()) catch @panic("OOM");
     return self;
 }
 
@@ -116,7 +123,7 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
 }
 
 pub fn deinit(self: *Self) void {
-    // self.scene.deinit();
+    self.components.deinit();
     assets.AssetsDatabase.deinit();
     self.engine.deinit();
     self.allocator.destroy(self);

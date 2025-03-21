@@ -242,19 +242,25 @@ pub const Object = struct {
         const component = self.scene.allocator.create(ComponentType) catch @panic("OOM");
         component.* = ComponentType.init(self, init_options);
 
-        var interface = component.asComponent();
-        interface.uuid = Uuid.new();
+        const interface = component.asComponent();
+        const def = ComponentType.definition();
+        self.addComponentPtr(&def, interface);
+    }
 
-        self.components.append(interface) catch @panic("OOM");
-        const deinitializer = struct {
-            fn f(allocator: std.mem.Allocator, ptr: *anyopaque) void {
-                allocator.destroy(@as(*ComponentType, @ptrCast(@alignCast(ptr))));
-            }
-        };
-        self.components_deinit_handles.append(.{ .ptr = component, .deinitalizer = deinitializer.f }) catch @panic("OOM");
+    pub fn addComponentDynamic(self: *Self, def: *const ComponentDefinition) void {
+        const component = def.create_default(self.scene.allocator, self) catch @panic("Failed to add component dynamically");
+        self.addComponentPtr(def, component);
+    }
 
-        if (ComponentType == MeshRenderer) {
-            self.scene.renderables.append(component) catch @panic("OOM");
+    pub fn addComponentPtr(self: *Self, def: *const ComponentDefinition, component: Component) void {
+        var component_var = component;
+        component_var.uuid = Uuid.new();
+
+        self.components.append(component_var) catch @panic("OOM");
+        self.components_deinit_handles.append(.{ .ptr = component.ptr, .deinitalizer = def.destroy }) catch @panic("OOM");
+
+        if (component_var.type_id == utils.typeId(MeshRenderer)) {
+            self.scene.renderables.append(@ptrCast(@alignCast(component_var.ptr))) catch @panic("OOM");
         }
     }
 
@@ -572,4 +578,13 @@ pub const Component = struct {
     deinit: *const fn (_: *anyopaque) void = struct {
         fn noop(_: *anyopaque) void {}
     }.noop,
+};
+
+pub const ComponentDefinition = struct {
+    type_id: usize,
+    name: [:0]const u8,
+    create_default: *const fn (allocator: std.mem.Allocator, obj: *Object) anyerror!Component,
+    destroy: *const fn (allocator: std.mem.Allocator, ptr: *anyopaque) void,
+    fromJson: *const fn (s: []const u8, ptr: *anyopaque) anyerror!void,
+    toJson: *const fn (self: *anyopaque) []u8,
 };
