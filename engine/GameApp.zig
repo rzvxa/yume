@@ -14,6 +14,7 @@ const math3d = @import("math3d.zig");
 const Vec3 = math3d.Vec3;
 
 const AssetsDatabase = @import("assets.zig").AssetsDatabase;
+const SceneAssetHandle = @import("assets.zig").SceneAssetHandle;
 
 const Scene = @import("scene.zig").Scene;
 const ComponentDefinition = @import("scene.zig").ComponentDefinition;
@@ -37,6 +38,7 @@ engine: VulkanEngine,
 components: std.StringHashMap(ComponentDefinition),
 
 scene: *Scene,
+scene_handle: ?SceneAssetHandle = null,
 
 delta: f32 = 0.016,
 
@@ -123,6 +125,9 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
 }
 
 pub fn deinit(self: *Self) void {
+    if (self.scene_handle == null) {
+        self.scene.deinit();
+    }
     self.components.deinit();
     assets.AssetsDatabase.deinit();
     self.engine.deinit();
@@ -130,15 +135,21 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn loadScene(self: *Self, scene_id: Uuid) !void {
-    const s = try AssetsDatabase.getOrLoadScene(scene_id);
+    const old_handle = self.scene_handle;
     var old_scene = self.scene;
-    self.scene = s;
+    self.scene_handle = try AssetsDatabase.loadScene(scene_id);
+    self.scene = try AssetsDatabase.getScene(self.scene_handle.?);
     var iter = self.scene.dfs() catch @panic("OOM");
     defer iter.deinit();
     while (try iter.next()) |next| {
         next.deref();
     }
-    old_scene.deinit();
+
+    if (old_handle) |handle| {
+        try AssetsDatabase.unload(handle.toAssetHandle());
+    } else {
+        old_scene.deinit();
+    }
 }
 
 fn newFrame(self: *Self) void {

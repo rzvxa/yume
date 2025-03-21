@@ -53,16 +53,26 @@ pub fn show(self: *Self) void {
         c.ImGui_BeginGroup();
 
         c.ImGui_SetCursorPosY(c.ImGui_GetCursorPosY() + box_height / 4);
+        imutils.alignHorizontal(700, 0.5);
+        c.ImGui_Image(@intFromPtr(Editor.yume_logo_ds), c.ImVec2{ .x = 246, .y = 326 });
         c.ImGui_PushFont(Editor.roboto32);
-        c.ImGui_Text("Hello!");
+        c.ImGui_NewLine();
+        imutils.alignHorizontal(730, 0.5);
+        const version = @import("yume").version;
+        c.ImGui_Text("Welcome to Yume v%d.%d.%d", version.major, version.minor, version.patch);
+        c.ImGui_PopFont();
         for (0..1) |_| c.ImGui_Spacing();
-        if (c.ImGui_Button("New Project")) {
+        c.ImGui_PushFont(Editor.roboto24);
+        imutils.alignHorizontal(875, 0.5);
+        if (c.ImGui_Button("\t\tNew Project\t\t")) {
             Editor.instance().newProject();
         }
         c.ImGui_SameLine();
-        if (c.ImGui_Button("Open Project")) {
+        if (c.ImGui_Button("\t\tOpen Project\t\t")) {
             Editor.instance().openProject();
         }
+        c.ImGui_NewLine();
+        imutils.alignHorizontal(550, 0.5);
         c.ImGui_Text("Recent:");
         c.ImGui_PopFont();
         c.ImGui_EndGroup();

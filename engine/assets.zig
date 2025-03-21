@@ -343,6 +343,12 @@ pub const AssetsDatabase = struct {
         if (it.assetType() != ty) return error.InvalidType;
         return it;
     }
+
+    pub fn unload(hndl: AssetHandle) !void {
+        var it = instance.loaded_assets.fetchRemove(hndl) orelse return error.AssetNotLoaded;
+        std.debug.assert(instance.loaded_ids.remove(hndl.uuid));
+        it.value.unload();
+    }
 };
 
 const AssetType = enum {

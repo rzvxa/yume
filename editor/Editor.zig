@@ -856,6 +856,8 @@ fn init_imgui(engine: *Engine) void {
     close_icon_ds = create_imgui_texture("assets/editor/icons/close.png", engine);
     browse_icon_ds = create_imgui_texture("assets/editor/icons/browse.png", engine);
 
+    yume_logo_ds = create_imgui_texture("assets/editor/icons/yume.png", engine);
+
     engine.deletion_queue.append(VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool)) catch @panic("Out of memory");
 
     io.*.ConfigFlags |= c.ImGuiConfigFlags_DockingEnable;
@@ -1188,3 +1190,5 @@ pub var rotate_tool_icon_ds: c.VkDescriptorSet = undefined;
 pub var scale_tool_icon_ds: c.VkDescriptorSet = undefined;
 pub var close_icon_ds: c.VkDescriptorSet = undefined;
 pub var browse_icon_ds: c.VkDescriptorSet = undefined;
+
+pub var yume_logo_ds: c.VkDescriptorSet = undefined;

@@ -74,6 +74,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+
     engine_c_libs.addIncludeDir("vendor/imgui/");
     editor.root_module.addImport("clibs", engine_c_mod);
 
