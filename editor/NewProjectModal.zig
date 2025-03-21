@@ -200,7 +200,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
 
     {
         const main_camera = scene.newObject(.{
-            .name = "Main Camera",
+            .name = self.allocator.dupeZ(u8, "Main Camera") catch @panic("OOM"),
             .transform = Mat4.translation(Vec3.make(0, 1, 0)),
         }) catch @panic("OOM");
         defer main_camera.deref();
@@ -212,12 +212,12 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
             },
         });
         const apes = scene.newObject(.{
-            .name = "Apes Together Strong!",
+            .name = self.allocator.dupeZ(u8, "Apes Together Strong!") catch @panic("OOM"),
             .transform = Mat4.translation(Vec3.make(0, 3, 0)),
         }) catch @panic("OOM");
         defer apes.deref();
         var monkey = scene.newObject(.{
-            .name = "Monkey",
+            .name = self.allocator.dupeZ(u8, "Monkey") catch @panic("OOM"),
             .transform = Mat4.translation(Vec3.make(-5, 3, 0)),
         }) catch @panic("OOM");
         defer monkey.deref();
@@ -228,7 +228,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
         apes.addChildren(monkey);
 
         const empire = scene.newObject(.{
-            .name = "Lost Empire",
+            .name = self.allocator.dupeZ(u8, "Lost Empire") catch @panic("OOM"),
             .transform = Mat4.translation(Vec3.make(5.0, -10.0, 0.0)),
         }) catch @panic("OOM");
         defer empire.deref();

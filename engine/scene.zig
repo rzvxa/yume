@@ -24,8 +24,8 @@ pub const Scene = struct {
             .live_object = std.ArrayList(*Object).init(allocator),
             .root = undefined,
         };
-        self.root = Object.create(self, "root", Mat4.IDENTITY) catch @panic("OOM");
-        self.live_object.append(self.root.ref()) catch @panic("OOM");
+        self.root = Object.create(self, try allocator.dupeZ(u8, "root"), Mat4.IDENTITY) catch @panic("OOM");
+        try self.live_object.append(self.root.ref());
 
         return self;
     }
@@ -46,7 +46,7 @@ pub const Scene = struct {
     }
 
     pub fn newObject(self: *Scene, options: struct {
-        name: []const u8 = "Object",
+        name: ?[:0]u8 = null,
         parent: ?*Object = null,
         transform: Mat4 = Mat4.IDENTITY,
     }) !*Object {
@@ -60,7 +60,8 @@ pub const Scene = struct {
                 break :blk self.root;
             }
         };
-        const obj = Object.create(self, options.name, options.transform) catch @panic("OOM");
+        const name = if (options.name) |n| n else parent.scene.allocator.dupeZ(u8, "Object") catch @panic("OOM");
+        const obj = Object.create(self, name, options.transform) catch @panic("OOM");
         self.live_object.append(obj) catch @panic("OOM");
         parent.addChildren(obj);
         return obj.ref();
@@ -170,7 +171,7 @@ pub const Object = struct {
     refc: u32 = 1,
 
     uuid: Uuid,
-    name: []const u8,
+    name: [:0]u8,
     transform: Transform,
     parent: ?*Object = null,
     children: std.ArrayList(*Object),
@@ -178,7 +179,7 @@ pub const Object = struct {
     components_deinit_handles: std.ArrayList(ComponentDeinitializer),
     scene: *Scene,
 
-    pub fn create(scene: *Scene, name: []const u8, transform: Mat4) !*Object {
+    pub fn create(scene: *Scene, name: [:0]u8, transform: Mat4) !*Object {
         const self = try scene.allocator.create(Self);
         self.* = .{
             .uuid = Uuid.new(),
@@ -233,6 +234,7 @@ pub const Object = struct {
             handle.deinitalizer(self.scene.allocator, handle.ptr);
         }
         self.components_deinit_handles.deinit();
+        self.scene.allocator.free(self.name);
         self.scene.allocator.destroy(self);
     }
 
@@ -372,7 +374,7 @@ pub const Object = struct {
 
         const result = try a.create(Object);
         result.* = .{
-            .uuid = undefined,
+            .uuid = .{ .raw = 0 },
             .name = undefined,
             .transform = undefined,
             .children = std.ArrayList(*Object).init(a),
@@ -396,9 +398,10 @@ pub const Object = struct {
 
             if (std.mem.eql(u8, field_name, "uuid")) {
                 result.uuid = try Uuid.jsonParse(a, jrs, o);
+                try ctx.ptrmap.put(result.uuid, result);
             } else if (std.mem.eql(u8, field_name, "name")) {
-                result.name = switch (try jrs.nextAlloc(a, .alloc_if_needed)) {
-                    inline .string, .allocated_string => |slice| slice,
+                result.name = switch (try jrs.next()) {
+                    inline .string => |slice| try a.dupeZ(u8, slice),
                     else => {
                         std.debug.print("{}\n", .{tk});
                         return error.UnexpectedToken;
@@ -416,15 +419,29 @@ pub const Object = struct {
                 const ptr = ctx.ptrmap.get(parent_id);
                 if (ptr) |p| {
                     result.parent = @as(*Self, @ptrCast(@alignCast(p)));
+                    continue;
                 }
                 std.debug.print("Failed to resolve reference {s}", .{parent_id.urn()});
                 return error.UnexpectedToken;
+            } else if (std.mem.eql(u8, field_name, "children")) {
+                std.debug.assert(try jrs.next() == .array_begin);
+                if (result.uuid.raw == 0) {
+                    return error.SyntaxError;
+                }
+                while (true) {
+                    const peek = try jrs.peekNextTokenType();
+                    if (peek == .array_end) {
+                        _ = try jrs.next();
+                        break;
+                    }
+                    const children = try Self.jsonParseGraph(a, jrs, o, ctx);
+                    try result.children.append(children);
+                }
             } else {
                 try jrs.skipValue();
             }
         }
 
-        try ctx.ptrmap.put(result.uuid, result);
         return result;
     }
 };
