@@ -139,14 +139,11 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
     var old_scene = self.scene;
     self.scene_handle = try AssetsDatabase.loadScene(scene_id);
     self.scene = try AssetsDatabase.getScene(self.scene_handle.?);
-    var iter = self.scene.dfs() catch @panic("OOM");
-    defer iter.deinit();
-    while (try iter.next()) |next| {
-        next.deref();
-    }
 
     if (old_handle) |handle| {
-        try AssetsDatabase.unload(handle.toAssetHandle());
+        if (handle.uuid.raw != scene_id.raw) {
+            try AssetsDatabase.unload(handle.toAssetHandle());
+        }
     } else {
         old_scene.deinit();
     }
