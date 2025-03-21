@@ -539,7 +539,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
                 }});
 
                 const aspect = me.d.game_view_size.x / me.d.game_view_size.y;
-                if (me.app.engine.main_camera) |main_camera| {
+                if (me.app.scene.main_camera) |main_camera| {
                     main_camera.updateMatrices(
                         main_camera.object.transform.position(),
                         Vec3.ZERO,
@@ -561,7 +561,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             }
         }.f, &frame_userdata);
         c.ImDrawList_AddCallback(game_image, c.ImDrawCallback_ResetRenderState, null);
-        if (ctx.engine.main_camera == null) {
+        if (ctx.scene.main_camera == null) {
             const text = "No Camera";
             const size = c.ImGui_CalcTextSize(text);
             const avail = c.ImGui_GetContentRegionAvail();

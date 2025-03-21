@@ -6,12 +6,14 @@ const Mat4 = @import("math3d.zig").Mat4;
 const Quat = @import("math3d.zig").Quat;
 const utils = @import("utils.zig");
 const MeshRenderer = @import("components/MeshRenderer.zig");
+const Camera = @import("components/Camera.zig");
 const BoundingBox = @import("mesh.zig").BoundingBox;
 
 pub const Scene = struct {
     const Self = @This();
 
     root: *Object,
+    main_camera: ?*Camera = null,
     renderables: std.ArrayList(*MeshRenderer),
     live_object: std.ArrayList(*Object),
     allocator: std.mem.Allocator,
@@ -32,6 +34,10 @@ pub const Scene = struct {
 
     pub fn deinit(self: *Self) void {
         self.renderables.deinit();
+        if (self.main_camera) |main_camera| {
+            main_camera.object.deref();
+            self.main_camera = null;
+        }
         self.root.clear(true);
         self.root.deref();
         for (self.live_object.items) |obj| {
@@ -261,6 +267,11 @@ pub const Object = struct {
 
         if (component_var.type_id == utils.typeId(MeshRenderer)) {
             self.scene.renderables.append(@ptrCast(@alignCast(component_var.ptr))) catch @panic("OOM");
+        } else if (component_var.type_id == utils.typeId(Camera)) {
+            if (self.scene.main_camera == null) {
+                _ = self.ref();
+                self.scene.main_camera = @ptrCast(@alignCast(component_var.ptr));
+            }
         }
     }
 

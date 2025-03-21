@@ -136,10 +136,6 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
     var iter = self.scene.dfs() catch @panic("OOM");
     defer iter.deinit();
     while (try iter.next()) |next| {
-        if (next.getComponent(Camera)) |camera| {
-            self.engine.main_camera = camera;
-            break;
-        }
         next.deref();
     }
     old_scene.deinit();
@@ -160,7 +156,7 @@ fn update(self: *Self) void {
 
     if (input.squaredLen() > (0.1 * 0.1)) {
         const camera_delta = input.normalized().mulf(self.delta * 5.0);
-        var transform = &self.engine.main_camera.?.object.transform;
+        var transform = &self.scene.main_camera.?.object.transform;
         transform.setPosition(transform.position().add(camera_delta));
     }
 }

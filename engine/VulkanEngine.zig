@@ -149,8 +149,6 @@ descriptor_pool: c.VkDescriptorPool = VK_NULL_HANDLE,
 
 vma_allocator: c.VmaAllocator = undefined,
 
-main_camera: ?*Camera = null,
-
 deletion_queue: std.ArrayList(VulkanDeleter) = undefined,
 buffer_deletion_queue: std.ArrayList(VmaBufferDeleter) = undefined,
 image_deletion_queue: std.ArrayList(VmaImageDeleter) = undefined,
@@ -1028,11 +1026,6 @@ pub fn createShaderModule(self: *Self, code: []const u8) ?c.VkShaderModule {
 
 pub fn deinit(self: *Self) void {
     check_vk(c.vkDeviceWaitIdle(self.device)) catch @panic("Failed to wait for device idle");
-
-    if (self.main_camera) |main_camera| {
-        main_camera.object.deref();
-        self.main_camera = null;
-    }
 
     for (self.buffer_deletion_queue.items) |*entry| {
         entry.delete(self);

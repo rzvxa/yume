@@ -506,31 +506,4 @@ fn setLayoutFromString(layout: []const u8) !SetLayout {
     } else unreachable;
 }
 
-// called must free the allocated string
-fn resolveUri2(allocator: std.mem.Allocator, uri: []const u8) ![]const u8 {
-    const BUILTIN_SCHEMA = "builtin://";
-    const BUILTIN_PREFIX = "assets/builtin";
-    const SHADER_PREFIX = "shaders";
-    var prefix_len: usize = 0;
-    var path: []const u8 = undefined;
-    if (uri.len > BUILTIN_SCHEMA.len and std.mem.eql(u8, uri[0..BUILTIN_SCHEMA.len], BUILTIN_SCHEMA)) {
-        prefix_len = BUILTIN_SCHEMA.len;
-        path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ BUILTIN_PREFIX, uri[BUILTIN_SCHEMA.len..] });
-    } else {
-        @panic("Not Implemented");
-    }
-
-    const ext = std.fs.path.extension(path);
-    if (std.mem.eql(u8, ext, ".glsl") and
-        uri.len - prefix_len > SHADER_PREFIX.len and
-        std.mem.eql(u8, uri[prefix_len .. prefix_len + SHADER_PREFIX.len], SHADER_PREFIX))
-    {
-        const slice = uri[prefix_len + SHADER_PREFIX.len + 1 .. uri.len - 5];
-        const cache_path = try std.fmt.allocPrint(allocator, ".shader-cache/{s}.spv", .{slice});
-        allocator.free(path);
-        return cache_path;
-    }
-    return path;
-}
-
 pub const AssetLoader = *const fn (allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) error{ ResourceNotFound, FailedToOpenResource, FailedToReadResource }![]u8;
