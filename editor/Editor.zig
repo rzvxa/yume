@@ -101,95 +101,6 @@ pub fn init(ctx: *GameApp) *Self {
     };
     singleton.init_descriptors(&ctx.engine);
     init_imgui(&ctx.engine);
-    // var scene = Scene.init(ctx.allocator) catch @panic("OOM");
-    //
-    // {
-    //     const main_camera = scene.newObject(.{
-    //         .name = "Main Camera",
-    //         .transform = Mat4.translation(Vec3.make(0, 1, 0)),
-    //     }) catch @panic("OOM");
-    //     defer main_camera.deref();
-    //     main_camera.addComponent(Camera, .{
-    //         .perspective = .{
-    //             .fovy_rad = std.math.degreesToRadians(70.0),
-    //             .far = 200,
-    //             .near = 0.1,
-    //         },
-    //     });
-    //     const apes = scene.newObject(.{
-    //         .name = "Apes Together Strong!",
-    //         .transform = Mat4.translation(Vec3.make(0, 3, 0)),
-    //     }) catch @panic("OOM");
-    //     defer apes.deref();
-    //     var monkey = scene.newObject(.{
-    //         .name = "Monkey",
-    //         .transform = Mat4.translation(Vec3.make(-5, 3, 0)),
-    //     }) catch @panic("OOM");
-    //     defer monkey.deref();
-    //     monkey.addComponent(MeshRenderer, .{
-    //         .mesh = AssetsDatabase.getOrLoadMesh("builtin://u.obj") catch @panic("Failed to get monkey mesh"),
-    //         .material = AssetsDatabase.getOrLoadMaterial("builtin://materials/none.mat.json") catch @panic("Failed to get none material"),
-    //     });
-    //     apes.addChildren(monkey);
-    //
-    //     const empire = scene.newObject(.{
-    //         .name = "Lost Empire",
-    //         .transform = Mat4.translation(Vec3.make(5.0, -10.0, 0.0)),
-    //     }) catch @panic("OOM");
-    //     defer empire.deref();
-    //     var empire_material = AssetsDatabase.getOrLoadMaterial("builtin://materials/default.mat.json") catch @panic("Failed to get default mesh material");
-    //
-    //     // Allocate descriptor set for signle-texture to use on the material
-    //     const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
-    //         .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-    //         .descriptorPool = ctx.engine.descriptor_pool,
-    //         .descriptorSetCount = 1,
-    //         .pSetLayouts = &ctx.engine.single_texture_set_layout,
-    //     });
-    //
-    //     check_vk(c.vkAllocateDescriptorSets(ctx.engine.device, &descriptor_set_alloc_info, &empire_material.texture_set)) catch @panic("Failed to allocate descriptor set");
-    //
-    //     // Sampler
-    //     const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
-    //         .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-    //         .magFilter = c.VK_FILTER_NEAREST,
-    //         .minFilter = c.VK_FILTER_NEAREST,
-    //         .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-    //         .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-    //         .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-    //     });
-    //
-    //     var sampler: c.VkSampler = undefined;
-    //     check_vk(c.vkCreateSampler(ctx.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
-    //     ctx.engine.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("Out of memory");
-    //
-    //     const lost_empire_tex_handle = AssetsDatabase.loadTexture("builtin://lost_empire-RGBA.png") catch @panic("Failed to load texture");
-    //     const lost_empire_tex = AssetsDatabase.getTexture(lost_empire_tex_handle) catch @panic("Failed to get empire texture");
-    //     // const lost_empire_tex = (ctx.engine.textures.get("empire_diffuse") orelse @panic("Failed to get empire texture"));
-    //
-    //     const descriptor_image_info = std.mem.zeroInit(c.VkDescriptorImageInfo, .{
-    //         .sampler = sampler,
-    //         .imageView = lost_empire_tex.image_view,
-    //         .imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-    //     });
-    //
-    //     const write_descriptor_set = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
-    //         .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-    //         .dstSet = empire_material.texture_set,
-    //         .dstBinding = 0,
-    //         .descriptorCount = 1,
-    //         .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-    //         .pImageInfo = &descriptor_image_info,
-    //     });
-    //
-    //     c.vkUpdateDescriptorSets(ctx.engine.device, 1, &write_descriptor_set, 0, null);
-    //
-    //     empire.addComponent(MeshRenderer, .{
-    //         .mesh = AssetsDatabase.getOrLoadMesh("builtin://lost_empire.obj") catch @panic("Failed to get triangle mesh"),
-    //         .material = empire_material,
-    //     });
-    // }
-    // ctx.engine.loadScene(scene) catch @panic("Failed to load default scene");
     return &singleton;
 }
 
@@ -320,29 +231,29 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             if (c.ImGui_MenuItem("Open")) {
                 self.open_project_modal.open();
             }
-            if (c.ImGui_MenuItem("Save")) {}
-            if (c.ImGui_MenuItem("Quit")) {}
+            if (c.ImGui_MenuItem("Save*")) {}
+            if (c.ImGui_MenuItem("Quit*")) {}
             c.ImGui_EndMenu();
         }
         if (c.ImGui_BeginMenu("Scene")) {
-            if (c.ImGui_MenuItem("New")) {}
-            if (c.ImGui_MenuItem("Load")) {}
-            if (c.ImGui_MenuItem("Save")) {}
+            if (c.ImGui_MenuItem("New*")) {}
+            if (c.ImGui_MenuItem("Load*")) {}
+            if (c.ImGui_MenuItem("Save*")) {}
             c.ImGui_EndMenu();
         }
         if (c.ImGui_BeginMenu("Edit")) {
-            if (c.ImGui_MenuItemEx("Undo", "CTRL+Z", false, true)) {}
-            if (c.ImGui_MenuItemEx("Redo", "CTRL+Y", false, false)) {} // Disabled item
+            if (c.ImGui_MenuItemEx("Undo*", "CTRL+Z", false, true)) {}
+            if (c.ImGui_MenuItemEx("Redo*", "CTRL+Y", false, false)) {} // Disabled item
             c.ImGui_Separator();
-            if (c.ImGui_MenuItemEx("Cut", "CTRL+X", false, true)) {}
-            if (c.ImGui_MenuItemEx("Copy", "CTRL+C", false, true)) {}
-            if (c.ImGui_MenuItemEx("Paste", "CTRL+V", false, true)) {}
+            if (c.ImGui_MenuItemEx("Cut*", "CTRL+X", false, true)) {}
+            if (c.ImGui_MenuItemEx("Copy*", "CTRL+C", false, true)) {}
+            if (c.ImGui_MenuItemEx("Paste*", "CTRL+V", false, true)) {}
             c.ImGui_EndMenu();
         }
         if (c.ImGui_BeginMenu("Help")) {
             _ = c.ImGui_MenuItemBoolPtr("ImGui Demo Window", null, &self.imgui_demo_open, true);
             c.ImGui_Separator();
-            if (c.ImGui_MenuItem("About")) {}
+            if (c.ImGui_MenuItem("About*")) {}
             c.ImGui_EndMenu();
         }
         c.ImGui_SetCursorPosX((c.ImGui_GetCursorPosX() - (13 * 3)) + (GameApp.window_extent.width / 2) - c.ImGui_GetCursorPosX());
@@ -946,15 +857,28 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
 
     if (c.ImGui_BeginPopupContextItemEx("context-menu", c.ImGuiPopupFlags_MouseButtonRight)) {
         if (c.ImGui_BeginMenu("New")) {
-            _ = c.ImGui_MenuItem("New Object");
-            _ = c.ImGui_MenuItem("New Camera");
+            _ = c.ImGui_MenuItem("Object*");
+            c.ImGui_Separator();
+            _ = c.ImGui_MenuItem("Cube*");
+            _ = c.ImGui_MenuItem("Sphere*");
+            _ = c.ImGui_MenuItem("Plane*");
+            c.ImGui_Separator();
+            _ = c.ImGui_MenuItem("Camera*");
+            c.ImGui_Separator();
+            _ = c.ImGui_MenuItem("Directional Light*");
+            _ = c.ImGui_MenuItem("Point Light*");
             c.ImGui_EndMenu();
         }
-        _ = c.ImGui_MenuItem("Copy");
-        _ = c.ImGui_MenuItem("Paste");
-        _ = c.ImGui_MenuItem("Delete");
-        _ = c.ImGui_MenuItem("Rename");
-        _ = c.ImGui_MenuItem("Duplicate");
+        _ = c.ImGui_MenuItem("Copy*");
+        _ = c.ImGui_MenuItem("Paste*");
+        if (c.ImGui_MenuItem("Delete")) {
+            if (self.selection != null and self.selection.? == obj) {
+                self.selection = null;
+            }
+            obj.parent.?.removeChildren(obj);
+        }
+        _ = c.ImGui_MenuItem("Rename*");
+        _ = c.ImGui_MenuItem("Duplicate*");
         c.ImGui_EndPopup();
     }
 }
