@@ -20,6 +20,9 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         }
         const avail = c.ImGui_GetContentRegionAvail();
         _ = c.ImGui_InvisibleButton("outside-the-tree", c.ImVec2{ .x = avail.x, .y = avail.y }, 0);
+        if (!drawContextMenu(ctx.scene.root)) {
+            return;
+        }
         if (c.ImGui_BeginDragDropTarget()) {
             if (c.ImGui_AcceptDragDropPayload("Object", 0)) |payload| {
                 const payload_obj: ?**Object = @ptrCast(@alignCast(payload.*.Data.?));
@@ -79,44 +82,11 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
     c.ImGui_SetCursorPosY(c.ImGui_GetCursorPosY() - edge_size);
 
     const open = c.ImGui_TreeNodeEx("##", node_flags);
-    if (c.ImGui_BeginPopupContextItemEx("context-menu", c.ImGuiPopupFlags_MouseButtonRight)) {
-        if (c.ImGui_BeginMenu("New")) {
-            if (c.ImGui_MenuItem("Object")) {
-                var new_obj = obj.scene.newObject(.{ .parent = obj }) catch @panic("Failed to add new object");
-                new_obj.deref();
-            }
-            c.ImGui_Separator();
-            if (c.ImGui_MenuItem("Cube")) {
-                var new_obj = obj.scene.newObject(.{ .parent = obj }) catch @panic("Failed to add new object");
-                new_obj.addComponent(
-                    MeshRenderer,
-                    .{
-                        .mesh = AssetsDatabase.getOrLoadMesh(Project.current().?.getResourceId("builtin://cube.obj") catch @panic("Cube mesh not found")) catch @panic("Failed to load cube mesh"),
-                        .material = AssetsDatabase.getOrLoadMaterial(Project.current().?.getResourceId("builtin://materials/none.mat") catch @panic("None material not found")) catch @panic("Failed to load none material"),
-                    },
-                );
-                new_obj.deref();
-            }
-            _ = c.ImGui_MenuItem("Sphere*");
-            _ = c.ImGui_MenuItem("Plane*");
-            c.ImGui_Separator();
-            _ = c.ImGui_MenuItem("Camera*");
-            c.ImGui_Separator();
-            _ = c.ImGui_MenuItem("Directional Light*");
-            _ = c.ImGui_MenuItem("Point Light*");
-            c.ImGui_EndMenu();
+    if (!drawContextMenu(obj)) {
+        if (open) {
+            c.ImGui_TreePop();
         }
-        _ = c.ImGui_MenuItem("Copy*");
-        _ = c.ImGui_MenuItem("Paste*");
-        if (c.ImGui_MenuItem("Delete")) {
-            if (Editor.instance().selection != null and Editor.instance().selection.? == obj) {
-                Editor.instance().selection = null;
-            }
-            obj.parent.?.removeChildren(obj);
-        }
-        _ = c.ImGui_MenuItem("Rename*");
-        _ = c.ImGui_MenuItem("Duplicate*");
-        c.ImGui_EndPopup();
+        return;
     }
     if (c.ImGui_IsItemClicked() and !c.ImGui_IsItemToggledOpen()) {
         Editor.instance().selection = obj;
@@ -152,4 +122,49 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
         }
         c.ImGui_TreePop();
     }
+}
+
+fn drawContextMenu(obj: *Object) bool {
+    var cont = true;
+    if (c.ImGui_BeginPopupContextItemEx("context-menu", c.ImGuiPopupFlags_MouseButtonRight)) {
+        if (c.ImGui_BeginMenu("New")) {
+            if (c.ImGui_MenuItem("Object")) {
+                var new_obj = obj.scene.newObject(.{ .parent = obj }) catch @panic("Failed to add new object");
+                new_obj.deref();
+            }
+            c.ImGui_Separator();
+            if (c.ImGui_MenuItem("Cube")) {
+                var new_obj = obj.scene.newObject(.{ .parent = obj }) catch @panic("Failed to add new object");
+                new_obj.addComponent(
+                    MeshRenderer,
+                    .{
+                        .mesh = AssetsDatabase.getOrLoadMesh(Project.current().?.getResourceId("builtin://cube.obj") catch @panic("Cube mesh not found")) catch @panic("Failed to load cube mesh"),
+                        .material = AssetsDatabase.getOrLoadMaterial(Project.current().?.getResourceId("builtin://materials/none.mat") catch @panic("None material not found")) catch @panic("Failed to load none material"),
+                    },
+                );
+                new_obj.deref();
+            }
+            _ = c.ImGui_MenuItem("Sphere*");
+            _ = c.ImGui_MenuItem("Plane*");
+            c.ImGui_Separator();
+            _ = c.ImGui_MenuItem("Camera*");
+            c.ImGui_Separator();
+            _ = c.ImGui_MenuItem("Directional Light*");
+            _ = c.ImGui_MenuItem("Point Light*");
+            c.ImGui_EndMenu();
+        }
+        _ = c.ImGui_MenuItem("Copy*");
+        _ = c.ImGui_MenuItem("Paste*");
+        if (c.ImGui_MenuItem("Delete")) {
+            if (Editor.instance().selection != null and Editor.instance().selection.? == obj) {
+                Editor.instance().selection = null;
+            }
+            obj.parent.?.removeChildren(obj);
+            cont = false;
+        }
+        _ = c.ImGui_MenuItem("Rename*");
+        _ = c.ImGui_MenuItem("Duplicate*");
+        c.ImGui_EndPopup();
+    }
+    return cont;
 }
