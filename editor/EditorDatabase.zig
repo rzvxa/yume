@@ -1,9 +1,12 @@
 const std = @import("std");
 
+const Uuid = @import("yume").Uuid;
+
 const Self = @This();
 
 const EditorDatabase = struct {
     last_open_project: ?[]u8 = null,
+    last_open_scene: ?Uuid = null,
 };
 
 var instance: Self = undefined;
@@ -44,19 +47,17 @@ pub fn flush() !void {
 }
 
 pub fn setLastOpenProject(value: ?[]const u8) !void {
-    if (value != null and storage().last_open_project == null) {
+    if (storage().last_open_project) |lop| {
+        if (value != null and value.?.ptr == lop.ptr) {
+            return;
+        }
+        instance.db_arena.allocator().free(lop);
+    }
+
+    if (value != null) {
         storage().last_open_project = try instance.db_arena.allocator().dupe(u8, value.?);
-        return;
-    }
-
-    if (value == null and storage().last_open_project != null) {
-        instance.allocator.free(storage().last_open_project.?);
-        return;
-    }
-
-    if (value) |v| {
-        storage().last_open_project = try instance.db_arena.allocator().realloc(storage().last_open_project.?, v.len);
-        @memcpy(storage().last_open_project.?, v);
+    } else {
+        storage().last_open_project = null;
     }
 }
 

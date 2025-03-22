@@ -129,7 +129,9 @@ pub fn show(self: *Self, ctx: *GameApp) void {
         c.ImGui_SetCursorPosY(end_y);
         if (c.ImGui_Button(open_label)) {
             Project.load(self.allocator, self.project_path.items[0 .. self.project_path.items.len - 1]) catch @panic("Failed to load project");
-            ctx.loadScene(Project.current().?.default_scene) catch @panic("Failed to load the default scene");
+            const default_scene = Project.current().?.default_scene;
+            ctx.loadScene(default_scene) catch @panic("Failed to load the default scene");
+            EditorDatabase.storage().last_open_scene = default_scene;
             self.close();
         }
         c.ImGui_PopFont();

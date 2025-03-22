@@ -109,9 +109,17 @@ pub fn init(ctx: *GameApp) *Self {
     singleton.init_descriptors(&ctx.engine);
     init_imgui(&ctx.engine);
 
-    // if (EditorDatabase.storage().last_open_project) |lop| {
-    // Project.load(ctx.allocator, lop) catch {};
-    // }
+    if (EditorDatabase.storage().last_open_project) |lop| {
+        Project.load(ctx.allocator, lop) catch {
+            std.debug.print("Failed to load previously loaded project {s}", .{lop});
+        };
+
+        if (EditorDatabase.storage().last_open_scene) |los| {
+            ctx.loadScene(los) catch {
+                std.debug.print("Failed to load previously loaded project {s}", .{lop});
+            };
+        }
+    }
 
     return &singleton;
 }
