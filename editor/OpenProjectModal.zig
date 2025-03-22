@@ -18,6 +18,7 @@ const Mat4 = @import("yume").Mat4;
 
 const imutils = @import("imutils.zig");
 const Editor = @import("Editor.zig");
+const EditorDatabase = @import("EditorDatabase.zig");
 const Project = @import("Project.zig");
 const utils = @import("yume").utils;
 
@@ -45,8 +46,13 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .allocator = allocator,
         .project_path = try std.ArrayList(u8).initCapacity(allocator, default_project_path.len + 1),
     };
-    self.project_path.appendSliceAssumeCapacity(default_project_path);
-    self.project_path.appendAssumeCapacity(0);
+    if (EditorDatabase.storage().last_open_project) |lop| {
+        try self.project_path.appendSlice(lop);
+        try self.project_path.append(0);
+    } else {
+        self.project_path.appendSliceAssumeCapacity(default_project_path);
+        self.project_path.appendAssumeCapacity(0);
+    }
     return self;
 }
 

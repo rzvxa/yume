@@ -2,6 +2,7 @@ const std = @import("std");
 const Uuid = @import("yume").Uuid;
 
 const AssetLoader = @import("yume").assets.AssetLoader;
+const EditorDatabase = @import("EditorDatabase.zig");
 
 const Self = @This();
 
@@ -47,6 +48,8 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     try addBuiltinShader("cf64bfc9-703c-43b0-9d01-c8032706872c", "tri_mesh.vert.glsl");
     try addBuiltinShader("8b4db7d0-33a6-4f42-96cc-7b1d88566f27", "default_lit.frag.glsl");
     try addBuiltinShader("9939ab1b-d72c-4463-b039-58211f2d6531", "textured_lit.frag.glsl");
+
+    try EditorDatabase.setLastOpenProject(path);
 }
 
 pub fn unload(self: *Self) void {

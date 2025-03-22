@@ -7,6 +7,7 @@ const gizmo = @import("gizmo.zig");
 const check_vk = @import("yume").vki.check_vk;
 
 const Uuid = @import("yume").Uuid;
+const EditorDatabase = @import("EditorDatabase.zig");
 const Editors = @import("editors/editors.zig");
 const Project = @import("Project.zig");
 const AssetsDatabase = @import("yume").AssetsDatabase;
@@ -92,6 +93,12 @@ new_project_modal: NewProjectModal,
 open_project_modal: OpenProjectModal,
 
 pub fn init(ctx: *GameApp) *Self {
+    const home_dir = std.fs.selfExeDirPathAlloc(ctx.allocator) catch @panic("OOM");
+    defer ctx.allocator.free(home_dir);
+    const db_path = std.fs.path.join(ctx.allocator, &[_][]const u8{ home_dir, ".user-data", "db.json" }) catch @panic("OOM");
+    defer ctx.allocator.free(db_path);
+
+    EditorDatabase.init(ctx.allocator, db_path) catch @panic("Faield to load editor database");
     inputs = InputsContext{ .window = ctx.window };
     singleton = Self{
         .editors = Editors.init(ctx.allocator),
@@ -101,6 +108,11 @@ pub fn init(ctx: *GameApp) *Self {
     };
     singleton.init_descriptors(&ctx.engine);
     init_imgui(&ctx.engine);
+
+    // if (EditorDatabase.storage().last_open_project) |lop| {
+    // Project.load(ctx.allocator, lop) catch {};
+    // }
+
     return &singleton;
 }
 
@@ -114,6 +126,8 @@ pub fn deinit(self: *Self, ctx: *GameApp) void {
     }
     check_vk(c.vkDeviceWaitIdle(ctx.engine.device)) catch @panic("Failed to wait for device idle");
     c.cImGui_ImplVulkan_Shutdown();
+    EditorDatabase.flush() catch std.debug.print("Failed to flush the editor database", .{});
+    EditorDatabase.deinit();
 }
 
 pub fn newFrame(_: *Self, _: *GameApp) void {
