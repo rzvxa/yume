@@ -79,41 +79,6 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
     c.ImGui_SetCursorPosY(c.ImGui_GetCursorPosY() - edge_size);
 
     const open = c.ImGui_TreeNodeEx("##", node_flags);
-    if (c.ImGui_IsItemClicked() and !c.ImGui_IsItemToggledOpen()) {
-        Editor.instance().selection = obj;
-    }
-
-    if (c.ImGui_BeginDragDropTarget()) {
-        if (c.ImGui_AcceptDragDropPayload("Object", 0)) |payload| {
-            const payload_obj: ?**Object = @ptrCast(@alignCast(payload.*.Data.?));
-            if (payload_obj) |p| {
-                _ = p.*.ref();
-                p.*.parent.?.removeChildren(p.*);
-                obj.addChildren(p.*);
-                p.*.deref();
-            }
-        }
-        c.ImGui_EndDragDropTarget();
-    }
-
-    if (c.ImGui_BeginDragDropSource(0)) {
-        _ = c.ImGui_SetDragDropPayload("Object", @ptrCast(&obj), @sizeOf(*Object), c.ImGuiCond_Once);
-        c.ImGui_Text(obj.name.ptr);
-        c.ImGui_EndDragDropSource();
-    }
-
-    c.ImGui_SameLine();
-    c.ImGui_Image(@intFromPtr(Editor.object_icon_ds), c.ImVec2{ .x = c.ImGui_GetFontSize(), .y = c.ImGui_GetFontSize() });
-    c.ImGui_SameLine();
-    c.ImGui_Text(obj.name.ptr);
-    if (open) {
-        var i: usize = 0;
-        while (i < obj.children.items.len) : (i += 1) {
-            self.drawHierarchyNode(obj.children.items[i]);
-        }
-        c.ImGui_TreePop();
-    }
-
     if (c.ImGui_BeginPopupContextItemEx("context-menu", c.ImGuiPopupFlags_MouseButtonRight)) {
         if (c.ImGui_BeginMenu("New")) {
             if (c.ImGui_MenuItem("Object")) {
@@ -152,5 +117,39 @@ fn drawHierarchyNode(self: *Self, obj: *Object) void {
         _ = c.ImGui_MenuItem("Rename*");
         _ = c.ImGui_MenuItem("Duplicate*");
         c.ImGui_EndPopup();
+    }
+    if (c.ImGui_IsItemClicked() and !c.ImGui_IsItemToggledOpen()) {
+        Editor.instance().selection = obj;
+    }
+
+    if (c.ImGui_BeginDragDropTarget()) {
+        if (c.ImGui_AcceptDragDropPayload("Object", 0)) |payload| {
+            const payload_obj: ?**Object = @ptrCast(@alignCast(payload.*.Data.?));
+            if (payload_obj) |p| {
+                _ = p.*.ref();
+                p.*.parent.?.removeChildren(p.*);
+                obj.addChildren(p.*);
+                p.*.deref();
+            }
+        }
+        c.ImGui_EndDragDropTarget();
+    }
+
+    if (c.ImGui_BeginDragDropSource(0)) {
+        _ = c.ImGui_SetDragDropPayload("Object", @ptrCast(&obj), @sizeOf(*Object), c.ImGuiCond_Once);
+        c.ImGui_Text(obj.name.ptr);
+        c.ImGui_EndDragDropSource();
+    }
+
+    c.ImGui_SameLine();
+    c.ImGui_Image(@intFromPtr(Editor.object_icon_ds), c.ImVec2{ .x = c.ImGui_GetFontSize(), .y = c.ImGui_GetFontSize() });
+    c.ImGui_SameLine();
+    c.ImGui_Text(obj.name.ptr);
+    if (open) {
+        var i: usize = 0;
+        while (i < obj.children.items.len) : (i += 1) {
+            self.drawHierarchyNode(obj.children.items[i]);
+        }
+        c.ImGui_TreePop();
     }
 }
