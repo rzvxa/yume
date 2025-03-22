@@ -252,7 +252,20 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         if (c.ImGui_BeginMenu("Scene")) {
             if (c.ImGui_MenuItem("New*")) {}
             if (c.ImGui_MenuItem("Load*")) {}
-            if (c.ImGui_MenuItem("Save*")) {}
+            if (c.ImGui_MenuItemEx("Save", "CTRL+S", false, true)) {
+                if (ctx.scene_handle) |hndl| {
+                    const path = Project.getResourcePath(hndl.uuid) catch @panic("Scene not found!");
+                    const json = std.json.stringifyAlloc(ctx.allocator, ctx.scene, .{ .whitespace = .indent_4 }) catch @panic("Failed to serialize the scene");
+                    defer ctx.allocator.free(json);
+                    var file = std.fs.cwd().openFile(path, .{ .mode = .write_only }) catch @panic("Failed to open scene file to save");
+                    defer file.close();
+                    file.setEndPos(0) catch @panic("Failed to truncate the scene file");
+                    file.seekTo(0) catch @panic("Failed to seek the start of the scene file");
+                    file.writeAll(json) catch @panic("Failed to write scene data");
+                } else {
+                    std.debug.print("Saving new scene not implemented yet\n", .{}); // TODO
+                }
+            }
             c.ImGui_EndMenu();
         }
         if (c.ImGui_BeginMenu("Edit")) {

@@ -44,3 +44,33 @@ pub fn pathExists(path: []const u8) !bool {
     std.debug.print("HERE fullpath {s} {}\n", .{ path, try dir.createFile("Hello.txt", .{}) });
     return true;
 }
+
+fn AbsorbSentinelReturnType(comptime Slice: type) type {
+    const info = @typeInfo(Slice).Pointer;
+    std.debug.assert(info.size == .Slice);
+    return @Type(.{
+        .Pointer = .{
+            .size = info.size,
+            .is_const = info.is_const,
+            .is_volatile = info.is_volatile,
+            .is_allowzero = info.is_allowzero,
+            .alignment = info.alignment,
+            .address_space = info.address_space,
+            .child = info.child,
+            .sentinel = null,
+        },
+    });
+}
+
+/// If the provided slice is not sentinel terminated, do nothing and return that slice.
+/// If it is sentinel-terminated, return a non-sentinel-terminated slice with the
+/// length increased by one to include the absorbed sentinel element.
+pub fn absorbSentinel(slice: anytype) AbsorbSentinelReturnType(@TypeOf(slice)) {
+    const info = @typeInfo(@TypeOf(slice)).Pointer;
+    std.debug.assert(info.size == .Slice);
+    if (info.sentinel == null) {
+        return slice;
+    } else {
+        return slice.ptr[0 .. slice.len + 1];
+    }
+}
