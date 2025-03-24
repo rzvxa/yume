@@ -21,6 +21,8 @@ const ComponentDefinition = @import("scene.zig").ComponentDefinition;
 const Camera = @import("components/Camera.zig");
 const MeshRenderer = @import("components/MeshRenderer.zig");
 
+const ecs = @import("ecs.zig");
+
 const inputs = @import("inputs.zig");
 const assets = @import("assets.zig");
 
@@ -37,6 +39,7 @@ engine: VulkanEngine,
 
 components: std.StringHashMap(ComponentDefinition),
 
+world: ecs.World,
 scene: *Scene,
 scene_handle: ?SceneAssetHandle = null,
 
@@ -54,6 +57,7 @@ pub fn init(a: std.mem.Allocator, loader: assets.AssetLoader, window_title: []co
     const self = a.create(Self) catch @panic("OOM");
 
     self.* = Self{
+        .world = ecs.World.init() catch @panic("failed to create the world"),
         .scene = Scene.init(a) catch @panic("failed to create default scene"),
         .window_title = window_title,
         .allocator = a,
@@ -128,6 +132,7 @@ pub fn deinit(self: *Self) void {
     if (self.scene_handle == null) {
         self.scene.deinit();
     }
+    self.world.deinit();
     self.components.deinit();
     assets.AssetsDatabase.deinit();
     self.engine.deinit();
@@ -146,6 +151,22 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
         }
     } else {
         old_scene.deinit();
+    }
+
+    var dfs = try self.scene.dfs();
+    defer dfs.deinit();
+    var entity_map = std.AutoHashMap(Uuid, ecs.Entity).init(self.allocator);
+    defer entity_map.deinit();
+    while (try dfs.next()) |obj| {
+        const entity = self.world.createEntity(obj.name);
+        try entity_map.put(obj.uuid, entity);
+        std.debug.print("entity {s} {d}\n", .{ obj.name, entity });
+        if (obj.parent) |parent| {
+            const parent_entity = entity_map.get(parent.uuid).?;
+            std.debug.print("entity {s} parent {d}\n", .{ obj.name, parent_entity });
+            self.world.addPair(entity, ecs.relations.ChildOf, parent_entity);
+        }
+        obj.deref();
     }
 }
 

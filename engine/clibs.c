@@ -8,4 +8,6 @@
 #include "cimgui_impl_vulkan.h"
 #include "cimgui_impl_sdl3.h"
 
+#include "flecs.h"
+
 #include "ufbx.h"

@@ -25,6 +25,7 @@ pub fn build(b: *std.Build) !void {
     engine_c_libs.addIncludeDir("vendor/sdl3/include");
     engine_c_libs.addIncludeDir("vendor/vma/");
     engine_c_libs.addIncludeDir("vendor/stb/");
+    engine_c_libs.addIncludeDir("vendor/flecs/");
 
     const ufbx_lib = b.addStaticLibrary(.{
         .name = "ufbx",
@@ -64,6 +65,29 @@ pub fn build(b: *std.Build) !void {
     yume.addIncludePath(.{ .cwd_relative = "vendor/stb/" });
 
     yume.linkLibrary(ufbx_lib);
+
+    const flecs_lib = b.addStaticLibrary(.{
+        .name = "flecs",
+        .target = target,
+        .optimize = optimize,
+    });
+    if (target.result.os.tag == .windows) {
+        flecs_lib.linkSystemLibrary("ws2_32");
+    }
+    flecs_lib.root_module.addCMacro("FLECS_NO_CPP", "1");
+    if (builtin.mode == .Debug) {
+        flecs_lib.root_module.addCMacro("FLECS_SANITIZE", "1");
+    }
+    flecs_lib.addIncludePath(b.path("vendor/flecs/flecs.h"));
+    flecs_lib.addIncludePath(b.path("vendor/flecs/flecs_cfg.h"));
+    flecs_lib.linkLibC();
+    flecs_lib.addCSourceFiles(.{
+        .files = &.{
+            "vendor/flecs/flecs.c",
+        },
+    });
+
+    yume.linkLibrary(flecs_lib);
 
     const engine_c_mod = engine_c_libs.createModule();
     yume.addImport("clibs", engine_c_mod);
@@ -106,7 +130,7 @@ pub fn build(b: *std.Build) !void {
     if (env_map.get("VK_SDK_PATH")) |path| {
         imgui_lib.addIncludePath(.{ .cwd_relative = try std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) });
     }
-    imgui_lib.defineCMacro("IMGUI_USE_LEGACY_CRC32_ADLER", null);
+    imgui_lib.root_module.addCMacro("IMGUI_USE_LEGACY_CRC32_ADLER", "1");
     imgui_lib.addIncludePath(b.path("vendor/imgui/"));
     imgui_lib.addIncludePath(b.path("vendor/sdl3/include/"));
     imgui_lib.linkLibCpp();

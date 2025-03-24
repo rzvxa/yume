@@ -31,6 +31,7 @@ const ScanCode = @import("yume").inputs.ScanCode;
 const MouseButton = @import("yume").inputs.MouseButton;
 const InputsContext = @import("yume").inputs.InputContext;
 
+const ecs = @import("yume").ecs;
 const GameApp = @import("yume").GameApp;
 const Vec3 = @import("yume").math3d.Vec3;
 const Vec4 = @import("yume").math3d.Vec4;

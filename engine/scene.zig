@@ -18,7 +18,7 @@ pub const Scene = struct {
     live_object: std.ArrayList(*Object),
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) std.mem.Allocator.Error!*Self {
+    pub fn init(allocator: std.mem.Allocator) !*Self {
         const self = try allocator.create(Self);
         self.* = .{
             .allocator = allocator,
