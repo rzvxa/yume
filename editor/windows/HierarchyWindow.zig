@@ -1,5 +1,7 @@
 const c = @import("clibs");
+const std = @import("std");
 
+const ecs = @import("yume").ecs;
 const AssetsDatabase = @import("yume").AssetsDatabase;
 const GameApp = @import("yume").GameApp;
 const MeshRenderer = @import("yume").MeshRenderer;
@@ -10,9 +12,55 @@ const Editor = @import("../Editor.zig");
 
 const Self = @This();
 
+query: *ecs.Query,
+
+pub fn init(ctx: *GameApp) Self {
+    var desc = ecs.QueryDesc{};
+    desc.terms[0] = .{ .id = ecs.pair(ecs.relations.ChildOf, ecs.core.Wildcard), .oper = ecs.operators.Not };
+    desc.terms[1] = .{ .id = ecs.core.System, .oper = ecs.operators.Not };
+    desc.terms[2] = .{ .id = ecs.core.Component, .oper = ecs.operators.Not };
+    desc.terms[3] = .{ .id = ecs.scopes.Flecs, .oper = ecs.operators.Not };
+    desc.terms[4] = .{ .id = ecs.scopes.FlecsCore, .oper = ecs.operators.Not };
+    desc.terms[5] = .{ .id = ecs.scopes.Module, .oper = ecs.operators.Not };
+
+    return .{
+        .query = ctx.world.query(&desc),
+    };
+}
+
+pub fn deinit(self: *Self) void {
+    c.ecs_query_fini(self.query);
+}
+
+// Function to recursively print the hierarchy
+fn print_hierarchy(world: *c.ecs_world_t, entity: c.ecs_entity_t, level: usize) void {
+    const name = c.ecs_get_name(world, entity);
+    if (name != null) {
+        for (0..level) |_| {
+            std.debug.print("  ", .{});
+        }
+        std.debug.print("{s}\n", .{name});
+    }
+
+    // Iterate over the entity's children
+    // var it = c.ecs_children(world, entity);
+    // while (c.ecs_iter_next(&it)) {
+    // for (0..@intCast(it.count)) |i| {
+    // print_hierarchy(world, it.entities[i], level + 1);
+    // }
+    // }
+}
+
 pub fn draw(self: *Self, ctx: *GameApp) void {
     if (c.ImGui_Begin("Hierarchy", null, 0)) {
         {
+            var iter = c.ecs_query_iter(ctx.world.inner, self.query);
+            // defer c.ecs_iter_fini(&iter);
+            while (c.ecs_iter_next(&iter)) {
+                for (0..@intCast(iter.count)) |i| {
+                    print_hierarchy(ctx.world.inner, iter.entities[i], 0);
+                }
+            }
             var i: usize = 0;
             while (i < ctx.scene.root.children.items.len) : (i += 1) {
                 self.drawHierarchyNode(ctx.scene.root.children.items[i]);
@@ -168,3 +216,27 @@ fn drawContextMenu(obj: *Object) bool {
     }
     return cont;
 }
+
+// void iterate_tree(ecs_world_t *ecs, ecs_entity_t e, Position p_parent) {
+//     // Print hierarchical name of entity & the entity type
+//     char *path_str = ecs_get_path(ecs, e);
+//     char *type_str = ecs_type_str(ecs, ecs_get_type(ecs, e));
+//     printf("%s [%s]\n", path_str, type_str);
+//     ecs_os_free(type_str);
+//     ecs_os_free(path_str);
+//
+//     // Get entity position
+//     const Position *ptr = ecs_get(ecs, e, Position);
+//
+//     // Calculate actual position
+//     Position p_actual = {ptr->x + p_parent.x, ptr->y + p_parent.y};
+//     printf("{%f, %f}\n\n", p_actual.x, p_actual.y);
+//
+//     // Iterate children recursively
+//     ecs_iter_t it = ecs_children(ecs, e);
+//     while (ecs_children_next(&it)) {
+//         for (int i = 0; i < it.count; i ++) {
+//             iterate_tree(ecs, it.entities[i], p_actual);
+//         }
+//     }
+// }

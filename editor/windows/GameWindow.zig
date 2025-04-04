@@ -71,6 +71,8 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                     );
                 }
 
+                _ = c.ecs_run(me.app.world.inner, Editor.render_system, me.app.delta, null);
+
                 c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
                     .offset = .{ .x = 0, .y = 0 },
                     .extent = GameApp.window_extent,

@@ -93,7 +93,7 @@ pub fn init(ctx: *GameApp) *Self {
         .hello_modal = HelloModal.init() catch @panic("Failed to initialize `HelloModal`"),
         .new_project_modal = NewProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `NewProjectModal`"),
         .open_project_modal = OpenProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `OpenProjectModal`"),
-        .hierarchy_window = HierarchyWindow{},
+        .hierarchy_window = HierarchyWindow.init(ctx),
         .project_explorer = ProjectExplorerWindow{},
         .properties_window = PropertiesWindow{},
         .scene_window = SceneWindow{},
@@ -114,6 +114,18 @@ pub fn init(ctx: *GameApp) *Self {
         }
     }
 
+    render_system = ctx.world.systemEx(.{
+        .entity = ctx.world.createEntity("Render"),
+        .query = std.mem.zeroInit(c.ecs_query_desc_t, .{ .terms = .{
+            .{ .id = c.EcsAny },
+        } }),
+        .callback = &struct {
+            fn f(_: [*c]ecs.Iter) callconv(.C) void {
+                // std.debug.print("HERE", .{});
+            }
+        }.f,
+    });
+
     return &singleton;
 }
 
@@ -122,6 +134,7 @@ pub fn deinit(self: *Self, ctx: *GameApp) void {
     self.hello_modal.deinit();
     self.new_project_modal.deinit();
     self.open_project_modal.deinit();
+    self.hierarchy_window.deinit();
     if (Project.current()) |p| {
         p.unload();
     }
@@ -165,7 +178,7 @@ fn isInSceneView(self: *Self, pos: c.ImVec2) bool {
         (pos.y > self.scene_window_rect.y and pos.y < self.scene_window_rect.w);
 }
 
-pub fn update(self: *Self, ctx: *GameApp) void {
+pub fn update(self: *Self, ctx: *GameApp) bool {
     var input: Vec3 = Vec3.make(0, 0, 0);
     var input_rot: Vec3 = Vec3.make(0, 0, 0);
 
@@ -225,6 +238,12 @@ pub fn update(self: *Self, ctx: *GameApp) void {
     if (input_rot.squaredLen() > (0.1 * 0.1)) {
         const rot_delta = input_rot.mulf(ctx.delta * 1.0);
         self.scene_window.camera_rot = self.scene_window.camera_rot.add(rot_delta);
+    }
+
+    if (self.play) {
+        return ctx.world.progress(ctx.delta);
+    } else {
+        return true;
     }
 }
 
@@ -686,6 +705,8 @@ fn loadImGuiTheme() void {
 }
 
 var singleton: Self = undefined;
+
+pub var render_system: ecs.Entity = undefined;
 
 pub var inputs: InputsContext = undefined;
 
