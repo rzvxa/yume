@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const Uuid = @import("uuid.zig");
+const Uuid = @import("uuid.zig").Uuid;
 const Vec3 = @import("math3d.zig").Vec3;
 const Mat4 = @import("math3d.zig").Mat4;
 const Quat = @import("math3d.zig").Quat;
@@ -474,15 +474,15 @@ pub const Transform = struct {
         scale: Vec3,
     },
 
-    pub inline fn position(self: *Self) Vec3 {
+    pub inline fn position(self: *const Self) Vec3 {
         return self.raw.position;
     }
 
-    pub inline fn rotation(self: *Self) Vec3 {
+    pub inline fn rotation(self: *const Self) Vec3 {
         return self.raw.rotation;
     }
 
-    pub inline fn scale(self: *Self) Vec3 {
+    pub inline fn scale(self: *const Self) Vec3 {
         return self.raw.scale;
     }
 
@@ -512,7 +512,7 @@ pub const Transform = struct {
         return self;
     }
 
-    pub inline fn matrix(self: *const Self) Mat4 {
+    pub inline fn getMatrix(self: *const Self) Mat4 {
         return Mat4.compose(self.position(), Quat.fromEuler(self.rotation()), self.scale());
     }
 

@@ -2,6 +2,10 @@ const c = @import("clibs");
 
 const std = @import("std");
 
+const ecs = @import("yume").ecs;
+const components = @import("yume").components;
+
+const GameApp = @import("yume").GameApp;
 const Uuid = @import("yume").Uuid;
 const Object = @import("yume").Object;
 const Component = @import("yume").Component;
@@ -37,15 +41,15 @@ const ComponentEditorInstance = struct { ptr: *anyopaque, type_id: TypeId };
 const Self = @This();
 
 component_editor_types: std.AutoHashMap(TypeId, ComponentEditor),
-object_meta_editors: std.AutoHashMap(Uuid, ObjectMetaEditor),
-object_transform_editors: std.AutoHashMap(Uuid, ObjectTransformEditor),
+object_meta_editors: std.AutoHashMap(ecs.Entity, ObjectMetaEditor),
+object_transform_editors: std.AutoHashMap(ecs.Entity, ObjectTransformEditor),
 component_editors: std.AutoHashMap(Uuid, std.AutoHashMap(Uuid, ComponentEditorInstance)),
 
 pub fn init(allocator: std.mem.Allocator) Self {
     var self = Self{
         .component_editor_types = std.AutoHashMap(TypeId, ComponentEditor).init(allocator),
-        .object_meta_editors = std.AutoHashMap(Uuid, ObjectMetaEditor).init(allocator),
-        .object_transform_editors = std.AutoHashMap(Uuid, ObjectTransformEditor).init(allocator),
+        .object_meta_editors = std.AutoHashMap(ecs.Entity, ObjectMetaEditor).init(allocator),
+        .object_transform_editors = std.AutoHashMap(ecs.Entity, ObjectTransformEditor).init(allocator),
         .component_editors = std.AutoHashMap(Uuid, std.AutoHashMap(Uuid, ComponentEditorInstance)).init(allocator),
     };
     self.registerBuiltinComponentEditors();
@@ -81,21 +85,21 @@ pub fn deinit(self: *Self) void {
     self.object_transform_editors.clearAndFree();
 }
 
-pub fn editObjectMeta(self: *Self, object: *Object, icon: c.VkDescriptorSet) void {
-    const entry = self.object_meta_editors.getOrPut(object.uuid) catch @panic("OOM");
+pub fn editEntityMeta(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
+    const entry = self.object_meta_editors.getOrPut(entity) catch @panic("OOM");
     if (!entry.found_existing) {
-        entry.value_ptr.* = ObjectMetaEditor.init(self.component_editors.allocator, object);
+        entry.value_ptr.* = ObjectMetaEditor.init(self.component_editors.allocator, entity, ctx);
     }
-    entry.value_ptr.edit(object, icon);
+    entry.value_ptr.edit(entity, ctx);
 }
 
-pub fn editObjectTransform(self: *Self, object: *Object) void {
-    const entry = self.object_transform_editors.getOrPut(object.uuid) catch @panic("OOM");
+pub fn editEntityTransform(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
+    const entry = self.object_transform_editors.getOrPut(entity) catch @panic("OOM");
     if (!entry.found_existing) {
-        entry.value_ptr.* = ObjectTransformEditor.init(self.component_editors.allocator, object);
+        entry.value_ptr.* = ObjectTransformEditor.init(self.component_editors.allocator, entity);
     }
     if (collapsingHeaderWithCheckBox("Transform", null, c.ImGuiTreeNodeFlags_DefaultOpen)) {
-        entry.value_ptr.edit(object);
+        entry.value_ptr.edit(entity, ctx);
     }
 }
 

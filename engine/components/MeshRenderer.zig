@@ -6,7 +6,7 @@ const AssetDatabase = @import("../assets.zig").AssetsDatabase;
 const Mesh = @import("../mesh.zig").Mesh;
 const BoundingBox = @import("../mesh.zig").BoundingBox;
 const Material = @import("../VulkanEngine.zig").Material;
-const Uuid = @import("../uuid.zig");
+const Uuid = @import("../uuid.zig").Uuid;
 
 const typeId = @import("../utils.zig").typeId;
 

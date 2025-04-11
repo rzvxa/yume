@@ -4,7 +4,7 @@ const std = @import("std");
 const AllocatedBuffer = @import("VulkanEngine.zig").AllocatedBuffer;
 const m3d = @import("math3d.zig");
 
-const Uuid = @import("uuid.zig");
+const Uuid = @import("uuid.zig").Uuid;
 
 const Vec2 = m3d.Vec2;
 const Vec3 = m3d.Vec3;

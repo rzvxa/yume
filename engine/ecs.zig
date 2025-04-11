@@ -1,8 +1,6 @@
 const c = @import("clibs");
 const std = @import("std");
 
-const utils = @import("utils.zig");
-
 pub const Entity = c.ecs_entity_t;
 pub const System = c.ecs_system_desc_t;
 pub const QueryDesc = c.ecs_query_desc_t;
@@ -66,7 +64,7 @@ pub const World = struct {
         const meta = Reflect(T);
         std.debug.assert(meta.id == 0);
 
-        meta.id = c.ecs_component_init(self.inner, &.{
+        meta.id = mkp_component_init(self.inner, &.{
             .entity = c.ecs_entity_init(self.inner, &.{
                 .use_low_id = true,
                 .name = typeName(T),
@@ -77,7 +75,7 @@ pub const World = struct {
                 .alignment = @alignOf(T),
                 .hooks = .{
                     .dtor = switch (@typeInfo(T)) {
-                        .@"struct" => if (@hasDecl(T, "deinit")) struct {
+                        .Struct => if (@hasDecl(T, "deinit")) struct {
                             pub fn f(ptr: *anyopaque, _: i32, _: *const c.ecs_type_info_t) callconv(.C) void {
                                 T.deinit(@as(*T, @ptrCast(@alignCast(ptr))).*);
                             }
@@ -91,50 +89,98 @@ pub const World = struct {
         std.debug.assert(meta.id != 0);
     }
 
-    pub fn system(_: Self, _: []const u8) void {
-        // const sys = self.createEntity(name);
-        // c.ecs_system_init(self.inner, {
-        // Systems are entities, and by initializing the .entity field we can
-        // set some additional properties for the system like a name. While this
-        // is not mandatory, it makes a system easier to find in tools like the
-        // explorer (https://www.flecs.dev/explorer/).
-        // .entity = ecs_entity(ecs, {
-        //     .name = "Move"
-        // }),
-        // .query.terms = {
-        //     { .id = ecs_id(Position) },
-        //     { .id = ecs_id(Velocity), .inout = EcsIn }
-        // },
-        // .callback = Move
-        // });
+    pub fn autoSystemFnDesc(comptime fn_system: anytype) c.ecs_system_desc_t {
+        const system_struct = SystemImpl(fn_system);
+
+        var system_desc = System{};
+        system_desc.callback = system_struct.exec;
+
+        const fn_type = @typeInfo(@TypeOf(fn_system)).Fn;
+        const has_it_param = fn_type.params[0].type == *c.ecs_iter_t;
+        const start_index = if (has_it_param) 1 else 0;
+        inline for (start_index..fn_type.params.len) |i| {
+            const p = fn_type.params[i];
+            const param_type_info = @typeInfo(p.type.?).Pointer;
+            const inout = if (param_type_info.is_const) c.EcsIn else c.EcsInOut;
+            system_desc.query.terms[i - start_index] = .{ .id = typeId(param_type_info.child), .inout = inout };
+        }
+
+        return system_desc;
+    }
+
+    pub fn systemFn(
+        self: Self,
+        name: [*:0]const u8,
+        phase: Entity,
+        comptime fn_system: anytype,
+    ) Entity {
+        var desc = autoSystemFnDesc(fn_system);
+        return self.system(name, phase, &desc);
+    }
+
+    pub fn system(
+        self: Self,
+        name: [*:0]const u8,
+        phase: Entity,
+        system_desc: *c.ecs_system_desc_t,
+    ) Entity {
+        var entity_desc = c.ecs_entity_desc_t{};
+        entity_desc.id = c.ecs_new(self.inner);
+        entity_desc.name = name;
+        const first = if (phase != 0) pair(relations.DependsOn, phase) else 0;
+        const second = phase;
+        entity_desc.add = &[_]c.ecs_id_t{ first, second, 0 };
+
+        system_desc.entity = self.createEx(&entity_desc);
+        return c.ecs_system_init(self.inner, system_desc);
     }
 
     pub fn systemEx(self: Self, desc: SystemDesc) Entity {
-        return ecs_system_init(self.inner, &desc);
+        return mkp_system_init(self.inner, &desc);
     }
 
-    pub fn createEntity(self: Self, name: [:0]const u8) Entity {
+    pub fn create(self: Self, name: [*:0]const u8) Entity {
         return c.ecs_entity_init(self.inner, &.{ .name = name });
     }
 
-    pub fn destroyEntity(self: Self, entity: Entity) void {
-        c.ecs_delete(self.inner, entity);
+    pub fn createEx(self: Self, desc: *const c.ecs_entity_desc_t) Entity {
+        return c.ecs_entity_init(self.inner, desc);
+    }
+
+    pub fn delete(self: Self, ent: Entity) void {
+        c.ecs_delete(self.inner, ent);
+    }
+
+    pub fn clear(self: Self, ent: Entity) void {
+        c.ecs_clear(self.inner, ent);
     }
 
     // add
 
-    pub fn add(self: Self, entity: Entity, comptime T: type) void {
-        c.ecs_add_id(self.inner, entity, typeId(T));
+    pub fn add(self: Self, ent: Entity, comptime T: type) void {
+        c.ecs_add_id(self.inner, ent, typeId(T));
+    }
+
+    pub fn addId(self: Self, ent: Entity, id: Entity) void {
+        c.ecs_add_id(self.inner, ent, id);
     }
 
     pub fn addPair(self: Self, subject: Entity, first: Entity, second: Entity) void {
         c.ecs_add_id(self.inner, subject, pair(first, second));
     }
 
+    pub fn addSingleton(self: Self, comptime T: type) void {
+        self.add(typeId(T), T);
+    }
+
     // remove
 
-    pub fn remove(self: Self, entity: Entity, comptime T: type) void {
-        return c.ecs_remove_id(self.inner, entity, typeId(T));
+    pub fn remove(self: Self, ent: Entity, comptime T: type) void {
+        return c.ecs_remove_id(self.inner, ent, typeId(T));
+    }
+
+    pub fn removeId(self: Self, ent: Entity, id: Entity) void {
+        return c.ecs_remove_id(self.inner, ent, id);
     }
 
     pub fn removePair(self: Self, subject: Entity, first: Entity, second: Entity) void {
@@ -143,8 +189,12 @@ pub const World = struct {
 
     // set
 
-    pub fn set(self: Self, entity: Entity, comptime T: type, value: T) void {
-        c.ecs_set_id(self.inner, entity, typeId(T), @sizeOf(T), @ptrCast(&value));
+    pub fn setName(self: Self, ent: Entity, new_name: [*:0]const u8) Entity {
+        return c.ecs_set_name(self.inner, ent, new_name);
+    }
+
+    pub fn set(self: Self, ent: Entity, comptime T: type, value: T) void {
+        c.ecs_set_id(self.inner, ent, typeId(T), @sizeOf(T), @ptrCast(&value));
     }
 
     pub fn setPair(
@@ -158,14 +208,22 @@ pub const World = struct {
         return c.ecs_set_id(self.inner, subject, pair(first, second), @sizeOf(T), @ptrCast(&value));
     }
 
-    // get
-
-    pub fn get(self: Self, entity: Entity, comptime T: type) *const T {
-        return @ptrCast(@alignCast(c.ecs_get_id(self.inner, entity, typeId(T))));
+    pub fn setSingleton(self: Self, comptime T: type, value: T) void {
+        return self.set(typeId(T), T, value);
     }
 
-    pub fn getMut(self: Self, entity: Entity, comptime T: type) *T {
-        return @ptrCast(@alignCast(c.ecs_get_mut_id(self.inner, entity, typeId(T))));
+    // get
+
+    pub fn get(self: Self, ent: Entity, comptime T: type) *const T {
+        return @ptrCast(@alignCast(c.ecs_get_id(self.inner, ent, typeId(T))));
+    }
+
+    pub fn getMut(self: Self, ent: Entity, comptime T: type) *T {
+        return @ptrCast(@alignCast(c.ecs_get_mut_id(self.inner, ent, typeId(T))));
+    }
+
+    pub fn getName(self: Self, ent: Entity) [:0]const u8 {
+        return if (c.ecs_get_name(self.inner, ent)) |name| std.mem.span(name) else "";
     }
 
     pub fn progress(self: Self, dt: f32) bool {
@@ -174,6 +232,20 @@ pub const World = struct {
 
     pub fn query(self: Self, q: *const QueryDesc) *Query {
         return @ptrCast(c.ecs_query_init(self.inner, q));
+    }
+
+    pub fn enable(self: Self, ent: Entity, enabled: bool) void {
+        c.ecs_enable(self.inner, ent, enabled);
+    }
+
+    pub fn enable_component(self: Self, ent: Entity, comptime T: type, enabled: bool) void {
+        c.ecs_enable_id(self.inner, ent, typeId(T), enabled);
+    }
+
+    // iterators
+
+    pub fn children(self: Self, ent: Entity) c.ecs_iter_t {
+        return c.ecs_children(self.inner, ent);
     }
 };
 
@@ -185,8 +257,16 @@ fn Reflect(comptime T: type) type {
     return META;
 }
 
-fn typeId(comptime T: type) c.ecs_id_t {
+pub fn typeId(comptime T: type) c.ecs_id_t {
     return Reflect(T).id;
+}
+
+pub fn field(it: *c.ecs_iter_t, comptime T: type, index: i8) ?[]T {
+    if (c.ecs_field_w_size(it, @sizeOf(T), index)) |anyptr| {
+        const ptr = @as([*]T, @ptrCast(@alignCast(anyptr)));
+        return ptr[0..@intCast(it.count)];
+    }
+    return null;
 }
 
 // taken from `zflecs` <https://github.com/zig-gamedev/zflecs/blob/ee2cd434fa2ec2454008988a1cc1201b242f030e/src/zflecs.zig#L2806C1-L2821C2>
@@ -205,6 +285,16 @@ fn typeName(comptime T: type) @TypeOf(@typeName(T)) {
         f64 => return "F64",
         else => return @typeName(T),
     };
+}
+
+pub const pair = c.ecs_pair;
+
+pub fn ids(comptime N: usize, args: [N]c.ecs_id_t) [*c]c.ecs_id_t {
+    const len = N + 1;
+    var result: [len]c.ecs_id_t = undefined;
+    @memcpy(result[0..args.len], args[0..]);
+    result[args.len] = 0;
+    return result[0..];
 }
 
 // called on first world initialization, setting all static values
@@ -442,8 +532,56 @@ pub const operators = struct {
     pub var NotFrom: i16 = undefined;
 };
 
-pub const pair = c.ecs_pair;
+/// Taken from <https://github.com/zig-gamedev/zflecs/blob/ee2cd434fa2ec2454008988a1cc1201b242f030e/src/zflecs.zig#L2652C1-L2693C2>
+/// Implements a flecs system from function parameters.
+/// For instance, the function below
+/// fn move_system(positions: []Position, velocities: []const Velocity) void {
+///     for (positions, velocities) |*p, *v| {
+///         p.x += v.x;
+///         p.y += v.y;
+///     }
+/// }
+/// Would return the following implementation
+/// fn exec(it: *ecs.iter_t) callconv(.C) void {
+///     const c1 = ecs.field(it, Position, 0).?;
+///     const c2 = ecs.field(it, Velocity, 1).?;
+///     move_system(c1, c2);//probably inlined
+// }
+fn SystemImpl(comptime fn_system: anytype) type {
+    const fn_type = @typeInfo(@TypeOf(fn_system));
+    switch (fn_type) {
+        .Fn => |f| if (f.params.len == 0) {
+            @compileError("System need at least one parameter");
+        },
+        else => @compileError("System should be a pure function"),
+    }
 
+    return struct {
+        fn exec(it: [*c]c.ecs_iter_t) callconv(.C) void {
+            const ArgsTupleType = std.meta.ArgsTuple(@TypeOf(fn_system));
+            var args_tuple: ArgsTupleType = undefined;
+
+            const has_it_param = fn_type.Fn.params[0].type == *c.ecs_iter_t;
+            if (has_it_param) {
+                args_tuple[0] = it;
+            }
+
+            const start_index = if (has_it_param) 1 else 0;
+
+            inline for (start_index..fn_type.Fn.params.len) |i| {
+                const p = fn_type.Fn.params[i];
+                args_tuple[i] = field(it, @typeInfo(p.type.?).Pointer.child, i - start_index).?;
+            }
+
+            //NOTE: .always_inline seems ok, but unsure. Replace to .auto if it breaks
+            _ = @call(.always_inline, fn_system, args_tuple);
+        }
+    };
+}
+
+// monkey patches for working around zig compiler bugs
+
+const mkp_system_init = ecs_system_init;
 extern fn ecs_system_init(world: ?*c.ecs_world_t, desc: [*c]const SystemDesc) c.ecs_entity_t;
 
 pub const SystemDesc = extern struct {
@@ -509,3 +647,51 @@ pub const Iter = extern struct {
     fini: c.ecs_iter_fini_action_t = @import("std").mem.zeroes(c.ecs_iter_fini_action_t),
     chain_it: [*c]c.ecs_iter_t = @import("std").mem.zeroes([*c]c.ecs_iter_t),
 };
+
+pub const IterAction = ?*const fn ([*c]c.ecs_iter_t) callconv(.C) void;
+
+pub const ComponentDesc = extern struct {
+    _canary: i32 = @import("std").mem.zeroes(i32),
+    entity: c.ecs_entity_t = @import("std").mem.zeroes(c.ecs_entity_t),
+    type: TypeInfo = @import("std").mem.zeroes(TypeInfo),
+};
+
+pub const TypeInfo = extern struct {
+    size: c.ecs_size_t = @import("std").mem.zeroes(c.ecs_size_t),
+    alignment: c.ecs_size_t = @import("std").mem.zeroes(c.ecs_size_t),
+    hooks: TypeHooks = @import("std").mem.zeroes(TypeHooks),
+    component: c.ecs_entity_t = @import("std").mem.zeroes(c.ecs_entity_t),
+    name: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+};
+
+pub const TypeHooks = extern struct {
+    ctor: Xtor = @import("std").mem.zeroes(Xtor),
+    dtor: Xtor = @import("std").mem.zeroes(Xtor),
+    copy: Copy = @import("std").mem.zeroes(Copy),
+    move: Move = @import("std").mem.zeroes(Move),
+    copy_ctor: Copy = @import("std").mem.zeroes(Copy),
+    move_ctor: Move = @import("std").mem.zeroes(Move),
+    ctor_move_dtor: Move = @import("std").mem.zeroes(Move),
+    move_dtor: Move = @import("std").mem.zeroes(Move),
+    cmp: Cmp = @import("std").mem.zeroes(Cmp),
+    equals: Equals = @import("std").mem.zeroes(Equals),
+    flags: c.ecs_flags32_t = @import("std").mem.zeroes(c.ecs_flags32_t),
+    on_add: IterAction = @import("std").mem.zeroes(IterAction),
+    on_set: IterAction = @import("std").mem.zeroes(IterAction),
+    on_remove: IterAction = @import("std").mem.zeroes(IterAction),
+    ctx: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+    binding_ctx: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+    lifecycle_ctx: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+    ctx_free: c.ecs_ctx_free_t = @import("std").mem.zeroes(c.ecs_ctx_free_t),
+    binding_ctx_free: c.ecs_ctx_free_t = @import("std").mem.zeroes(c.ecs_ctx_free_t),
+    lifecycle_ctx_free: c.ecs_ctx_free_t = @import("std").mem.zeroes(c.ecs_ctx_free_t),
+};
+
+pub const Xtor = ?*const fn (?*anyopaque, i32, [*c]const TypeInfo) callconv(.C) void;
+pub const Copy = ?*const fn (?*anyopaque, ?*const anyopaque, i32, [*c]const TypeInfo) callconv(.C) void;
+pub const Move = ?*const fn (?*anyopaque, ?*anyopaque, i32, [*c]const TypeInfo) callconv(.C) void;
+pub const Cmp = ?*const fn (?*const anyopaque, ?*const anyopaque, [*c]const TypeInfo) callconv(.C) c_int;
+pub const Equals = ?*const fn (?*const anyopaque, ?*const anyopaque, [*c]const TypeInfo) callconv(.C) bool;
+
+const mkp_component_init = ecs_component_init;
+extern fn ecs_component_init(world: *c.ecs_world_t, desc: *const ComponentDesc) Entity;

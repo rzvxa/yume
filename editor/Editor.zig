@@ -32,6 +32,7 @@ const MouseButton = @import("yume").inputs.MouseButton;
 const InputsContext = @import("yume").inputs.InputContext;
 
 const ecs = @import("yume").ecs;
+const systems = @import("yume").systems;
 const GameApp = @import("yume").GameApp;
 const Vec3 = @import("yume").math3d.Vec3;
 const Vec4 = @import("yume").math3d.Vec4;
@@ -114,6 +115,14 @@ scene_window: SceneWindow,
 game_window: GameWindow,
 
 pub fn init(ctx: *GameApp) *Self {
+    ctx.world.tag(RunInEditor);
+    ctx.world.tag(Playing);
+    ctx.world.addSingleton(Playing);
+    ctx.world.enable(ecs.typeId(Playing), false);
+    const tmu_entity = ctx.world.systemFn("transform-matrix-update", ecs.systems.PostUpdate, systems.transformMatrices);
+    _ = tmu_entity;
+    // ctx.world.add(tmu_entity, RunInEditor);
+
     const home_dir = std.fs.selfExeDirPathAlloc(ctx.allocator) catch @panic("OOM");
     defer ctx.allocator.free(home_dir);
     const db_path = std.fs.path.join(ctx.allocator, &[_][]const u8{ home_dir, ".user-data", "db.json" }) catch @panic("OOM");
@@ -132,6 +141,7 @@ pub fn init(ctx: *GameApp) *Self {
         .scene_window = SceneWindow{},
         .game_window = GameWindow{},
     };
+    singleton.bootstrapEditorPipeline(ctx.world);
     singleton.init_descriptors(&ctx.engine);
     init_imgui(&ctx.engine);
 
@@ -148,7 +158,7 @@ pub fn init(ctx: *GameApp) *Self {
     }
 
     render_system = ctx.world.systemEx(.{
-        .entity = ctx.world.createEntity("Render"),
+        .entity = ctx.world.create("Render"),
         .query = std.mem.zeroInit(c.ecs_query_desc_t, .{ .terms = .{
             .{ .id = c.EcsAny },
         } }),
@@ -273,11 +283,7 @@ pub fn update(self: *Self, ctx: *GameApp) bool {
         self.scene_window.camera_rot = self.scene_window.camera_rot.add(rot_delta);
     }
 
-    if (self.play) {
-        return ctx.world.progress(ctx.delta);
-    } else {
-        return true;
-    }
+    return ctx.world.progress(ctx.delta);
 }
 
 pub fn draw(self: *Self, ctx: *GameApp) void {
@@ -339,6 +345,8 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         c.ImGui_SetCursorPosX((c.ImGui_GetCursorPosX() - (13 * 3)) + (GameApp.window_extent.width / 2) - c.ImGui_GetCursorPosX());
         if (c.ImGui_ImageButton("Play", @intFromPtr(if (self.play) stop_icon_ds else play_icon_ds), c.ImVec2{ .x = 13, .y = 13 })) {
             self.play = !self.play;
+            ctx.world.enable(ecs.typeId(Playing), self.play);
+            self.bootstrapEditorPipeline(ctx.world);
         }
         _ = c.ImGui_ImageButton("Pause", @intFromPtr(pause_icon_ds), c.ImVec2{ .x = 13, .y = 13 });
         _ = c.ImGui_ImageButton("Next", @intFromPtr(fast_forward_icon_ds), c.ImVec2{ .x = 13, .y = 13 });
@@ -406,7 +414,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
     c.ImGui_End();
 
     self.hierarchy_window.draw(ctx);
-    self.properties_window.draw(ctx);
+    self.properties_window.draw(ctx) catch @panic("err");
     self.project_explorer.draw();
     self.scene_window.draw(cmd, ctx);
     self.game_window.draw(cmd, ctx);
@@ -647,6 +655,41 @@ fn create_imgui_texture(filepath: []const u8, engine: *Engine) c.VkDescriptorSet
     }
     engine.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("OOM");
     return c.cImGui_ImplVulkan_AddTexture(sampler, image_view, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
+fn bootstrapEditorPipeline(self: *const Self, world: ecs.World) void {
+    var query = c.ecs_query_desc_t{};
+    query.terms[0] = .{ .id = ecs.core.System };
+    query.terms[1] = .{ .id = ecs.systems.Phase, .src = .{ .id = c.EcsCascade }, .trav = ecs.relations.DependsOn };
+    query.terms[2] = .{ .id = c.ecs_dependson(ecs.systems.OnStart), .trav = ecs.relations.DependsOn, .oper = c.EcsNot };
+    query.terms[3] = .{ .id = c.EcsDisabled, .src = .{ .id = c.EcsUp }, .trav = ecs.relations.DependsOn, .oper = c.EcsNot };
+    query.terms[4] = .{ .id = c.EcsDisabled, .src = .{ .id = c.EcsUp }, .trav = ecs.relations.ChildOf, .oper = c.EcsNot };
+    if (!self.play) {
+        query.terms[5] = .{ .id = ecs.typeId(RunInEditor), .src = .{ .id = c.EcsThis } };
+    }
+    query.order_by_callback = flecs_entity_compare;
+    query.cache_kind = c.EcsQueryCacheAuto;
+
+    const old_pipeline = c.ecs_get_pipeline(world.inner);
+    world.delete(old_pipeline);
+
+    const pipeline = c.ecs_pipeline_init(world.inner, &.{
+        .entity = world.createEx(&.{ .name = "EditorPipeline" }),
+        .query = query,
+    });
+    c.ecs_set_pipeline(world.inner, pipeline);
+}
+
+const RunInEditor = extern struct {};
+const Playing = extern struct {};
+
+fn flecs_bootstrap_phase_(world: ecs.World, phase: ecs.Entity, depends_on: ecs.Entity) void {
+    c.ecs_add_id(world.inner, phase, ecs.systems.Phase);
+    world.addPair(phase, ecs.relations.DependsOn, depends_on);
+}
+
+fn flecs_entity_compare(e1: c.ecs_entity_t, _: ?*const anyopaque, e2: c.ecs_entity_t, _: ?*const anyopaque) callconv(.C) c_int {
+    return @as(c_int, @intCast(@intFromBool((e1 > e2)))) - @intFromBool((e1 < e2));
 }
 
 fn loadImGuiTheme() void {

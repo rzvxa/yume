@@ -1,8 +1,10 @@
 pub const version = @import("cfg").version;
 
-pub const Uuid = @import("uuid.zig");
+pub const Uuid = @import("uuid.zig").Uuid;
 
 pub const ecs = @import("ecs.zig");
+pub const components = @import("components.zig");
+pub const systems = @import("systems.zig");
 
 pub const GameApp = @import("GameApp.zig");
 pub const VulkanEngine = @import("VulkanEngine.zig");

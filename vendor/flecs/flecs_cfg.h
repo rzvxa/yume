@@ -1,5 +1,5 @@
 #define FLECS_CUSTOM_BUILD
-#define FLECS_ALERTS         /**< Monitor conditions for errors */
+// #define FLECS_ALERTS         /**< Monitor conditions for errors */
 #define FLECS_APP            /**< Application addon */
 // #define FLECS_C           /**< C API convenience macros, always enabled */
 // #define FLECS_CPP            /**< C++ API */
@@ -17,7 +17,7 @@
 // #define FLECS_REST           /**< REST API for querying application data */
 // #define FLECS_PARSER         /**< Utilities for script and query DSL parsers */
 // #define FLECS_QUERY_DSL      /**< Flecs query DSL parser */
-#define FLECS_SCRIPT         /**< Flecs entity notation language */
+// #define FLECS_SCRIPT         /**< Flecs entity notation language */
 // #define FLECS_SCRIPT_MATH /**< Math functions for flecs script (may require linking with libm) */
 #define FLECS_SYSTEM         /**< System support */
 #define FLECS_STATS          /**< Track runtime statistics */

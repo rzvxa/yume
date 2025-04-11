@@ -12,46 +12,25 @@ const Editor = @import("../Editor.zig");
 
 const Self = @This();
 
-query: *ecs.Query,
-
-pub fn init(ctx: *GameApp) Self {
-    var desc = ecs.QueryDesc{};
-    desc.terms[0] = .{ .id = ecs.pair(ecs.relations.ChildOf, ecs.core.Wildcard), .oper = ecs.operators.Not };
-    desc.terms[1] = .{ .id = ecs.core.System, .oper = ecs.operators.Not };
-    desc.terms[2] = .{ .id = ecs.core.Component, .oper = ecs.operators.Not };
-    desc.terms[3] = .{ .id = ecs.scopes.Flecs, .oper = ecs.operators.Not };
-    desc.terms[4] = .{ .id = ecs.scopes.FlecsCore, .oper = ecs.operators.Not };
-    desc.terms[5] = .{ .id = ecs.scopes.Module, .oper = ecs.operators.Not };
-
-    return .{
-        .query = ctx.world.query(&desc),
-    };
+pub fn init(_: *GameApp) Self {
+    return .{};
 }
 
-pub fn deinit(self: *Self) void {
-    self.query.deinit();
-}
+pub fn deinit(_: *Self) void {}
 
 pub fn draw(self: *Self, ctx: *GameApp) void {
     if (c.ImGui_Begin("Hierarchy", null, 0)) {
-        var root: ecs.Entity = 0;
         {
-            var iter = self.query.iter();
-            while (c.ecs_iter_next(&iter)) {
-                std.debug.assert(iter.count == 1);
-                std.debug.assert(root == 0);
-                root = iter.entities[0];
-                var childs = c.ecs_children(ctx.world.inner, iter.entities[0]);
-                while (c.ecs_iter_next(&childs)) {
-                    for (0..@intCast(childs.count)) |i| {
-                        self.drawHierarchyNode(ctx.world, childs.entities[i], 0, ctx);
-                    }
+            var childs = c.ecs_children(ctx.world.inner, ctx.scene_root);
+            while (c.ecs_iter_next(&childs)) {
+                for (0..@intCast(childs.count)) |i| {
+                    self.drawHierarchyNode(ctx.world, childs.entities[i], 0, ctx);
                 }
             }
         }
         const avail = c.ImGui_GetContentRegionAvail();
         _ = c.ImGui_InvisibleButton("outside-the-tree", c.ImVec2{ .x = avail.x, .y = avail.y }, 0);
-        if (!drawContextMenu(root, ctx)) {
+        if (!drawContextMenu(ctx.scene_root, ctx)) {
             return;
         }
         if (c.ImGui_BeginDragDropTarget()) {
@@ -71,9 +50,8 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
 }
 
 fn drawHierarchyNode(self: *Self, world: ecs.World, entity: ecs.Entity, level: usize, ctx: *GameApp) void {
-    const w = world.inner;
-    const name = c.ecs_get_name(w, entity);
-    var child_it = c.ecs_children(w, entity);
+    const name = world.getName(entity);
+    var child_it = world.children(entity);
     var has_next = c.ecs_iter_next(&child_it);
 
     c.ImGui_PushID(name);
@@ -165,7 +143,7 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) bool {
     if (c.ImGui_BeginPopupContextItemEx("context-menu", c.ImGuiPopupFlags_MouseButtonRight)) {
         if (c.ImGui_BeginMenu("New")) {
             if (c.ImGui_MenuItem("Entity")) {
-                const new_entity = ctx.world.createEntity("New Entity");
+                const new_entity = ctx.world.create("New Entity");
                 ctx.world.addPair(new_entity, ecs.relations.ChildOf, entity);
             }
             c.ImGui_Separator();

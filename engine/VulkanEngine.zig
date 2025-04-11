@@ -3,7 +3,7 @@ const c = @import("clibs");
 const std = @import("std");
 
 const utils = @import("utils.zig");
-const Uuid = @import("uuid.zig");
+const Uuid = @import("uuid.zig").Uuid;
 
 const vki = @import("vulkan_init.zig");
 const check_vk = vki.check_vk;

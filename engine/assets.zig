@@ -2,7 +2,7 @@ const c = @import("clibs");
 
 const std = @import("std");
 
-const Uuid = @import("uuid.zig");
+const Uuid = @import("uuid.zig").Uuid;
 const texs = @import("textures.zig");
 const Texture = texs.Texture;
 

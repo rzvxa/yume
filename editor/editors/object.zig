@@ -2,9 +2,12 @@ const c = @import("clibs");
 
 const std = @import("std");
 
-const Object = @import("yume").Object;
+const ecs = @import("yume").ecs;
+const GameApp = @import("yume").GameApp;
 const utils = @import("yume").utils;
 const imutils = @import("../imutils.zig");
+
+const Editor = @import("../Editor.zig");
 
 const Self = @This();
 
@@ -12,13 +15,14 @@ allocator: std.mem.Allocator,
 
 name: std.ArrayList(u8),
 
-pub fn init(allocator: std.mem.Allocator, obj: *Object) Self {
+pub fn init(allocator: std.mem.Allocator, entity: ecs.Entity, ctx: *GameApp) Self {
+    const name = ctx.world.getName(entity);
     var self = Self{
         .allocator = allocator,
-        .name = std.ArrayList(u8).initCapacity(allocator, obj.name.len + 1) catch @panic("OOM"),
+        .name = std.ArrayList(u8).init(allocator),
     };
-    self.name.appendSliceAssumeCapacity(obj.name);
-    self.name.appendAssumeCapacity(0);
+    self.name.appendSlice(name) catch @panic("OOM");
+    self.name.append(0) catch @panic("OOM");
     return self;
 }
 
@@ -26,7 +30,8 @@ pub fn deinit(self: *Self) void {
     self.name.deinit();
 }
 
-pub fn edit(self: *Self, obj: *Object, icon: c.VkDescriptorSet) void {
+pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
+    const icon = Editor.object_icon_ds;
     const avail = c.ImGui_GetContentRegionAvail();
     const old_pad_y = c.ImGui_GetStyle().*.FramePadding.y;
     c.ImGui_GetStyle().*.FramePadding.y = 0;
@@ -56,12 +61,13 @@ pub fn edit(self: *Self, obj: *Object, icon: c.VkDescriptorSet) void {
     );
 
     if (renamed) {
-        const len = self.name.items.len;
+        // const len = self.name.items.len;
 
-        var new_slice = (obj.scene.allocator.realloc(utils.absorbSentinel(obj.name), len + 1) catch @panic("OOM"));
-        @memcpy(new_slice[0..len], self.name.items);
-        new_slice[len] = 0;
-        obj.name = new_slice.ptr[0..len :0];
+        _ = ctx.world.setName(entity, @ptrCast(self.name.items.ptr));
+        // var new_slice = (ctx.allocator.realloc(utils.absorbSentinel(obj.name), len + 1) catch @panic("OOM"));
+        // @memcpy(new_slice[0..len], self.name.items);
+        // new_slice[len] = 0;
+        // obj.name = new_slice.ptr[0..len :0];
     }
 
     c.ImGui_EndChildFrame();

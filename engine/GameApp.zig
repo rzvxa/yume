@@ -8,7 +8,7 @@ pub const RenderCommand = VulkanEngine.RenderCommand;
 const context = @import("context.zig");
 pub const window_extent = context.window_extent;
 const utils = @import("utils.zig");
-const Uuid = @import("uuid.zig");
+const Uuid = @import("uuid.zig").Uuid;
 
 const math3d = @import("math3d.zig");
 const Vec3 = math3d.Vec3;
@@ -18,6 +18,7 @@ const SceneAssetHandle = @import("assets.zig").SceneAssetHandle;
 
 const Scene = @import("scene.zig").Scene;
 const ComponentDefinition = @import("scene.zig").ComponentDefinition;
+const components = @import("components.zig");
 const Camera = @import("components/Camera.zig");
 const MeshRenderer = @import("components/MeshRenderer.zig");
 
@@ -40,6 +41,7 @@ engine: VulkanEngine,
 components: std.StringHashMap(ComponentDefinition),
 
 world: ecs.World,
+scene_root: ecs.Entity,
 scene: *Scene,
 scene_handle: ?SceneAssetHandle = null,
 
@@ -58,6 +60,7 @@ pub fn init(a: std.mem.Allocator, loader: assets.AssetLoader, window_title: []co
 
     self.* = Self{
         .world = ecs.World.init() catch @panic("failed to create the world"),
+        .scene_root = undefined,
         .scene = Scene.init(a) catch @panic("failed to create default scene"),
         .window_title = window_title,
         .allocator = a,
@@ -67,9 +70,19 @@ pub fn init(a: std.mem.Allocator, loader: assets.AssetLoader, window_title: []co
         .components = std.StringHashMap(ComponentDefinition).init(a),
     };
 
+    self.scene_root = self.world.create("root");
+
     assets.AssetsDatabase.init(a, &self.engine, loader);
     self.components.put("Camera", Camera.definition()) catch @panic("OOM");
     self.components.put("MeshRenderer", MeshRenderer.definition()) catch @panic("OOM");
+
+    self.world.component(components.Uuid);
+
+    self.world.component(components.Position);
+    self.world.component(components.Rotation);
+    self.world.component(components.Scale);
+    self.world.component(components.TransformMatrix);
+
     return self;
 }
 
@@ -157,15 +170,31 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
     defer dfs.deinit();
     var entity_map = std.AutoHashMap(Uuid, ecs.Entity).init(self.allocator);
     defer entity_map.deinit();
+    self.world.clear(self.scene_root);
+    if (try dfs.next()) |root| {
+        try entity_map.put(root.uuid, self.scene_root);
+        root.deref();
+    }
+
     while (try dfs.next()) |obj| {
-        const entity = self.world.createEntity(obj.name);
+        const entity = self.world.create(obj.name);
+
         try entity_map.put(obj.uuid, entity);
+
         std.debug.print("entity {s} {d}\n", .{ obj.name, entity });
         if (obj.parent) |parent| {
             const parent_entity = entity_map.get(parent.uuid).?;
             std.debug.print("entity {s} parent {d}\n", .{ obj.name, parent_entity });
             self.world.addPair(entity, ecs.relations.ChildOf, parent_entity);
         }
+
+        self.world.set(entity, components.Uuid, .{ .value = obj.uuid });
+
+        self.world.set(entity, components.Position, .{ .value = obj.transform.position() });
+        self.world.set(entity, components.Rotation, .{ .value = obj.transform.rotation() });
+        self.world.set(entity, components.Scale, .{ .value = obj.transform.scale() });
+        self.world.set(entity, components.TransformMatrix, .{ .value = obj.transform.getMatrix() });
+
         obj.deref();
     }
 }

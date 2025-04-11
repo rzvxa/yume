@@ -1,4 +1,5 @@
 const c = @import("clibs");
+const std = @import("std");
 
 const GameApp = @import("yume").GameApp;
 const Object = @import("yume").scene_graph.Object;
@@ -8,25 +9,27 @@ const Editor = @import("../Editor.zig");
 
 const Self = @This();
 
-pub fn draw(_: *Self, ctx: *GameApp) void {
+pub fn draw(_: *Self, ctx: *GameApp) !void {
     if (c.ImGui_Begin("Properties", null, 0)) {
         switch (Editor.instance().selection) {
-            .entity => |e| drawProperties(e, ctx),
+            .entity => |e| try drawProperties(e, ctx),
             else => {},
         }
     }
     c.ImGui_End();
 }
 
-fn drawProperties(_: ecs.Entity, _: *GameApp) void {
+fn drawProperties(entity: ecs.Entity, ctx: *GameApp) !void {
     // FIXME
-    // c.ImGui_PushID(&obj.uuid.urn());
-    // defer c.ImGui_PopID();
-    // Editor.instance().editors.editObjectMeta(obj, Editor.object_icon_ds);
-    // c.ImGui_Spacing();
-    // c.ImGui_Separator();
-    // c.ImGui_Spacing();
-    // Editor.instance().editors.editObjectTransform(obj);
+    var buf: [256]u8 = undefined;
+    const gui_id = try std.fmt.bufPrint(&buf, "{}", .{entity});
+    c.ImGui_PushID(gui_id.ptr);
+    defer c.ImGui_PopID();
+    Editor.instance().editors.editEntityMeta(entity, ctx);
+    c.ImGui_Spacing();
+    c.ImGui_Separator();
+    c.ImGui_Spacing();
+    Editor.instance().editors.editEntityTransform(entity, ctx);
     // c.ImGui_Spacing();
     // c.ImGui_Separator();
     // c.ImGui_Spacing();
