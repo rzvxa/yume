@@ -142,15 +142,16 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
             .height = self.scene_view_size.y,
         });
 
-        if (Editor.instance().selection) |selection| {
-            gizmo.drawBoundingBox(selection.bounds()) catch @panic("error");
-            const transform = &selection.transform;
-            gizmo.manipulate(
-                transform.position(),
-                transform.rotation(),
-                transform.scale(),
-            ) catch @panic("error");
-        }
+        // FIXME
+        // if (Editor.instance().selection) |selection| {
+        //     gizmo.drawBoundingBox(selection.bounds()) catch @panic("error");
+        //     const transform = &selection.transform;
+        //     gizmo.manipulate(
+        //         transform.position(),
+        //         transform.rotation(),
+        //         transform.scale(),
+        //     ) catch @panic("error");
+        // }
         gizmo.endFrame();
     }
     c.ImGui_End();

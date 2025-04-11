@@ -153,21 +153,21 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
         old_scene.deinit();
     }
 
-    // var dfs = try self.scene.dfs();
-    // defer dfs.deinit();
-    // var entity_map = std.AutoHashMap(Uuid, ecs.Entity).init(self.allocator);
-    // defer entity_map.deinit();
-    // while (try dfs.next()) |obj| {
-    // const entity = self.world.createEntity(obj.name);
-    // try entity_map.put(obj.uuid, entity);
-    // std.debug.print("entity {s} {d}\n", .{ obj.name, entity });
-    // if (obj.parent) |parent| {
-    //     const parent_entity = entity_map.get(parent.uuid).?;
-    //     std.debug.print("entity {s} parent {d}\n", .{ obj.name, parent_entity });
-    //     self.world.addPair(entity, ecs.relations.ChildOf, parent_entity);
-    // }
-    // obj.deref();
-    // }
+    var dfs = try self.scene.dfs();
+    defer dfs.deinit();
+    var entity_map = std.AutoHashMap(Uuid, ecs.Entity).init(self.allocator);
+    defer entity_map.deinit();
+    while (try dfs.next()) |obj| {
+        const entity = self.world.createEntity(obj.name);
+        try entity_map.put(obj.uuid, entity);
+        std.debug.print("entity {s} {d}\n", .{ obj.name, entity });
+        if (obj.parent) |parent| {
+            const parent_entity = entity_map.get(parent.uuid).?;
+            std.debug.print("entity {s} parent {d}\n", .{ obj.name, parent_entity });
+            self.world.addPair(entity, ecs.relations.ChildOf, parent_entity);
+        }
+        obj.deref();
+    }
 }
 
 fn newFrame(self: *Self) void {

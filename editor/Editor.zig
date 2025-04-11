@@ -57,9 +57,42 @@ const ManipulationTool = enum {
     scale,
 };
 
+const SelectionKind = enum { none, entity, many };
+const Selection = union(SelectionKind) {
+    none: void,
+    entity: ecs.Entity,
+    many: []Selection,
+
+    pub fn is(self: *const Selection, comptime kind: SelectionKind, other: anytype) bool {
+        if (kind != std.meta.activeTag(self.*)) {
+            return false;
+        }
+
+        switch (self.*) {
+            .none => return true,
+            .entity => |e| return e == other,
+            .many => return false,
+        }
+    }
+
+    pub fn contains(self: *const Selection, comptime kind: SelectionKind, other: anytype) bool {
+        switch (self.*) {
+            .none, .entity => return self.is(kind, other),
+            .many => |ms| return ms.len > 0 and blk: {
+                for (ms) |m| {
+                    if (m.is(kind, other)) {
+                        break :blk true;
+                    }
+                }
+                break :blk false;
+            },
+        }
+    }
+};
+
 const Self = @This();
 
-selection: ?*Object = null,
+selection: Selection = .none,
 
 play: bool = false,
 imgui_demo_open: bool = false,

@@ -5,8 +5,29 @@ const utils = @import("utils.zig");
 
 pub const Entity = c.ecs_entity_t;
 pub const System = c.ecs_system_desc_t;
-pub const Query = c.ecs_query_t;
 pub const QueryDesc = c.ecs_query_desc_t;
+pub const Iterator = c.ecs_iter_t;
+
+pub const Query = extern struct {
+    const Self = @This();
+    inner: c.ecs_query_t,
+
+    pub fn deinit(self: *Self) void {
+        c.ecs_query_fini(self.castMut());
+    }
+
+    pub fn iter(self: *const Self) Iterator {
+        return c.ecs_query_iter(self.inner.world orelse self.inner.real_world.?, self.cast());
+    }
+
+    fn cast(self: *const Self) *const c.ecs_query_t {
+        return @ptrCast(self);
+    }
+
+    fn castMut(self: *Self) *c.ecs_query_t {
+        return @ptrCast(self);
+    }
+};
 
 pub const World = struct {
     const Self = @This();
@@ -100,17 +121,44 @@ pub const World = struct {
         c.ecs_delete(self.inner, entity);
     }
 
+    // add
+
     pub fn add(self: Self, entity: Entity, comptime T: type) void {
         c.ecs_add_id(self.inner, entity, typeId(T));
     }
+
+    pub fn addPair(self: Self, subject: Entity, first: Entity, second: Entity) void {
+        c.ecs_add_id(self.inner, subject, pair(first, second));
+    }
+
+    // remove
+
+    pub fn remove(self: Self, entity: Entity, comptime T: type) void {
+        return c.ecs_remove_id(self.inner, entity, typeId(T));
+    }
+
+    pub fn removePair(self: Self, subject: Entity, first: Entity, second: Entity) void {
+        return c.ecs_remove_id(self.inner, subject, pair(first, second));
+    }
+
+    // set
 
     pub fn set(self: Self, entity: Entity, comptime T: type, value: T) void {
         c.ecs_set_id(self.inner, entity, typeId(T), @sizeOf(T), @ptrCast(&value));
     }
 
-    pub fn addPair(self: Self, entity: Entity, first: Entity, second: Entity) void {
-        c.ecs_add_id(self.inner, entity, pair(first, second));
+    pub fn setPair(
+        self: Self,
+        subject: Entity,
+        first: Entity,
+        second: Entity,
+        comptime T: type,
+        value: T,
+    ) void {
+        return c.ecs_set_id(self.inner, subject, pair(first, second), @sizeOf(T), @ptrCast(&value));
     }
+
+    // get
 
     pub fn get(self: Self, entity: Entity, comptime T: type) *const T {
         return @ptrCast(@alignCast(c.ecs_get_id(self.inner, entity, typeId(T))));
@@ -125,7 +173,7 @@ pub const World = struct {
     }
 
     pub fn query(self: Self, q: *const QueryDesc) *Query {
-        return c.ecs_query_init(self.inner, q);
+        return @ptrCast(c.ecs_query_init(self.inner, q));
     }
 };
 
