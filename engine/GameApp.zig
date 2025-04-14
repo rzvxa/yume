@@ -19,8 +19,6 @@ const SceneAssetHandle = @import("assets.zig").SceneAssetHandle;
 const Scene = @import("scene.zig").Scene;
 const ComponentDefinition = @import("scene.zig").ComponentDefinition;
 const components = @import("components.zig");
-const Camera = @import("components/Camera.zig");
-const MeshRenderer = @import("components/MeshRenderer.zig");
 
 const ecs = @import("ecs.zig");
 
@@ -38,7 +36,7 @@ window: *c.SDL_Window = undefined,
 inputs: *inputs.InputContext,
 engine: VulkanEngine,
 
-components: std.StringHashMap(ComponentDefinition),
+components: std.StringHashMap(components.ComponentDef),
 
 world: ecs.World,
 scene_root: ecs.Entity,
@@ -67,21 +65,22 @@ pub fn init(a: std.mem.Allocator, loader: assets.AssetLoader, window_title: []co
         .window = window,
         .inputs = inputs.init(window) catch @panic("Failed to initialize input manager"),
         .engine = engine,
-        .components = std.StringHashMap(ComponentDefinition).init(a),
+        .components = std.StringHashMap(components.ComponentDef).init(a),
     };
 
     self.scene_root = self.world.create("root");
 
     assets.AssetsDatabase.init(a, &self.engine, loader);
-    self.components.put("Camera", Camera.definition()) catch @panic("OOM");
-    self.components.put("MeshRenderer", MeshRenderer.definition()) catch @panic("OOM");
 
-    self.world.component(components.Uuid);
+    self.registerComponent(components.Uuid);
 
-    self.world.component(components.Position);
-    self.world.component(components.Rotation);
-    self.world.component(components.Scale);
-    self.world.component(components.TransformMatrix);
+    self.registerComponent(components.Position);
+    self.registerComponent(components.Rotation);
+    self.registerComponent(components.Scale);
+    self.registerComponent(components.TransformMatrix);
+
+    self.registerComponent(components.camera.Camera);
+    self.registerComponent(components.mesh.Mesh);
 
     return self;
 }
@@ -197,6 +196,10 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
 
         obj.deref();
     }
+}
+
+pub fn registerComponent(self: *Self, comptime T: type) void {
+    self.components.put(ecs.typeName(T), self.world.component(T)) catch @panic("OOM");
 }
 
 fn newFrame(self: *Self) void {

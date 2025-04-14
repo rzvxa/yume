@@ -77,13 +77,13 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
 
                 const aspect = me.d.scene_view_size.x / me.d.scene_view_size.y;
                 me.d.camera.updateMatrices(me.d.camera_pos, me.d.camera_rot, aspect);
-                me.app.engine.drawObjects(
-                    me.cmd,
-                    me.app.scene.renderables.items,
-                    me.d.editor_camera_and_scene_buffer,
-                    me.d.editor_camera_and_scene_set,
-                    &me.d.camera,
-                );
+                // me.app.engine.drawObjects(
+                //     me.cmd,
+                //     me.app.scene.renderables.items,
+                //     me.d.editor_camera_and_scene_buffer,
+                //     me.d.editor_camera_and_scene_set,
+                //     &me.d.camera,
+                // );
 
                 c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
                     .offset = .{ .x = 0, .y = 0 },

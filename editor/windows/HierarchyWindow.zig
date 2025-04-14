@@ -5,7 +5,6 @@ const ecs = @import("yume").ecs;
 const AssetsDatabase = @import("yume").AssetsDatabase;
 const GameApp = @import("yume").GameApp;
 const MeshRenderer = @import("yume").MeshRenderer;
-const Object = @import("yume").scene_graph.Object;
 
 const Project = @import("../Project.zig");
 const Editor = @import("../Editor.zig");
@@ -34,13 +33,12 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             return;
         }
         if (c.ImGui_BeginDragDropTarget()) {
-            if (c.ImGui_AcceptDragDropPayload("Object", 0)) |payload| {
-                const payload_obj: ?**Object = @ptrCast(@alignCast(payload.*.Data.?));
+            if (c.ImGui_AcceptDragDropPayload("Entity", 0)) |payload| {
+                const payload_obj: ?*ecs.Entity = @ptrCast(@alignCast(payload.*.Data.?));
                 if (payload_obj) |p| {
-                    _ = p.*.ref();
-                    p.*.parent.?.removeChildren(p.*);
-                    ctx.scene.root.addChildren(p.*);
-                    p.*.deref();
+                    const parent = c.ecs_get_parent(ctx.world.inner, p.*);
+                    ctx.world.removePair(p.*, ecs.relations.ChildOf, parent);
+                    ctx.world.addPair(p.*, ecs.relations.ChildOf, ctx.scene_root);
                 }
             }
             c.ImGui_EndDragDropTarget();

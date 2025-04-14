@@ -7,8 +7,6 @@ const Uuid = @import("uuid.zig").Uuid;
 
 const vki = @import("vulkan_init.zig");
 const check_vk = vki.check_vk;
-const mesh_mod = @import("mesh.zig");
-const Mesh = mesh_mod.Mesh;
 const BoundingBox = mesh_mod.BoundingBox;
 
 const math3d = @import("math3d.zig");
@@ -18,8 +16,9 @@ const Vec4 = math3d.Vec4;
 const Mat4 = math3d.Mat4;
 
 const context = @import("context.zig");
-const Camera = @import("components/Camera.zig");
-const MeshRenderer = @import("components/MeshRenderer.zig");
+const Camera = @import("components/camera.zig").Camera;
+const mesh_mod = @import("components/mesh.zig");
+const Mesh = mesh_mod.Mesh;
 
 const window_extent = context.window_extent;
 
@@ -33,12 +32,12 @@ pub const vk_alloc_cbs: ?*c.VkAllocationCallbacks = null;
 
 pub const RenderCommand = c.VkCommandBuffer;
 
-pub const AllocatedBuffer = struct {
+pub const AllocatedBuffer = extern struct {
     buffer: c.VkBuffer,
     allocation: c.VmaAllocation,
 };
 
-pub const AllocatedImage = struct {
+pub const AllocatedImage = extern struct {
     image: c.VkImage,
     allocation: c.VmaAllocation,
 };
@@ -1287,7 +1286,7 @@ pub fn beginPresentRenderPass(self: *Self, cmd: RenderCommand) void {
 pub fn drawObjects(
     self: *Self,
     cmd: c.VkCommandBuffer,
-    renderables: []*MeshRenderer,
+    renderables: []*Mesh,
     ubo_buf: AllocatedBuffer,
     ubo_set: c.VkDescriptorSet,
     cam: *Camera,

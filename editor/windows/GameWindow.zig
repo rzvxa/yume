@@ -62,13 +62,13 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                         Vec3.ZERO,
                         aspect,
                     );
-                    me.app.engine.drawObjects(
-                        me.cmd,
-                        me.app.scene.renderables.items,
-                        me.app.engine.camera_and_scene_buffer,
-                        me.app.engine.camera_and_scene_set,
-                        main_camera,
-                    );
+                    // me.app.engine.drawObjects(
+                    //     me.cmd,
+                    //     me.app.scene.renderables.items,
+                    //     me.app.engine.camera_and_scene_buffer,
+                    //     me.app.engine.camera_and_scene_set,
+                    //     main_camera,
+                    // );
                 }
 
                 _ = c.ecs_run(me.app.world.inner, Editor.render_system, me.app.delta, null);

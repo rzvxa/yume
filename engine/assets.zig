@@ -6,9 +6,9 @@ const Uuid = @import("uuid.zig").Uuid;
 const texs = @import("textures.zig");
 const Texture = texs.Texture;
 
-const Mesh = @import("mesh.zig").Mesh;
-const Vertex = @import("mesh.zig").Vertex;
-const load_from_obj = @import("mesh.zig").load_from_obj;
+const Mesh = @import("components/mesh.zig").Mesh;
+const Vertex = @import("components/mesh.zig").Vertex;
+const load_from_obj = @import("components/mesh.zig").load_from_obj;
 
 const Engine = @import("VulkanEngine.zig");
 const Material = Engine.Material;
@@ -454,7 +454,7 @@ const LoadedAsset = struct {
             },
             .mesh => {
                 const it = self.data.mesh;
-                AssetsDatabase.instance.allocator.free(it.vertices);
+                AssetsDatabase.instance.allocator.free(it.vertices[0..it.vertices_count]);
                 AssetsDatabase.instance.allocator.destroy(it);
             },
             .material => {

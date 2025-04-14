@@ -10,9 +10,7 @@ pub fn system(
     scales: []const components.Scale,
     transformMatrices: []components.TransformMatrix,
 ) void {
-    std.debug.print("syscall \n", .{});
     for (positions, rotations, scales, transformMatrices) |p, r, s, *t| {
-        std.debug.print("here {?}\n", .{p.value});
         t.value = Mat4.compose(p.value, Quat.fromEuler(r.value), s.value);
     }
 }

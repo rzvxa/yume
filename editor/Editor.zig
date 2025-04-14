@@ -120,8 +120,7 @@ pub fn init(ctx: *GameApp) *Self {
     ctx.world.addSingleton(Playing);
     ctx.world.enable(ecs.typeId(Playing), false);
     const tmu_entity = ctx.world.systemFn("transform-matrix-update", ecs.systems.PostUpdate, systems.transformMatrices);
-    _ = tmu_entity;
-    // ctx.world.add(tmu_entity, RunInEditor);
+    ctx.world.add(tmu_entity, RunInEditor);
 
     const home_dir = std.fs.selfExeDirPathAlloc(ctx.allocator) catch @panic("OOM");
     defer ctx.allocator.free(home_dir);

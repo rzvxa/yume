@@ -9,13 +9,10 @@ const GameApp = @import("yume").GameApp;
 const Uuid = @import("yume").Uuid;
 const Object = @import("yume").Object;
 const Component = @import("yume").Component;
-const Camera = @import("yume").Camera;
 const MeshRenderer = @import("yume").MeshRenderer;
-const TypeId = @import("yume").TypeId;
-const typeId = @import("yume").typeId;
 const ObjectMetaEditor = @import("object.zig");
 const ObjectTransformEditor = @import("transform.zig");
-const MeshRendererEditor = @import("MeshRendererEditor.zig");
+const MeshEditor = @import("MeshEditor.zig");
 const CameraEditor = @import("CameraEditor.zig");
 
 pub const ComponentEditorFlags = packed struct {
@@ -32,25 +29,25 @@ pub const ComponentEditorFlags = packed struct {
 pub const ComponentEditor = struct {
     init: *const fn (allocator: std.mem.Allocator) *anyopaque,
     deinit: *const fn (*anyopaque) void,
-    edit: *const fn (self: *anyopaque, obj: *Object, comp: *Component) void,
+    edit: *const fn (self: *anyopaque, comp_id: ecs.Entity, comp: ecs.Entity, ctx: *GameApp) void,
     flags: ComponentEditorFlags = .{},
 };
 
-const ComponentEditorInstance = struct { ptr: *anyopaque, type_id: TypeId };
+const ComponentEditorInstance = struct { ptr: *anyopaque, type_id: ecs.TypeId };
 
 const Self = @This();
 
-component_editor_types: std.AutoHashMap(TypeId, ComponentEditor),
+component_editor_types: std.AutoHashMap(ecs.TypeId, ComponentEditor),
 object_meta_editors: std.AutoHashMap(ecs.Entity, ObjectMetaEditor),
 object_transform_editors: std.AutoHashMap(ecs.Entity, ObjectTransformEditor),
-component_editors: std.AutoHashMap(Uuid, std.AutoHashMap(Uuid, ComponentEditorInstance)),
+component_editors: std.AutoHashMap(ecs.Entity, std.AutoHashMap(ecs.Entity, ComponentEditorInstance)),
 
 pub fn init(allocator: std.mem.Allocator) Self {
     var self = Self{
-        .component_editor_types = std.AutoHashMap(TypeId, ComponentEditor).init(allocator),
+        .component_editor_types = std.AutoHashMap(ecs.TypeId, ComponentEditor).init(allocator),
         .object_meta_editors = std.AutoHashMap(ecs.Entity, ObjectMetaEditor).init(allocator),
         .object_transform_editors = std.AutoHashMap(ecs.Entity, ObjectTransformEditor).init(allocator),
-        .component_editors = std.AutoHashMap(Uuid, std.AutoHashMap(Uuid, ComponentEditorInstance)).init(allocator),
+        .component_editors = std.AutoHashMap(ecs.Entity, std.AutoHashMap(ecs.Entity, ComponentEditorInstance)).init(allocator),
     };
     self.registerBuiltinComponentEditors();
     return self;
@@ -74,7 +71,7 @@ pub fn deinit(self: *Self) void {
         while (outer_it.next()) |outer| {
             var inner_it = outer.valueIterator();
             while (inner_it.next()) |inner| {
-                self.componentEditorOf(inner.type_id).deinit(inner.ptr);
+                self.componentEditorOf(inner.type_id).?.deinit(inner.ptr);
             }
             outer.deinit();
         }
@@ -103,64 +100,42 @@ pub fn editEntityTransform(self: *Self, entity: ecs.Entity, ctx: *GameApp) void 
     }
 }
 
-pub fn editComponent(self: *Self, object: *Object, component: *Component) void {
-    const editor = self.componentEditorOf(component.type_id);
-    const entry = self.component_editors.getOrPut(object.uuid) catch @panic("OOM");
+pub fn editComponent(self: *Self, editor: ComponentEditor, entity: ecs.Entity, component: ecs.Entity, ctx: *GameApp) void {
+    const entry = self.component_editors.getOrPut(entity) catch @panic("OOM");
     if (!entry.found_existing) {
-        entry.value_ptr.* = std.AutoHashMap(Uuid, ComponentEditorInstance).init(self.component_editors.allocator);
+        entry.value_ptr.* = std.AutoHashMap(ecs.Entity, ComponentEditorInstance).init(self.component_editors.allocator);
     }
-    const instance = entry.value_ptr.getOrPut(component.uuid) catch @panic("OOM");
+    const instance = entry.value_ptr.getOrPut(component) catch @panic("OOM");
     if (!instance.found_existing) {
-        instance.value_ptr.* = .{ .ptr = editor.init(self.component_editors.allocator), .type_id = component.type_id };
+        instance.value_ptr.* = .{ .ptr = editor.init(self.component_editors.allocator), .type_id = component };
     }
+
+    const name = ctx.world.getName(component);
+    var enable = c.ecs_is_enabled_id(ctx.world.inner, entity, component);
 
     var open: bool = undefined;
     if (editor.flags.no_disable) {
-        open = c.ImGui_CollapsingHeader(component.name, c.ImGuiTreeNodeFlags_DefaultOpen);
+        open = c.ImGui_CollapsingHeader(name, c.ImGuiTreeNodeFlags_DefaultOpen);
     } else {
-        open = collapsingHeaderWithCheckBox(component.name, &component.enable, c.ImGuiTreeNodeFlags_DefaultOpen);
+        open = collapsingHeaderWithCheckBox(name, &enable, c.ImGuiTreeNodeFlags_DefaultOpen);
     }
     if (open) {
-        editor.edit(instance.value_ptr.*.ptr, object, component);
+        editor.edit(instance.value_ptr.*.ptr, entity, component, ctx);
     }
 }
 
-fn componentEditorOf(self: *Self, type_id: TypeId) ComponentEditor {
+pub fn componentEditorOf(self: *Self, type_id: ecs.Entity) ?ComponentEditor {
     const ty = self.component_editor_types.get(type_id);
     if (ty) |t| {
         return t;
     }
 
-    return struct {
-        allocator: std.mem.Allocator,
-        pub fn init(a: std.mem.Allocator) *anyopaque {
-            const ptr = a.create(@This()) catch @panic("OOM");
-            ptr.* = @This(){ .allocator = a };
-            return ptr;
-        }
-
-        pub fn deinit(ptr: *anyopaque) void {
-            const me = @as(*@This(), @ptrCast(@alignCast(ptr)));
-            me.allocator.destroy(me);
-        }
-
-        pub fn edit(_: *anyopaque, obj: *Object, comp: *Component) void {
-            c.ImGui_Text("No Editor for %s{ compId: %d, uuid: %s }", obj.name.ptr, comp.type_id, &comp.uuid.urnZ());
-        }
-
-        pub fn asComponentEditor() ComponentEditor {
-            return .{
-                .init = @This().init,
-                .deinit = @This().deinit,
-                .edit = @This().edit,
-            };
-        }
-    }.asComponentEditor();
+    return null;
 }
 
 fn registerBuiltinComponentEditors(self: *Self) void {
-    self.component_editor_types.put(typeId(MeshRenderer), MeshRendererEditor.asComponentEditor()) catch @panic("OOM");
-    self.component_editor_types.put(typeId(Camera), CameraEditor.asComponentEditor()) catch @panic("OOM");
+    self.component_editor_types.put(ecs.typeId(components.Camera), CameraEditor.asComponentEditor()) catch @panic("OOM");
+    self.component_editor_types.put(ecs.typeId(components.Mesh), MeshEditor.asComponentEditor()) catch @panic("OOM");
 }
 
 fn collapsingHeaderWithCheckBox(label: [*c]const u8, checked: [*c]bool, flags: c.ImGuiTreeNodeFlags) bool {

@@ -1,3 +1,4 @@
+const ecs = @import("../ecs.zig");
 const Vec3 = @import("../math3d.zig").Vec3;
 const Mat4 = @import("../math3d.zig").Mat4;
 

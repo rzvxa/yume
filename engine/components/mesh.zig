@@ -1,10 +1,14 @@
 const c = @import("clibs");
-
 const std = @import("std");
-const AllocatedBuffer = @import("VulkanEngine.zig").AllocatedBuffer;
-const m3d = @import("math3d.zig");
 
-const Uuid = @import("uuid.zig").Uuid;
+const AllocatedBuffer = @import("../VulkanEngine.zig").AllocatedBuffer;
+const m3d = @import("../math3d.zig");
+
+const ecs = @import("../ecs.zig");
+const GameApp = @import("../GameApp.zig");
+
+const Uuid = @import("../uuid.zig").Uuid;
+const obj_loader = @import("../obj_loader.zig");
 
 const Vec2 = m3d.Vec2;
 const Vec3 = m3d.Vec3;
@@ -17,7 +21,7 @@ pub const VertexInputDescription = struct {
     flags: c.VkPipelineVertexInputStateCreateFlags = 0,
 };
 
-pub const Vertex = struct {
+pub const Vertex = extern struct {
     position: Vec3,
     normal: Vec3,
     color: Vec3,
@@ -60,7 +64,7 @@ pub const Vertex = struct {
     };
 };
 
-pub const BoundingBox = struct {
+pub const BoundingBox = extern struct {
     const Self = @This();
     mins: Vec3,
     maxs: Vec3,
@@ -93,62 +97,70 @@ pub const BoundingBox = struct {
     }
 };
 
-pub const Mesh = struct {
+pub const primitives = extern struct {
+    pub fn cube(allocator: std.mem.Allocator) !Mesh {
+        const verts = try allocator.alloc(Vertex, 24);
+        @memcpy(verts, &[24]Vertex{
+            // Front face
+            .{ .position = Vec3.make(-1, -1, 1), .normal = Vec3.make(0, 0, 1), .color = Vec3.make(1, 0, 0), .uv = Vec2.make(0, 0) },
+            .{ .position = Vec3.make(1, -1, 1), .normal = Vec3.make(0, 0, 1), .color = Vec3.make(0, 1, 0), .uv = Vec2.make(1, 0) },
+            .{ .position = Vec3.make(1, 1, 1), .normal = Vec3.make(0, 0, 1), .color = Vec3.make(0, 0, 1), .uv = Vec2.make(1, 1) },
+            .{ .position = Vec3.make(-1, 1, 1), .normal = Vec3.make(0, 0, 1), .color = Vec3.make(1, 1, 0), .uv = Vec2.make(0, 1) },
+
+            // Back face
+            .{ .position = Vec3.make(-1, -1, -1), .normal = Vec3.make(0, 0, -1), .color = Vec3.make(1, 0, 1), .uv = Vec2.make(0, 0) },
+            .{ .position = Vec3.make(1, -1, -1), .normal = Vec3.make(0, 0, -1), .color = Vec3.make(0, 1, 1), .uv = Vec2.make(1, 0) },
+            .{ .position = Vec3.make(1, 1, -1), .normal = Vec3.make(0, 0, -1), .color = Vec3.make(0, 0, 0), .uv = Vec2.make(1, 1) },
+            .{ .position = Vec3.make(-1, 1, -1), .normal = Vec3.make(0, 0, -1), .color = Vec3.make(1, 1, 1), .uv = Vec2.make(0, 1) },
+
+            // Left face
+            .{ .position = Vec3.make(-1, -1, -1), .normal = Vec3.make(-1, 0, 0), .color = Vec3.make(1, 0, 1), .uv = Vec2.make(0, 0) },
+            .{ .position = Vec3.make(-1, -1, 1), .normal = Vec3.make(-1, 0, 0), .color = Vec3.make(1, 0, 0), .uv = Vec2.make(1, 0) },
+            .{ .position = Vec3.make(-1, 1, 1), .normal = Vec3.make(-1, 0, 0), .color = Vec3.make(1, 1, 0), .uv = Vec2.make(1, 1) },
+            .{ .position = Vec3.make(-1, 1, -1), .normal = Vec3.make(-1, 0, 0), .color = Vec3.make(1, 1, 1), .uv = Vec2.make(0, 1) },
+
+            // Right face
+            .{ .position = Vec3.make(1, -1, -1), .normal = Vec3.make(1, 0, 0), .color = Vec3.make(0, 1, 1), .uv = Vec2.make(0, 0) },
+            .{ .position = Vec3.make(1, -1, 1), .normal = Vec3.make(1, 0, 0), .color = Vec3.make(0, 1, 0), .uv = Vec2.make(1, 0) },
+            .{ .position = Vec3.make(1, 1, 1), .normal = Vec3.make(1, 0, 0), .color = Vec3.make(0, 0, 1), .uv = Vec2.make(1, 1) },
+            .{ .position = Vec3.make(1, 1, -1), .normal = Vec3.make(1, 0, 0), .color = Vec3.make(0, 0, 0), .uv = Vec2.make(0, 1) },
+
+            // Top face
+            .{ .position = Vec3.make(-1, 1, -1), .normal = Vec3.make(0, 1, 0), .color = Vec3.make(1, 1, 1), .uv = Vec2.make(0, 0) },
+            .{ .position = Vec3.make(-1, 1, 1), .normal = Vec3.make(0, 1, 0), .color = Vec3.make(1, 1, 0), .uv = Vec2.make(1, 0) },
+            .{ .position = Vec3.make(1, 1, 1), .normal = Vec3.make(0, 1, 0), .color = Vec3.make(0, 0, 1), .uv = Vec2.make(1, 1) },
+            .{ .position = Vec3.make(1, 1, -1), .normal = Vec3.make(0, 1, 0), .color = Vec3.make(0, 0, 0), .uv = Vec2.make(0, 1) },
+
+            // Bottom face
+            .{ .position = Vec3.make(-1, -1, -1), .normal = Vec3.make(0, -1, 0), .color = Vec3.make(1, 0, 1), .uv = Vec2.make(0, 0) },
+            .{ .position = Vec3.make(-1, -1, 1), .normal = Vec3.make(0, -1, 0), .color = Vec3.make(1, 0, 0), .uv = Vec2.make(1, 0) },
+            .{ .position = Vec3.make(1, -1, 1), .normal = Vec3.make(0, -1, 0), .color = Vec3.make(0, 1, 0), .uv = Vec2.make(1, 1) },
+            .{ .position = Vec3.make(1, -1, -1), .normal = Vec3.make(0, -1, 0), .color = Vec3.make(0, 1, 1), .uv = Vec2.make(0, 1) },
+        });
+        return Mesh{
+            .uuid = Uuid.new(),
+            .vertices_count = verts.len,
+            .vertices = verts.ptr,
+            .bounds = .{ .mins = Vec3.make(-1, -1, -1), .maxs = Vec3.make(1, 1, 1) },
+        };
+    }
+};
+
+pub const Mesh = extern struct {
     uuid: Uuid,
-    vertices: []Vertex,
+    vertices_count: usize,
+    vertices: [*c]Vertex,
     bounds: BoundingBox,
     vertex_buffer: AllocatedBuffer = undefined,
 
-    pub const primitives = struct {
-        pub fn cube(allocator: std.mem.Allocator) !Mesh {
-            const verts = try allocator.alloc(Vertex, 24);
-            @memcpy(verts, &[24]Vertex{
-                // Front face
-                .{ .position = Vec3.make(-1, -1, 1), .normal = Vec3.make(0, 0, 1), .color = Vec3.make(1, 0, 0), .uv = Vec2.make(0, 0) },
-                .{ .position = Vec3.make(1, -1, 1), .normal = Vec3.make(0, 0, 1), .color = Vec3.make(0, 1, 0), .uv = Vec2.make(1, 0) },
-                .{ .position = Vec3.make(1, 1, 1), .normal = Vec3.make(0, 0, 1), .color = Vec3.make(0, 0, 1), .uv = Vec2.make(1, 1) },
-                .{ .position = Vec3.make(-1, 1, 1), .normal = Vec3.make(0, 0, 1), .color = Vec3.make(1, 1, 0), .uv = Vec2.make(0, 1) },
-
-                // Back face
-                .{ .position = Vec3.make(-1, -1, -1), .normal = Vec3.make(0, 0, -1), .color = Vec3.make(1, 0, 1), .uv = Vec2.make(0, 0) },
-                .{ .position = Vec3.make(1, -1, -1), .normal = Vec3.make(0, 0, -1), .color = Vec3.make(0, 1, 1), .uv = Vec2.make(1, 0) },
-                .{ .position = Vec3.make(1, 1, -1), .normal = Vec3.make(0, 0, -1), .color = Vec3.make(0, 0, 0), .uv = Vec2.make(1, 1) },
-                .{ .position = Vec3.make(-1, 1, -1), .normal = Vec3.make(0, 0, -1), .color = Vec3.make(1, 1, 1), .uv = Vec2.make(0, 1) },
-
-                // Left face
-                .{ .position = Vec3.make(-1, -1, -1), .normal = Vec3.make(-1, 0, 0), .color = Vec3.make(1, 0, 1), .uv = Vec2.make(0, 0) },
-                .{ .position = Vec3.make(-1, -1, 1), .normal = Vec3.make(-1, 0, 0), .color = Vec3.make(1, 0, 0), .uv = Vec2.make(1, 0) },
-                .{ .position = Vec3.make(-1, 1, 1), .normal = Vec3.make(-1, 0, 0), .color = Vec3.make(1, 1, 0), .uv = Vec2.make(1, 1) },
-                .{ .position = Vec3.make(-1, 1, -1), .normal = Vec3.make(-1, 0, 0), .color = Vec3.make(1, 1, 1), .uv = Vec2.make(0, 1) },
-
-                // Right face
-                .{ .position = Vec3.make(1, -1, -1), .normal = Vec3.make(1, 0, 0), .color = Vec3.make(0, 1, 1), .uv = Vec2.make(0, 0) },
-                .{ .position = Vec3.make(1, -1, 1), .normal = Vec3.make(1, 0, 0), .color = Vec3.make(0, 1, 0), .uv = Vec2.make(1, 0) },
-                .{ .position = Vec3.make(1, 1, 1), .normal = Vec3.make(1, 0, 0), .color = Vec3.make(0, 0, 1), .uv = Vec2.make(1, 1) },
-                .{ .position = Vec3.make(1, 1, -1), .normal = Vec3.make(1, 0, 0), .color = Vec3.make(0, 0, 0), .uv = Vec2.make(0, 1) },
-
-                // Top face
-                .{ .position = Vec3.make(-1, 1, -1), .normal = Vec3.make(0, 1, 0), .color = Vec3.make(1, 1, 1), .uv = Vec2.make(0, 0) },
-                .{ .position = Vec3.make(-1, 1, 1), .normal = Vec3.make(0, 1, 0), .color = Vec3.make(1, 1, 0), .uv = Vec2.make(1, 0) },
-                .{ .position = Vec3.make(1, 1, 1), .normal = Vec3.make(0, 1, 0), .color = Vec3.make(0, 0, 1), .uv = Vec2.make(1, 1) },
-                .{ .position = Vec3.make(1, 1, -1), .normal = Vec3.make(0, 1, 0), .color = Vec3.make(0, 0, 0), .uv = Vec2.make(0, 1) },
-
-                // Bottom face
-                .{ .position = Vec3.make(-1, -1, -1), .normal = Vec3.make(0, -1, 0), .color = Vec3.make(1, 0, 1), .uv = Vec2.make(0, 0) },
-                .{ .position = Vec3.make(-1, -1, 1), .normal = Vec3.make(0, -1, 0), .color = Vec3.make(1, 0, 0), .uv = Vec2.make(1, 0) },
-                .{ .position = Vec3.make(1, -1, 1), .normal = Vec3.make(0, -1, 0), .color = Vec3.make(0, 1, 0), .uv = Vec2.make(1, 1) },
-                .{ .position = Vec3.make(1, -1, -1), .normal = Vec3.make(0, -1, 0), .color = Vec3.make(0, 1, 1), .uv = Vec2.make(0, 1) },
-            });
-            return Mesh{
-                .uuid = Uuid.new(),
-                .vertices = verts,
-                .bounds = .{ .mins = Vec3.make(-1, -1, -1), .maxs = Vec3.make(1, 1, 1) },
-            };
-        }
-    };
+    pub fn default(ptr: *align(8) Mesh, _: ecs.Entity, ctx: *GameApp) callconv(.C) bool {
+        ptr.* = primitives.cube(ctx.allocator) catch |err| {
+            std.debug.print("error initializing default mesh {}", .{err});
+            return false;
+        };
+        return true;
+    }
 };
-
-const obj_loader = @import("obj_loader.zig");
 
 pub fn load_from_obj(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
     var obj_mesh = obj_loader.parse(allocator, buffer, ":memory:") catch |err| {

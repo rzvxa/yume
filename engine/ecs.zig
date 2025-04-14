@@ -1,6 +1,9 @@
 const c = @import("clibs");
 const std = @import("std");
 
+const GameApp = @import("GameApp.zig");
+
+pub const TypeId = c.ecs_id_t;
 pub const Entity = c.ecs_entity_t;
 pub const System = c.ecs_system_desc_t;
 pub const QueryDesc = c.ecs_query_desc_t;
@@ -56,7 +59,7 @@ pub const World = struct {
         meta.id = c.ecs_entity_init(self.inner, &.{ .name = typeName(T) });
     }
 
-    pub fn component(self: Self, comptime T: type) void {
+    pub fn component(self: Self, comptime T: type) ComponentDef {
         if (@sizeOf(T) == 0) {
             @compileError("For registering zero-sized components use `tag` instead");
         }
@@ -87,14 +90,23 @@ pub const World = struct {
         });
 
         std.debug.assert(meta.id != 0);
+        return .{
+            .id = meta.id,
+            .size = @sizeOf(T),
+            .alignment = @alignOf(T),
+            .default = switch (@typeInfo(T)) {
+                .Struct => if (@hasDecl(T, "default")) struct {
+                    pub fn f(ptr: *anyopaque, entity: Entity, ctx: *GameApp) callconv(.C) bool {
+                        return T.default(@as(*align(8) T, @ptrCast(@alignCast(ptr))), entity, ctx);
+                    }
+                }.f else null,
+                else => null,
+            },
+        };
     }
 
     pub fn autoSystemFnDesc(comptime fn_system: anytype) c.ecs_system_desc_t {
-        const system_struct = SystemImpl(fn_system);
-
-        var system_desc = System{};
-        system_desc.callback = system_struct.exec;
-
+        var terms = std.mem.zeroes([32]c.ecs_term_t);
         const fn_type = @typeInfo(@TypeOf(fn_system)).Fn;
         const has_it_param = fn_type.params[0].type == *c.ecs_iter_t;
         const start_index = if (has_it_param) 1 else 0;
@@ -102,8 +114,17 @@ pub const World = struct {
             const p = fn_type.params[i];
             const param_type_info = @typeInfo(p.type.?).Pointer;
             const inout = if (param_type_info.is_const) c.EcsIn else c.EcsInOut;
-            system_desc.query.terms[i - start_index] = .{ .id = typeId(param_type_info.child), .inout = inout };
+            terms[i - start_index] = .{ .id = typeId(param_type_info.child), .inout = inout };
         }
+        return systemFnDesc(fn_system, terms);
+    }
+
+    pub fn systemFnDesc(comptime fn_system: anytype, terms: [32]c.ecs_term_t) c.ecs_system_desc_t {
+        const system_struct = SystemImpl(fn_system);
+
+        var system_desc = System{};
+        system_desc.callback = system_struct.exec;
+        system_desc.query.terms = terms;
 
         return system_desc;
     }
@@ -194,7 +215,11 @@ pub const World = struct {
     }
 
     pub fn set(self: Self, ent: Entity, comptime T: type, value: T) void {
-        c.ecs_set_id(self.inner, ent, typeId(T), @sizeOf(T), @ptrCast(&value));
+        self.setId(ent, typeId(T), @sizeOf(T), @ptrCast(&value));
+    }
+
+    pub inline fn setId(self: Self, ent: Entity, comp: Entity, size: usize, value: *const anyopaque) void {
+        c.ecs_set_id(self.inner, ent, comp, size, value);
     }
 
     pub fn setPair(
@@ -249,6 +274,13 @@ pub const World = struct {
     }
 };
 
+pub const ComponentDef = extern struct {
+    id: Entity,
+    size: usize,
+    alignment: usize,
+    default: ?*const fn (self: *anyopaque, entity: Entity, ctx: *GameApp) callconv(.C) bool,
+};
+
 fn Reflect(comptime T: type) type {
     const META = struct {
         const _ = T;
@@ -271,7 +303,7 @@ pub fn field(it: *c.ecs_iter_t, comptime T: type, index: i8) ?[]T {
 
 // taken from `zflecs` <https://github.com/zig-gamedev/zflecs/blob/ee2cd434fa2ec2454008988a1cc1201b242f030e/src/zflecs.zig#L2806C1-L2821C2>
 // flecs internally reserves names like u16, u32, f32, etc. so we re-map them to uppercase to avoid collisions
-fn typeName(comptime T: type) @TypeOf(@typeName(T)) {
+pub fn typeName(comptime T: type) @TypeOf(@typeName(T)) {
     return switch (T) {
         u8 => return "U8",
         u16 => return "U16",
@@ -547,7 +579,7 @@ pub const operators = struct {
 ///     const c2 = ecs.field(it, Velocity, 1).?;
 ///     move_system(c1, c2);//probably inlined
 // }
-fn SystemImpl(comptime fn_system: anytype) type {
+pub fn SystemImpl(comptime fn_system: anytype) type {
     const fn_type = @typeInfo(@TypeOf(fn_system));
     switch (fn_type) {
         .Fn => |f| if (f.params.len == 0) {
