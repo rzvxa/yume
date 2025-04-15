@@ -49,6 +49,10 @@ pub const Vec3 = extern struct {
         return .{ .x = x, .y = y, .z = z };
     }
 
+    pub inline fn fromArray(xyz: [3]f32) Self {
+        return @as(*const Self, @ptrCast(&xyz)).*;
+    }
+
     pub inline fn scalar(n: f32) Self {
         return make(n, n, n);
     }
@@ -116,6 +120,40 @@ pub const Vec3 = extern struct {
 
     pub inline fn toArray(self: Self) [3]f32 {
         return @as(*const [3]f32, @ptrCast(&self)).*;
+    }
+
+    pub fn jsonStringify(self: Self, jws: anytype) !void {
+        try jws.beginArray();
+
+        try jws.write(self.x);
+        try jws.write(self.y);
+        try jws.write(self.z);
+
+        try jws.endArray();
+    }
+
+    pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, _: anytype) !Self {
+        var tk = try jrs.next();
+        if (tk != .array_begin) return error.UnexpectedEndOfInput;
+
+        var xyz = [3]f32{ 0, 0, 0 };
+
+        for (0..3) |i| {
+            tk = try jrs.nextAlloc(a, .alloc_if_needed);
+            if (tk == .array_end) return error.UnexpectedEndOfInput;
+
+            xyz[i] = switch (tk) {
+                inline .number, .allocated_number => |slice| std.fmt.parseFloat(f32, slice) catch return error.SyntaxError,
+                else => {
+                    return error.UnexpectedToken;
+                },
+            };
+        }
+
+        tk = try jrs.next();
+        std.debug.assert(tk == .array_end);
+
+        return fromArray(xyz);
     }
 };
 

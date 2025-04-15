@@ -1,10 +1,15 @@
 const c = @import("clibs");
-
 const std = @import("std");
-const AllocatedBuffer = @import("VulkanEngine.zig").AllocatedBuffer;
-const m3d = @import("math3d.zig");
 
-const Uuid = @import("uuid.zig");
+const AllocatedBuffer = @import("../VulkanEngine.zig").AllocatedBuffer;
+const m3d = @import("../math3d.zig");
+
+const ecs = @import("../ecs.zig");
+const GameApp = @import("../GameApp.zig");
+const AssetsDatabase = @import("../assets.zig").AssetsDatabase;
+
+const Uuid = @import("../uuid.zig").Uuid;
+const obj_loader = @import("../obj_loader.zig");
 
 const Vec2 = m3d.Vec2;
 const Vec3 = m3d.Vec3;
@@ -17,7 +22,7 @@ pub const VertexInputDescription = struct {
     flags: c.VkPipelineVertexInputStateCreateFlags = 0,
 };
 
-pub const Vertex = struct {
+pub const Vertex = extern struct {
     position: Vec3,
     normal: Vec3,
     color: Vec3,
@@ -60,7 +65,7 @@ pub const Vertex = struct {
     };
 };
 
-pub const BoundingBox = struct {
+pub const BoundingBox = extern struct {
     const Self = @This();
     mins: Vec3,
     maxs: Vec3,
@@ -93,17 +98,26 @@ pub const BoundingBox = struct {
     }
 };
 
-pub const Mesh = struct {
+pub const Mesh = extern struct {
     uuid: Uuid,
-    vertices: []Vertex,
+    vertices_count: usize,
+    vertices: [*c]Vertex,
     bounds: BoundingBox,
     vertex_buffer: AllocatedBuffer = undefined,
+
+    pub fn default(ptr: *align(8) Mesh, _: ecs.Entity, _: *GameApp, rr: ecs.ResourceResolver) callconv(.C) bool {
+        const cube = rr("builtin://cube.obj");
+        if (!cube.found) {
+            return false;
+        }
+
+        ptr.* = (AssetsDatabase.getOrLoadMesh(cube.uuid) catch return false).*;
+        return true;
+    }
 };
 
-const obj_loader = @import("obj_loader.zig");
-
-pub fn load_from_obj(allocator: std.mem.Allocator, filepath: []const u8) Mesh {
-    var obj_mesh = obj_loader.parse_file(allocator, filepath) catch |err| {
+pub fn load_from_obj(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
+    var obj_mesh = obj_loader.parse(allocator, buffer, ":memory:") catch |err| {
         std.log.err("Failed to load obj file: {s}", .{@errorName(err)});
         unreachable;
     };
@@ -171,7 +185,8 @@ pub fn load_from_obj(allocator: std.mem.Allocator, filepath: []const u8) Mesh {
 
     return Mesh{
         .uuid = Uuid.new(),
-        .vertices = vb.vertices.toOwnedSlice() catch @panic("Failed to make owned slice"),
+        .vertices_count = vb.vertices.items.len,
+        .vertices = (vb.vertices.toOwnedSlice() catch @panic("Failed to make owned slice")).ptr,
         .bounds = vb.bounds,
     };
 }

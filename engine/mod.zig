@@ -1,10 +1,13 @@
 pub const version = @import("cfg").version;
 
-pub const Uuid = @import("uuid.zig");
+pub const Uuid = @import("uuid.zig").Uuid;
+
+pub const ecs = @import("ecs.zig");
+pub const components = @import("components.zig");
+pub const systems = @import("systems.zig");
 
 pub const GameApp = @import("GameApp.zig");
 pub const VulkanEngine = @import("VulkanEngine.zig");
-pub const Mesh = @import("mesh.zig");
 pub const vki = @import("vulkan_init.zig");
 pub const textures = @import("textures.zig");
 
@@ -38,5 +41,5 @@ pub const utils = @import("utils.zig");
 pub const TypeId = utils.TypeId;
 pub const typeId = utils.typeId;
 
-pub const Camera = @import("components/Camera.zig");
-pub const MeshRenderer = @import("components/MeshRenderer.zig");
+pub const Camera = @import("components/camera.zig").Camera;
+// pub const MeshRenderer = @import("components/MeshRenderer.zig");

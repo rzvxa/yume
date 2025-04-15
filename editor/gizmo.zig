@@ -9,7 +9,7 @@ const Vec3 = yume.Vec3;
 const Mat4 = yume.Mat4;
 const Rect = yume.Rect;
 
-const BoundingBox = @import("yume").Mesh.BoundingBox;
+const BoundingBox = @import("yume").components.mesh.BoundingBox;
 
 const GizmoContext = struct {
     inframe: bool = false,
@@ -151,7 +151,7 @@ pub fn drawArrow(from: Vec3, to: Vec3, thickness: f32, head_size: f32, outline_t
     drawTriangleWithOutline(base4, base1, arrowTip, darkenColor(color, 10), outline_color);
 }
 
-pub fn manipulate(pos: Vec3, rot: Vec3, scale: Vec3) DrawError!void {
+pub fn manipulate(pos: *Vec3, rot: *Vec3, scale: *Vec3) DrawError!void {
     const x_end = pos.add(Vec3.make(0.5, 0, 0));
     const y_end = pos.add(Vec3.make(0, 0.5, 0));
     const z_end = pos.add(Vec3.make(0, 0, 0.5));
@@ -162,11 +162,11 @@ pub fn manipulate(pos: Vec3, rot: Vec3, scale: Vec3) DrawError!void {
     const col = context.color;
 
     context.color = red();
-    try drawArrow(pos, x_end, thickness, 0.2, 1, black());
+    try drawArrow(pos.*, x_end, thickness, 0.2, 1, black());
     context.color = green();
-    try drawArrow(pos, y_end, thickness, 0.2, 1, black());
+    try drawArrow(pos.*, y_end, thickness, 0.2, 1, black());
     context.color = blue();
-    try drawArrow(pos, z_end, thickness, 0.2, 1, black());
+    try drawArrow(pos.*, z_end, thickness, 0.2, 1, black());
     context.color = col;
 
     // c.ImDrawList_AddLineEx(context.drawlist, toScreenPoint(pos), toScreenPoint(x_end), black(), thickness + outline_thickness);

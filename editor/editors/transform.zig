@@ -2,7 +2,9 @@ const c = @import("clibs");
 
 const std = @import("std");
 
-const Object = @import("yume").Object;
+const GameApp = @import("yume").GameApp;
+const ecs = @import("yume").ecs;
+const components = @import("yume").components;
 const Vec3 = @import("yume").Vec3;
 const Mat4 = @import("yume").Mat4;
 const Quat = @import("yume").Quat;
@@ -11,7 +13,7 @@ const Self = @This();
 
 allocator: std.mem.Allocator,
 
-pub fn init(allocator: std.mem.Allocator, _: *Object) Self {
+pub fn init(allocator: std.mem.Allocator, _: ecs.Entity) Self {
     const self = Self{
         .allocator = allocator,
     };
@@ -20,26 +22,23 @@ pub fn init(allocator: std.mem.Allocator, _: *Object) Self {
 
 pub fn deinit(_: *Self) void {}
 
-pub fn edit(_: *Self, obj: *Object) void {
-    const transform = &obj.transform;
+pub fn edit(_: *Self, entity: ecs.Entity, ctx: *GameApp) void {
+    const pos = ctx.world.getMut(entity, components.Position).?;
+    const rot = ctx.world.getMut(entity, components.Rotation).?;
+    const scale = ctx.world.getMut(entity, components.Scale).?;
 
     var changed = false;
 
-    if (inputVec3("Position", &transform.raw.position, 0.01)) {
-        changed = true;
-    }
-    // std.log.debug("rot: {} {}", .{ rot, components.rotation });
-
-    if (inputVec3("Rotation", &transform.raw.rotation, 1)) {
+    if (inputVec3("Position", &pos.value, 0.01)) {
         changed = true;
     }
 
-    if (inputVec3("Scale", &transform.raw.scale, 0.01)) {
+    if (inputVec3("Rotation", &rot.value, 1)) {
         changed = true;
     }
 
-    if (changed) {
-        transform.updateMatrices();
+    if (inputVec3("Scale", &scale.value, 0.01)) {
+        changed = true;
     }
 }
 

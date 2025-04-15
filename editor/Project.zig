@@ -1,6 +1,9 @@
 const std = @import("std");
 const Uuid = @import("yume").Uuid;
 
+const AssetLoader = @import("yume").assets.AssetLoader;
+const EditorDatabase = @import("EditorDatabase.zig");
+
 const Self = @This();
 
 var instance: ?Self = null;
@@ -14,24 +17,64 @@ default_scene: Uuid,
 
 resources: std.AutoHashMap(Uuid, Resource),
 
+// unserialized data
+resources_index: std.StringHashMap(Uuid),
+resources_builtins: std.AutoHashMap(Uuid, Resource),
+
 pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     if (instance) |*ins| {
         ins.unload();
     }
-    var file = try std.fs.cwd().openFile(path, .{});
+    var file = try std.fs.openFileAbsolute(path, .{});
     defer file.close();
     const s = try file.readToEndAlloc(allocator, 30_000_000);
     defer allocator.free(s);
     instance = (try std.json.parseFromSliceLeaky(Self, allocator, s, .{}));
+    instance.?.resources_index = std.StringHashMap(Uuid).init(allocator);
+    instance.?.resources_builtins = std.AutoHashMap(Uuid, Resource).init(allocator);
+
+    var project_root = try std.fs.openDirAbsolute(std.fs.path.dirname(path) orelse return error.InvalidPath, .{});
+    defer project_root.close();
+    try project_root.setAsCwd();
+
+    try addBuiltin("3e21192b-6c22-4a4f-98ca-a4a43f675986", "materials/default.mat");
+    try addBuiltin("e732bb0c-19bb-492b-a79d-24fde85964d2", "materials/none.mat");
+    try addBuiltin("ad4bc22b-3765-4a9d-bab7-7984e101428a", "lost_empire-RGBA.png");
+    try addBuiltin("ac6b9d14-0a56-458a-a7cc-fd36ede79468", "lost_empire.obj");
+    try addBuiltin("acc02aef-7ac0-46e7-b006-378c36ac1b27", "u.obj");
+    try addBuiltin("17c0ee4b-8fa0-43a7-a3d8-8bf7b5e73bb9", "u.mtl");
+    try addBuiltin("23400ade-52d7-416b-9679-884a49de1722", "cube.obj");
+
+    try addBuiltinShader("cf64bfc9-703c-43b0-9d01-c8032706872c", "tri_mesh.vert.glsl");
+    try addBuiltinShader("8b4db7d0-33a6-4f42-96cc-7b1d88566f27", "default_lit.frag.glsl");
+    try addBuiltinShader("9939ab1b-d72c-4463-b039-58211f2d6531", "textured_lit.frag.glsl");
+
+    try EditorDatabase.setLastOpenProject(path);
 }
 
 pub fn unload(self: *Self) void {
     self.scenes.deinit();
-    var it = self.resources.iterator();
-    while (it.next()) |kv| {
-        self.allocator.free(kv.value_ptr.path);
+    {
+        var it = self.resources_index.iterator();
+        while (it.next()) |kv| {
+            self.allocator.free(kv.key_ptr.*);
+        }
+    }
+    self.resources_index.deinit();
+    {
+        var it = self.resources.iterator();
+        while (it.next()) |kv| {
+            self.allocator.free(kv.value_ptr.path);
+        }
     }
     self.resources.deinit();
+    {
+        var it = self.resources_builtins.iterator();
+        while (it.next()) |kv| {
+            self.allocator.free(kv.value_ptr.path);
+        }
+    }
+    self.resources_builtins.deinit();
 }
 
 pub fn current() ?*Self {
@@ -74,7 +117,7 @@ pub fn jsonStringify(self: Self, jws: anytype) !void {
     try jws.endObject();
 }
 
-pub fn jsonParse(a: std.mem.Allocator, jrs: *std.json.Scanner, o: anytype) !Self {
+pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, o: anytype) !Self {
     var tk = try jrs.next();
     if (tk != .object_begin) return error.UnexpectedEndOfInput;
 
@@ -85,6 +128,8 @@ pub fn jsonParse(a: std.mem.Allocator, jrs: *std.json.Scanner, o: anytype) !Self
         .scenes = undefined,
         .default_scene = undefined,
         .resources = undefined,
+        .resources_index = undefined,
+        .resources_builtins = undefined,
     };
 
     while (true) {
@@ -98,7 +143,6 @@ pub fn jsonParse(a: std.mem.Allocator, jrs: *std.json.Scanner, o: anytype) !Self
                 return error.UnexpectedToken;
             },
         };
-        std.debug.print("{s}\n", .{field_name});
 
         if (std.mem.eql(u8, field_name, "yume_version")) {
             result.yume_version = try parseYumeVersion(jrs);
@@ -203,6 +247,70 @@ fn parseResources(a: std.mem.Allocator, jrs: *std.json.Scanner) !std.AutoHashMap
     }
 
     return resources;
+}
+
+pub fn getResourceId(path: []const u8) !Uuid {
+    const ins = instance.?;
+    if (ins.resources_index.get(path)) |id| {
+        return id;
+    }
+    // TODO: add these to the index index
+    var it = ins.resources.iterator();
+    while (it.next()) |next| {
+        if (std.mem.eql(u8, next.value_ptr.path, path)) {
+            return next.key_ptr.*;
+        }
+    }
+    return error.ResourceNotFound;
+}
+
+pub fn getResourcePath(id: Uuid) ![]const u8 {
+    const ins = instance.?;
+    if (ins.resources_builtins.get(id)) |b| {
+        return b.path;
+    }
+
+    const res = ins.resources.get(id);
+    if (res) |r| {
+        return r.path;
+    } else {
+        return error.ResourceNotFound;
+    }
+}
+
+pub fn readAssetAlloc(allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) ![]u8 {
+    std.debug.print("readAssetAlloc ({s}) :: {s}\n", .{ id.urn(), try getResourcePath(id) });
+    var file = std.fs.cwd().openFile(try getResourcePath(id), .{}) catch return error.FailedToOpenResource;
+    defer file.close();
+    return file.readToEndAlloc(allocator, max_bytes) catch return error.FailedToReadResource;
+}
+
+fn addBuiltin(urn: []const u8, path: []const u8) !void {
+    const id = try Uuid.fromUrnSlice(urn);
+    const exe_path = try std.fs.selfExeDirPathAlloc(instance.?.allocator);
+    defer instance.?.allocator.free(exe_path);
+    const dirname = std.fs.path.dirname(std.fs.path.dirname(exe_path) orelse return error.InvalidPath) orelse return error.InvalidPath;
+    try instance.?.resources_builtins.put(id, Resource{
+        .id = id,
+        .path = try std.fs.path.join(instance.?.allocator, &[_][]const u8{ dirname, "assets", "builtin", path }),
+    });
+    const uri = try std.fmt.allocPrint(instance.?.allocator, "builtin://{s}", .{path});
+    try instance.?.resources_index.put(uri, id);
+}
+
+fn addBuiltinShader(urn: []const u8, path: []const u8) !void {
+    const id = try Uuid.fromUrnSlice(urn);
+    const exe_path = try std.fs.selfExeDirPathAlloc(instance.?.allocator);
+    defer instance.?.allocator.free(exe_path);
+    const dirname = std.fs.path.dirname(exe_path) orelse return error.InvalidPath;
+    const pathspv = try std.fmt.allocPrint(instance.?.allocator, "{s}.{s}", .{ path[0 .. path.len - ".glsl".len], "spv" });
+    defer instance.?.allocator.free(pathspv);
+    try instance.?.resources_builtins.put(id, Resource{
+        .id = id,
+        .path = try std.fs.path.join(instance.?.allocator, &[_][]const u8{ dirname, "shaders", pathspv }),
+    });
+    const uri = try std.fmt.allocPrint(instance.?.allocator, "builtin://{s}", .{path});
+    try instance.?.resources_index.put(uri, id);
 }
 
 pub const Resource = struct {
