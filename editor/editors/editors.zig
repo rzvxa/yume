@@ -13,6 +13,7 @@ const MeshRenderer = @import("yume").MeshRenderer;
 const EntityMetaEditor = @import("entity.zig");
 const ObjectTransformEditor = @import("transform.zig");
 const MeshEditor = @import("MeshEditor.zig");
+const MaterialEditor = @import("MaterialEditor.zig");
 const CameraEditor = @import("CameraEditor.zig");
 
 pub const ComponentEditorFlags = packed struct {
@@ -136,6 +137,7 @@ pub fn componentEditorOf(self: *Self, type_id: ecs.Entity) ?ComponentEditor {
 fn registerBuiltinComponentEditors(self: *Self) void {
     self.component_editor_types.put(ecs.typeId(components.Camera), CameraEditor.asComponentEditor()) catch @panic("OOM");
     self.component_editor_types.put(ecs.typeId(components.Mesh), MeshEditor.asComponentEditor()) catch @panic("OOM");
+    self.component_editor_types.put(ecs.typeId(components.Material), MaterialEditor.asComponentEditor()) catch @panic("OOM");
 }
 
 fn collapsingHeaderWithCheckBox(label: [*c]const u8, checked: [*c]bool, flags: c.ImGuiTreeNodeFlags) bool {

@@ -72,6 +72,7 @@ pub fn init(a: std.mem.Allocator, loader: assets.AssetLoader, window_title: []co
 
     assets.AssetsDatabase.init(a, &self.engine, loader);
 
+    std.debug.print("WH? {s}\n", .{ecs.typeName(components.Mesh)});
     self.registerComponent(components.Uuid);
 
     self.registerComponent(components.Position);
@@ -79,8 +80,9 @@ pub fn init(a: std.mem.Allocator, loader: assets.AssetLoader, window_title: []co
     self.registerComponent(components.Scale);
     self.registerComponent(components.TransformMatrix);
 
-    self.registerComponent(components.camera.Camera);
-    self.registerComponent(components.mesh.Mesh);
+    self.registerComponent(components.Camera);
+    self.registerComponent(components.Mesh);
+    self.registerComponent(components.Material);
 
     return self;
 }
@@ -199,7 +201,8 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
 }
 
 pub fn registerComponent(self: *Self, comptime T: type) void {
-    self.components.put(ecs.typeName(T), self.world.component(T)) catch @panic("OOM");
+    const comp = self.world.component(T);
+    self.components.put(ecs.typeName(T), comp) catch @panic("OOM");
 }
 
 fn newFrame(self: *Self) void {

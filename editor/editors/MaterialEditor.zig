@@ -29,14 +29,14 @@ pub fn deinit(ptr: *anyopaque) void {
 }
 
 pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
-    var mesh = ctx.world.getMutAligned(entity, components.Mesh, 8);
-    var urn = mesh.uuid.urnZ();
-    c.ImGui_PushID("mesh-reference");
-    _ = c.ImGui_InputText("##mesh-reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);
+    var mat = ctx.world.getMutAligned(entity, components.Material, 8);
+    c.ImGui_PushID("material-reference");
+    var urn = mat.uuid.urnZ();
+    _ = c.ImGui_InputText("##material-reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);
     c.ImGui_SameLine();
     _ = c.ImGui_Button("...");
     c.ImGui_SameLine();
-    _ = c.ImGui_Text("Mesh");
+    _ = c.ImGui_Text("Material");
     c.ImGui_PopID();
 }
 

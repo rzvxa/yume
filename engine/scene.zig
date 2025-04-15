@@ -244,38 +244,6 @@ pub const Object = struct {
         self.scene.allocator.destroy(self);
     }
 
-    pub fn addComponent(self: *Self, comptime ComponentType: type, init_options: @typeInfo(@TypeOf(ComponentType.init)).Fn.params[1].type.?) void {
-        const component = self.scene.allocator.create(ComponentType) catch @panic("OOM");
-        component.* = ComponentType.init(self, init_options);
-
-        const interface = component.asComponent();
-        const def = ComponentType.definition();
-        self.addComponentPtr(&def, interface);
-    }
-
-    pub fn addComponentDynamic(self: *Self, def: *const ComponentDefinition) void {
-        const component = def.create_default(self.scene.allocator, self) catch @panic("Failed to add component dynamically");
-        self.addComponentPtr(def, component);
-    }
-
-    pub fn addComponentPtr(self: *Self, def: *const ComponentDefinition, component: Component) void {
-        var component_var = component;
-        component_var.uuid = Uuid.new();
-
-        self.components.append(component_var) catch @panic("OOM");
-        self.components_deinit_handles.append(.{ .ptr = component.ptr, .deinitalizer = def.destroy }) catch @panic("OOM");
-
-        @panic("deprecated");
-        // if (component_var.type_id == utils.typeId(MeshRenderer)) {
-        //     self.scene.renderables.append(@ptrCast(@alignCast(component_var.ptr))) catch @panic("OOM");
-        // } else if (component_var.type_id == utils.typeId(Camera)) {
-        //     if (self.scene.main_camera == null) {
-        //         _ = self.ref();
-        //         self.scene.main_camera = @ptrCast(@alignCast(component_var.ptr));
-        //     }
-        // }
-    }
-
     pub fn findChildren(self: *Self, obj: *Object) ?usize {
         for (self.children.items, 0..) |c, i| {
             if (c == obj) {

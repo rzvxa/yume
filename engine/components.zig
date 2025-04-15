@@ -11,8 +11,10 @@ pub const TransformMatrix = @import("components/transform.zig").TransformMatrix;
 
 pub const camera = @import("components/camera.zig");
 pub const mesh = @import("components/mesh.zig");
+pub const material = @import("components/material.zig");
 
 pub const Camera = camera.Camera;
 pub const Mesh = mesh.Mesh;
+pub const Material = material.Material;
 
 pub const ComponentDef = ecs.ComponentDef;

@@ -74,3 +74,37 @@ pub fn absorbSentinel(slice: anytype) AbsorbSentinelReturnType(@TypeOf(slice)) {
         return slice.ptr[0 .. slice.len + 1];
     }
 }
+
+pub fn levenshtein(a: []const u8, b: []const u8, allocator: std.mem.Allocator) usize {
+    const rows = a.len + 1;
+    const cols = b.len + 1;
+
+    const alloc = blk: {
+        var s = std.heap.stackFallback(4096, allocator);
+        break :blk s.get();
+    };
+    var matrix = alloc.alloc(usize, rows * cols) catch unreachable;
+
+    for (0..rows) |i| {
+        matrix[i * cols] = i;
+    }
+    for (0..cols) |j| {
+        matrix[j] = j;
+    }
+
+    for (1..rows) |i| {
+        for (1..cols) |j| {
+            const cost: usize = if (a[i - 1] == b[j - 1]) 0 else 1;
+            matrix[i * cols + j] = @min(matrix[(i - 1) * cols + j] + 1, @min(
+                matrix[i * cols + j - 1] + 1,
+                matrix[(i - 1) * cols + j - 1] + cost,
+            ));
+        }
+    }
+
+    const result = matrix[rows * cols - 1];
+
+    alloc.free(matrix);
+
+    return result;
+}

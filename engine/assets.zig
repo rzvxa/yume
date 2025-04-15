@@ -6,12 +6,15 @@ const Uuid = @import("uuid.zig").Uuid;
 const texs = @import("textures.zig");
 const Texture = texs.Texture;
 
-const Mesh = @import("components/mesh.zig").Mesh;
-const Vertex = @import("components/mesh.zig").Vertex;
-const load_from_obj = @import("components/mesh.zig").load_from_obj;
+const components = @import("components.zig");
+
+const Mesh = components.Mesh;
+const Vertex = components.mesh.Vertex;
+const load_from_obj = components.mesh.load_from_obj;
+
+const Material = components.Material;
 
 const Engine = @import("VulkanEngine.zig");
-const Material = Engine.Material;
 const Scene = @import("scene.zig").Scene;
 
 const check_vk = @import("vulkan_init.zig").check_vk;

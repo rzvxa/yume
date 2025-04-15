@@ -5,6 +5,7 @@ const GameApp = @import("yume").GameApp;
 const Object = @import("yume").scene_graph.Object;
 const ecs = @import("yume").ecs;
 const components = @import("yume").components;
+const utils = @import("yume").utils;
 
 const Editor = @import("../Editor.zig");
 
@@ -21,7 +22,6 @@ pub fn draw(_: *Self, ctx: *GameApp) !void {
 }
 
 fn drawProperties(entity: ecs.Entity, ctx: *GameApp) !void {
-    // FIXME
     var buf: [256]u8 = undefined;
     const gui_id = try std.fmt.bufPrint(&buf, "{}", .{entity});
     c.ImGui_PushID(gui_id.ptr);
@@ -69,21 +69,27 @@ fn drawProperties(entity: ecs.Entity, ctx: *GameApp) !void {
 
     c.ImGui_Spacing();
 
+    c.ImGui_Separator();
+
+    c.ImGui_Spacing();
+
     const style = c.ImGui_GetStyle();
     const label = "Add Component";
     const alignment = 0.5;
 
-    const size = @max(c.ImGui_CalcTextSize(label).x + style.*.FramePadding.x * 2, 200);
-    const avail = c.ImGui_GetContentRegionAvail().x;
     const popup_id = "###add_component_popup";
+    {
+        const size = @max(c.ImGui_CalcTextSize(label).x + style.*.FramePadding.x * 2, 200);
+        const avail = c.ImGui_GetContentRegionAvail().x;
 
-    const off = (avail - size) * alignment;
-    if (off > 0) {
-        c.ImGui_SetCursorPosX(c.ImGui_GetCursorPosX() + off);
-    }
+        const off = (avail - size) * alignment;
+        if (off > 0) {
+            c.ImGui_SetCursorPosX(c.ImGui_GetCursorPosX() + off);
+        }
 
-    if (c.ImGui_ButtonEx(label, c.ImVec2{ .x = size, .y = 0 })) {
-        c.ImGui_OpenPopup(popup_id, 0);
+        if (c.ImGui_ButtonEx(label, c.ImVec2{ .x = size, .y = 0 })) {
+            c.ImGui_OpenPopup(popup_id, 0);
+        }
     }
 
     if (c.ImGui_BeginPopup(popup_id, 0)) {
@@ -92,22 +98,103 @@ fn drawProperties(entity: ecs.Entity, ctx: *GameApp) !void {
         var query: [1024]u8 = undefined;
         query[0] = 0;
         _ = c.ImGui_InputText("###component_name", &query, 1024, 0);
+        c.ImGui_Separator();
         {
-            var iter = ctx.components.iterator();
-            while (iter.next()) |it| {
-                if (it.value_ptr.default) |default| {
-                    if (c.ImGui_Button(it.key_ptr.ptr)) {
-                        c.ImGui_CloseCurrentPopup();
-                        switch (Editor.instance().selection) {
-                            .entity => |e| {
-                                ctx.world.setId(e, it.value_ptr.id, it.value_ptr.size, undefined);
-                                const ref = c.ecs_get_mut_id(ctx.world.inner, e, it.value_ptr.id);
-                                std.debug.assert(default(ref.?, e, ctx));
-                            },
-                            else => {},
-                        }
+            const avail = c.ImGui_GetContentRegionAvail().x;
+            const pad = style.*.FramePadding;
+            const Scored = struct {
+                lev: usize,
+                key: []const u8,
+                name: [:0]const u8,
+            };
+            var sfa = std.heap.stackFallback(2048, ctx.allocator);
+            const a = sfa.get();
+            var filtered = std.ArrayList(Scored).init(a);
+            defer filtered.deinit();
+
+            {
+                var iter = ctx.components.iterator();
+                while (iter.next()) |it| {
+                    if (it.value_ptr.default) |_| {
+                        const name = ctx.world.getName(it.value_ptr.id);
+                        const lev = utils.levenshtein(
+                            name,
+                            std.mem.span(@as([*c]const u8, query[0..])),
+                            ctx.allocator,
+                        );
+
+                        try filtered.append(.{
+                            .lev = lev,
+                            .key = it.key_ptr.*,
+                            .name = name,
+                        });
                     }
                 }
+            }
+
+            std.mem.sort(Scored, filtered.items, {}, struct {
+                fn cmp(_: void, lhs: Scored, rhs: Scored) bool {
+                    return std.sort.asc(usize)({}, lhs.lev, rhs.lev);
+                }
+            }.cmp);
+
+            for (filtered.items) |it| {
+                const def = ctx.components.get(it.key).?;
+                c.ImGui_PushID(it.key.ptr);
+                const clicked = blk: {
+                    const icon_size = 8;
+                    const label_size = c.ImGui_CalcTextSize(it.key.ptr);
+                    const prepos = c.ImGui_GetCursorPos();
+                    const btnsz = c.ImVec2{ .x = avail, .y = label_size.y + pad.y * 2 };
+                    const clicked = c.ImGui_ButtonEx("##select-component-button", btnsz);
+                    const resetpos = c.ImGui_GetCursorPos();
+
+                    const label_pad_y = (btnsz.y - label_size.y) / 2;
+
+                    if (def.icon) {
+                        const icon_pad_y = (btnsz.y - icon_size) / 2;
+
+                        const icon_pos = c.ImVec2{
+                            .x = prepos.x + 2 * pad.x,
+                            .y = prepos.y + icon_pad_y,
+                        };
+                        c.ImGui_SetCursorPos(icon_pos);
+
+                        c.ImGui_Image(@intFromPtr(Editor.file_icon_ds), c.ImVec2{ .x = icon_size, .y = icon_size });
+                        c.ImGui_SetCursorPosX(icon_pos.x + icon_size + (2 * pad.x));
+                        c.ImGui_SetCursorPosY(prepos.y + label_pad_y - (pad.y / 2));
+                    } else {
+                        c.ImGui_SetCursorPosX(prepos.x + pad.x);
+                        c.ImGui_SetCursorPosY(prepos.y + label_pad_y);
+                    }
+
+                    c.ImGui_Text(it.name);
+
+                    const has_arrow = false;
+                    if (has_arrow) {
+                        const arrow_size = c.ImGui_CalcTextSize(">");
+                        const arrow_pad_y = (btnsz.y - arrow_size.y) / 2;
+                        c.ImGui_SameLine();
+                        c.ImGui_SetCursorPosY(prepos.y + arrow_pad_y);
+                        c.ImGui_SetCursorPosX(avail - 10);
+                        c.ImGui_Text(">");
+                    }
+                    c.ImGui_SetCursorPos(resetpos);
+
+                    break :blk clicked;
+                };
+                if (clicked) {
+                    c.ImGui_CloseCurrentPopup();
+                    switch (Editor.instance().selection) {
+                        .entity => |e| {
+                            ctx.world.setId(e, def.id, def.size, undefined);
+                            const ref = c.ecs_get_mut_id(ctx.world.inner, e, def.id);
+                            std.debug.assert(def.default.?(ref.?, e, ctx));
+                        },
+                        else => {},
+                    }
+                }
+                c.ImGui_PopID();
             }
         }
         if (c.ImGui_Button("Add###add_component")) {
