@@ -4,16 +4,22 @@ const std = @import("std");
 
 const gizmo = @import("../gizmo.zig");
 
+const ecs = @import("yume").ecs;
 const Vec3 = @import("yume").Vec3;
 const Engine = @import("yume").VulkanEngine;
 const GameApp = @import("yume").GameApp;
 const Object = @import("yume").scene_graph.Object;
-const Camera = @import("yume").Camera;
+const components = @import("yume").components;
 const AllocatedBuffer = @import("yume").AllocatedBuffer;
 
 const Editor = @import("../Editor.zig");
 
-const FrameData = struct { app: *GameApp, cmd: GameApp.RenderCommand, d: *Self };
+const FrameData = struct {
+    app: *GameApp,
+    cmd: GameApp.RenderCommand,
+    d: *Self,
+    camera: ?*const components.Camera = null,
+};
 
 const Self = @This();
 
@@ -22,6 +28,30 @@ game_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
 is_game_window_focused: bool = false,
 
 frame_userdata: FrameData = undefined,
+camera_query: *ecs.Query,
+render_system: ecs.Entity,
+
+pub fn init(ctx: *GameApp) Self {
+    return .{
+        .camera_query = ctx.world.query(&std.mem.zeroInit(
+            c.ecs_query_desc_t,
+            .{ .terms = .{
+                .{ .id = ecs.typeId(components.Camera) },
+                .{ .id = ecs.typeId(components.Position) },
+                .{ .id = ecs.typeId(components.Rotation) },
+            } },
+        )),
+        .render_system = ctx.world.systemEx(.{
+            .entity = ctx.world.create("Render System"),
+            .query = std.mem.zeroInit(c.ecs_query_desc_t, .{ .terms = .{
+                .{ .id = ecs.typeId(components.TransformMatrix) },
+                .{ .id = ecs.typeId(components.Mesh) },
+                .{ .id = ecs.typeId(components.Material) },
+            } }),
+            .callback = @ptrCast(&ecs.SystemImpl(renderSys).exec),
+        }),
+    };
+}
 
 pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
     self.frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .d = self };
@@ -55,23 +85,19 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                     .maxDepth = 1.0,
                 }});
 
+                var iter = me.d.camera_query.iter();
                 const aspect = me.d.game_view_size.x / me.d.game_view_size.y;
-                if (me.app.scene.main_camera) |main_camera| {
-                    main_camera.updateMatrices(
-                        main_camera.object.transform.position(),
-                        Vec3.ZERO,
-                        aspect,
-                    );
-                    // me.app.engine.drawObjects(
-                    //     me.cmd,
-                    //     me.app.scene.renderables.items,
-                    //     me.app.engine.camera_and_scene_buffer,
-                    //     me.app.engine.camera_and_scene_set,
-                    //     main_camera,
-                    // );
+                while (c.ecs_query_next(&iter)) {
+                    const cameras = ecs.field(&iter, components.Camera, @alignOf(components.Camera), 0).?;
+                    const positions = ecs.field(&iter, components.Position, @alignOf(components.Position), 1).?;
+                    const rotations = ecs.field(&iter, components.Rotation, @alignOf(components.Rotation), 2).?;
+                    for (cameras, positions, rotations) |*camera, pos, rot| {
+                        camera.updateMatrices(pos.value, rot.value, aspect);
+                        var new_me = me.*;
+                        new_me.camera = camera;
+                        _ = c.ecs_run(iter.real_world, me.d.render_system, me.app.delta, &new_me);
+                    }
                 }
-
-                _ = c.ecs_run(me.app.world.inner, Editor.render_system, me.app.delta, null);
 
                 c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
                     .offset = .{ .x = 0, .y = 0 },
@@ -80,7 +106,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
             }
         }.f, &self.frame_userdata);
         c.ImDrawList_AddCallback(game_image, c.ImDrawCallback_ResetRenderState, null);
-        if (ctx.scene.main_camera == null) {
+        if (!c.ecs_query_is_true(&self.camera_query.inner)) {
             const text = "No Camera";
             const size = c.ImGui_CalcTextSize(text);
             const avail = c.ImGui_GetContentRegionAvail();
@@ -93,4 +119,17 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
         }
     }
     c.ImGui_End();
+}
+
+fn renderSys(it: *ecs.Iter, matrices: []components.TransformMatrix, meshes: []align(8) components.Mesh, materials: []align(8) components.Material) void {
+    const me: *FrameData = @ptrCast(@alignCast(it.param));
+    me.app.engine.drawObjects(
+        me.cmd,
+        matrices,
+        meshes,
+        materials,
+        me.app.engine.camera_and_scene_buffer,
+        me.app.engine.camera_and_scene_set,
+        me.camera.?,
+    );
 }
