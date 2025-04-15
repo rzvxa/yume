@@ -29,7 +29,7 @@ pub fn deinit(ptr: *anyopaque) void {
 }
 
 pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
-    var mesh = ctx.world.getMutAligned(entity, components.Mesh, 8);
+    var mesh = ctx.world.getMutAligned(entity, components.Mesh, 8).?;
     var urn = mesh.uuid.urnZ();
     c.ImGui_PushID("mesh-reference");
     _ = c.ImGui_InputText("##mesh-reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);

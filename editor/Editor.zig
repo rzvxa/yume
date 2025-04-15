@@ -137,7 +137,7 @@ pub fn init(ctx: *GameApp) *Self {
         .hierarchy_window = HierarchyWindow.init(ctx),
         .project_explorer = ProjectExplorerWindow{},
         .properties_window = PropertiesWindow{},
-        .scene_window = SceneWindow{},
+        .scene_window = SceneWindow.init(ctx),
         .game_window = GameWindow{},
     };
     singleton.bootstrapEditorPipeline(ctx.world);
@@ -163,7 +163,7 @@ pub fn init(ctx: *GameApp) *Self {
         } }),
         .callback = &struct {
             fn f(_: [*c]ecs.Iter) callconv(.C) void {
-                // std.debug.print("HERE", .{});
+                // std.debug.print("HERE \n", .{});
             }
         }.f,
     });

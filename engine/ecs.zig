@@ -2,6 +2,7 @@ const c = @import("clibs");
 const std = @import("std");
 
 const GameApp = @import("GameApp.zig");
+const Uuid = @import("uuid.zig").Uuid;
 
 pub const TypeId = c.ecs_id_t;
 pub const Entity = c.ecs_entity_t;
@@ -98,8 +99,13 @@ pub const World = struct {
             .alignment = @alignOf(T),
             .default = switch (@typeInfo(T)) {
                 .Struct => if (@hasDecl(T, "default")) struct {
-                    pub fn f(ptr: *anyopaque, entity: Entity, ctx: *GameApp) callconv(.C) bool {
-                        return T.default(@ptrCast(@alignCast(ptr)), entity, ctx);
+                    pub fn f(ptr: *anyopaque, entity: Entity, ctx: *GameApp, resolver: ResourceResolver) callconv(.C) bool {
+                        const params = @typeInfo(@TypeOf(T.default)).Fn.params;
+                        if (params[params.len - 1].type == ResourceResolver) {
+                            return T.default(@ptrCast(@alignCast(ptr)), entity, ctx, resolver);
+                        } else {
+                            return T.default(@ptrCast(@alignCast(ptr)), entity, ctx);
+                        }
                     }
                 }.f else null,
                 else => null,
@@ -110,7 +116,7 @@ pub const World = struct {
     pub fn autoSystemFnDesc(comptime fn_system: anytype) c.ecs_system_desc_t {
         var terms = std.mem.zeroes([32]c.ecs_term_t);
         const fn_type = @typeInfo(@TypeOf(fn_system)).Fn;
-        const has_it_param = fn_type.params[0].type == *c.ecs_iter_t;
+        const has_it_param = comptime hasItParam(fn_type.params);
         const start_index = if (has_it_param) 1 else 0;
         inline for (start_index..fn_type.params.len) |i| {
             const p = fn_type.params[i];
@@ -241,22 +247,22 @@ pub const World = struct {
 
     // get
 
-    pub fn get(self: Self, ent: Entity, comptime T: type) *const T {
+    pub fn get(self: Self, ent: Entity, comptime T: type) ?*const T {
         return @ptrCast(@alignCast(c.ecs_get_id(self.inner, ent, typeId(T))));
     }
 
-    pub fn getMut(self: Self, ent: Entity, comptime T: type) *T {
+    pub fn getMut(self: Self, ent: Entity, comptime T: type) ?*T {
         return @ptrCast(@alignCast(c.ecs_get_mut_id(self.inner, ent, typeId(T))));
     }
 
     // these two aligned versions of get methods are a hacky workaround for issue with u128 and 16 byte alignemnt in general.
     // TODO: investigate this issue, perhaps it is an issue with the allocator functions?
 
-    pub fn getAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) *align(alignment) const T {
+    pub fn getAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) ?*align(alignment) const T {
         return @ptrCast(@alignCast(c.ecs_get_id(self.inner, ent, typeId(T))));
     }
 
-    pub fn getMutAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) *align(alignment) T {
+    pub fn getMutAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) ?*align(alignment) T {
         return @ptrCast(@alignCast(c.ecs_get_mut_id(self.inner, ent, typeId(T))));
     }
 
@@ -287,12 +293,18 @@ pub const World = struct {
     }
 };
 
+pub const ResourceResolverResult = extern struct {
+    found: bool,
+    uuid: Uuid,
+};
+pub const ResourceResolver = *const fn (path: [*:0]const u8) callconv(.C) ResourceResolverResult;
+
 pub const ComponentDef = extern struct {
     id: Entity,
     icon: bool,
     size: usize,
     alignment: usize,
-    default: ?*const fn (self: *anyopaque, entity: Entity, ctx: *GameApp) callconv(.C) bool,
+    default: ?*const fn (self: *anyopaque, entity: Entity, ctx: *GameApp, resourceResolver: ResourceResolver) callconv(.C) bool,
 };
 
 fn Reflect(comptime T: type) type {
@@ -307,9 +319,9 @@ pub fn typeId(comptime T: type) c.ecs_id_t {
     return Reflect(T).id;
 }
 
-pub fn field(it: *c.ecs_iter_t, comptime T: type, index: i8) ?[]T {
+pub fn field(it: *c.ecs_iter_t, comptime T: type, comptime alignment: usize, index: i8) ?[]align(alignment) T {
     if (c.ecs_field_w_size(it, @sizeOf(T), index)) |anyptr| {
-        const ptr = @as([*]T, @ptrCast(@alignCast(anyptr)));
+        const ptr = @as([*]align(alignment) T, @ptrCast(@alignCast(anyptr)));
         return ptr[0..@intCast(it.count)];
     }
     return null;
@@ -603,26 +615,35 @@ pub fn SystemImpl(comptime fn_system: anytype) type {
     }
 
     return struct {
-        fn exec(it: [*c]c.ecs_iter_t) callconv(.C) void {
+        pub fn exec(it: [*c]c.ecs_iter_t) callconv(.C) void {
             const ArgsTupleType = std.meta.ArgsTuple(@TypeOf(fn_system));
             var args_tuple: ArgsTupleType = undefined;
 
-            const has_it_param = fn_type.Fn.params[0].type == *c.ecs_iter_t;
+            const has_it_param = comptime hasItParam(fn_type.Fn.params);
             if (has_it_param) {
-                args_tuple[0] = it;
+                if (fn_type.Fn.params[0].type == *Iter) {
+                    args_tuple[0] = @ptrCast(it);
+                } else {
+                    args_tuple[0] = it;
+                }
             }
 
             const start_index = if (has_it_param) 1 else 0;
 
             inline for (start_index..fn_type.Fn.params.len) |i| {
                 const p = fn_type.Fn.params[i];
-                args_tuple[i] = field(it, @typeInfo(p.type.?).Pointer.child, i - start_index).?;
+                const info = @typeInfo(p.type.?);
+                args_tuple[i] = field(it, info.Pointer.child, info.Pointer.alignment, i - start_index).?;
             }
 
             //NOTE: .always_inline seems ok, but unsure. Replace to .auto if it breaks
             _ = @call(.always_inline, fn_system, args_tuple);
         }
     };
+}
+
+fn hasItParam(comptime params: []const std.builtin.Type.Fn.Param) bool {
+    return params[0].type == *c.ecs_iter_t or params[0].type == *Iter;
 }
 
 // monkey patches for working around zig compiler bugs

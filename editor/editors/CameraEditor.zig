@@ -24,7 +24,7 @@ pub fn deinit(ptr: *anyopaque) void {
 }
 
 pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
-    var cam = ctx.world.getMut(entity, components.Camera);
+    var cam = ctx.world.getMut(entity, components.Camera).?;
     if (c.ImGui_BeginCombo("Camera Type", cam.opts.typeName().ptr, 0)) {
         if (c.ImGui_Selectable(components.camera.CameraKind.perspective_name)) {
             cam.opts = .{ .kind = .perspective, .data = .{ .perspective = .{} } };

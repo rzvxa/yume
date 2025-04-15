@@ -249,13 +249,13 @@ fn parseResources(a: std.mem.Allocator, jrs: *std.json.Scanner) !std.AutoHashMap
     return resources;
 }
 
-pub fn getResourceId(self: *Self, path: []const u8) !Uuid {
+pub fn getResourceId(path: []const u8) !Uuid {
     const ins = instance.?;
     if (ins.resources_index.get(path)) |id| {
         return id;
     }
     // TODO: add these to the index index
-    var it = self.resources.iterator();
+    var it = ins.resources.iterator();
     while (it.next()) |next| {
         if (std.mem.eql(u8, next.value_ptr.path, path)) {
             return next.key_ptr.*;

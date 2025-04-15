@@ -23,9 +23,9 @@ pub fn init(allocator: std.mem.Allocator, _: ecs.Entity) Self {
 pub fn deinit(_: *Self) void {}
 
 pub fn edit(_: *Self, entity: ecs.Entity, ctx: *GameApp) void {
-    const pos = ctx.world.getMut(entity, components.Position);
-    const rot = ctx.world.getMut(entity, components.Rotation);
-    const scale = ctx.world.getMut(entity, components.Scale);
+    const pos = ctx.world.getMut(entity, components.Position).?;
+    const rot = ctx.world.getMut(entity, components.Rotation).?;
+    const scale = ctx.world.getMut(entity, components.Scale).?;
 
     var changed = false;
 

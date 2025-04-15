@@ -1055,7 +1055,7 @@ pub fn uploadMesh(self: *Self, mesh: *Mesh) void {
     // Create a cpu buffer for staging
     const staging_buffer_ci = std.mem.zeroInit(c.VkBufferCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = mesh.vertices.len * @sizeOf(Vertex),
+        .size = mesh.vertices_count * @sizeOf(Vertex),
         .usage = c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
     });
 
@@ -1070,14 +1070,14 @@ pub fn uploadMesh(self: *Self, mesh: *Mesh) void {
 
     var data: ?*align(@alignOf(Vertex)) anyopaque = undefined;
     check_vk(c.vmaMapMemory(self.vma_allocator, staging_buffer.allocation, &data)) catch @panic("Failed to map vertex buffer");
-    @memcpy(@as([*]Vertex, @ptrCast(data)), mesh.vertices);
+    @memcpy(@as([*]Vertex, @ptrCast(data)), mesh.vertices[0..mesh.vertices_count]);
     c.vmaUnmapMemory(self.vma_allocator, staging_buffer.allocation);
 
     log.info("Copied mesh data into staging buffer", .{});
 
     const gpu_buffer_ci = std.mem.zeroInit(c.VkBufferCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = mesh.vertices.len * @sizeOf(Vertex),
+        .size = mesh.vertices_count * @sizeOf(Vertex),
         .usage = c.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | c.VK_BUFFER_USAGE_TRANSFER_DST_BIT,
     });
 
@@ -1107,7 +1107,7 @@ pub fn uploadMesh(self: *Self, mesh: *Mesh) void {
     }{
         .mesh_buffer = mesh.vertex_buffer.buffer,
         .staging_buffer = staging_buffer.buffer,
-        .size = mesh.vertices.len * @sizeOf(Vertex),
+        .size = mesh.vertices_count * @sizeOf(Vertex),
     });
 
     // We can free the staging buffer at this point.
@@ -1278,7 +1278,9 @@ pub fn beginPresentRenderPass(self: *Self, cmd: RenderCommand) void {
 pub fn drawObjects(
     self: *Self,
     cmd: c.VkCommandBuffer,
-    renderables: []*Mesh,
+    matrices: []components.TransformMatrix,
+    meshes: []align(8) components.Mesh,
+    materials: []align(8) components.Material,
     ubo_buf: AllocatedBuffer,
     ubo_set: c.VkDescriptorSet,
     cam: *Camera,
@@ -1318,16 +1320,16 @@ pub fn drawObjects(
     var object_data: ?*align(@alignOf(GPUObjectData)) anyopaque = undefined;
     check_vk(c.vmaMapMemory(self.vma_allocator, self.getCurrentFrame().object_buffer.allocation, &object_data)) catch @panic("Failed to map object buffer");
     var object_data_arr: [*]GPUObjectData = @ptrCast(object_data orelse unreachable);
-    for (renderables, 0..) |object, index| {
+    for (matrices, 0..) |*matrix, index| {
         object_data_arr[index] = GPUObjectData{
-            .model_matrix = object.object.transform.matrix,
+            .model_matrix = matrix.value,
         };
     }
     c.vmaUnmapMemory(self.vma_allocator, self.getCurrentFrame().object_buffer.allocation);
 
-    for (renderables, 0..) |r, index| {
-        if (index == 0 or r.material != renderables[index - 1].material) {
-            c.vkCmdBindPipeline(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, r.material.pipeline);
+    for (matrices, materials, meshes, 0..) |*matrix, *material, *mesh, index| {
+        if (index == 0 or material != &materials[index - 1]) {
+            c.vkCmdBindPipeline(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline);
 
             // Compute the offset for dynamic uniform buffers (for now just the one containing scene data, the
             // camera data is not dynamic)
@@ -1336,28 +1338,28 @@ pub fn drawObjects(
                 @as(u32, @intCast(scene_data_offset)),
             };
 
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, r.material.pipeline_layout, 0, 1, &ubo_set, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 0, 1, &ubo_set, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
 
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, r.material.pipeline_layout, 1, 1, &self.getCurrentFrame().object_descriptor_set, 0, null);
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 1, 1, &self.getCurrentFrame().object_descriptor_set, 0, null);
         }
 
-        if (r.material.texture_set != null) {
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, r.material.pipeline_layout, 2, 1, &r.material.texture_set, 0, null);
+        if (material.texture_set != null) {
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 2, 1, &material.texture_set, 0, null);
         }
 
         const push_constants = MeshPushConstants{
             .data = Vec4.ZERO,
-            .render_matrix = r.object.transform.matrix,
+            .render_matrix = matrix.value,
         };
 
-        c.vkCmdPushConstants(cmd, r.material.pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &push_constants);
+        c.vkCmdPushConstants(cmd, material.pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &push_constants);
 
-        if (index == 0 or r.mesh != renderables[index - 1].mesh) {
+        if (index == 0 or mesh != &meshes[index - 1]) {
             const offset: c.VkDeviceSize = 0;
-            c.vkCmdBindVertexBuffers(cmd, 0, 1, &r.mesh.vertex_buffer.buffer, &offset);
+            c.vkCmdBindVertexBuffers(cmd, 0, 1, &mesh.vertex_buffer.buffer, &offset);
         }
 
-        c.vkCmdDraw(cmd, @as(u32, @intCast(r.mesh.vertices.len)), 1, 0, @intCast(index));
+        c.vkCmdDraw(cmd, @as(u32, @intCast(mesh.vertices_count)), 1, 0, @intCast(index));
     }
 }
 

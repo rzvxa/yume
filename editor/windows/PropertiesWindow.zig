@@ -1,6 +1,7 @@
 const c = @import("clibs");
 const std = @import("std");
 
+const Uuid = @import("yume").Uuid;
 const GameApp = @import("yume").GameApp;
 const Object = @import("yume").scene_graph.Object;
 const ecs = @import("yume").ecs;
@@ -8,6 +9,7 @@ const components = @import("yume").components;
 const utils = @import("yume").utils;
 
 const Editor = @import("../Editor.zig");
+const Project = @import("../Project.zig");
 
 const Self = @This();
 
@@ -189,7 +191,15 @@ fn drawProperties(entity: ecs.Entity, ctx: *GameApp) !void {
                         .entity => |e| {
                             ctx.world.setId(e, def.id, def.size, undefined);
                             const ref = c.ecs_get_mut_id(ctx.world.inner, e, def.id);
-                            std.debug.assert(def.default.?(ref.?, e, ctx));
+                            std.debug.assert(def.default.?(ref.?, e, ctx, extern struct {
+                                fn f(path: [*:0]const u8) callconv(.C) ecs.ResourceResolverResult {
+                                    const uuid = Project.getResourceId(std.mem.span(path)) catch return .{
+                                        .found = false,
+                                        .uuid = .{ .raw = 0 },
+                                    };
+                                    return .{ .found = true, .uuid = uuid };
+                                }
+                            }.f));
                         },
                         else => {},
                     }

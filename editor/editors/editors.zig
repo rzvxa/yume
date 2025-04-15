@@ -141,6 +141,8 @@ fn registerBuiltinComponentEditors(self: *Self) void {
 }
 
 fn collapsingHeaderWithCheckBox(label: [*c]const u8, checked: [*c]bool, flags: c.ImGuiTreeNodeFlags) bool {
+    c.ImGui_PushID(label);
+    defer c.ImGui_PopID();
     if (checked != null) {
         _ = c.ImGui_Checkbox("###enable", checked);
         const x = c.ImGui_GetCursorPosX();

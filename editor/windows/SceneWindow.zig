@@ -4,11 +4,12 @@ const std = @import("std");
 
 const gizmo = @import("../gizmo.zig");
 
+const ecs = @import("yume").ecs;
 const Vec3 = @import("yume").Vec3;
 const Engine = @import("yume").VulkanEngine;
 const GameApp = @import("yume").GameApp;
 const Object = @import("yume").scene_graph.Object;
-const Camera = @import("yume").Camera;
+const components = @import("yume").components;
 const AllocatedBuffer = @import("yume").AllocatedBuffer;
 
 const Editor = @import("../Editor.zig");
@@ -23,7 +24,7 @@ const FrameData = struct { app: *GameApp, cmd: GameApp.RenderCommand, d: *Self }
 
 const Self = @This();
 
-camera: Camera = Camera.makePerspectiveCamera(.{
+camera: components.Camera = components.Camera.makePerspectiveCamera(.{
     .fovy_rad = std.math.degreesToRadians(70.0),
     .far = 200,
     .near = 0.1,
@@ -42,6 +43,21 @@ editor_camera_and_scene_buffer: AllocatedBuffer = undefined,
 editor_camera_and_scene_set: c.VkDescriptorSet = null,
 
 frame_userdata: FrameData = undefined,
+render_system: ecs.Entity,
+
+pub fn init(ctx: *GameApp) Self {
+    return .{
+        .render_system = ctx.world.systemEx(.{
+            .entity = ctx.world.create("Editor Render System"),
+            .query = std.mem.zeroInit(c.ecs_query_desc_t, .{ .terms = .{
+                .{ .id = ecs.typeId(components.TransformMatrix) },
+                .{ .id = ecs.typeId(components.Mesh) },
+                .{ .id = ecs.typeId(components.Material) },
+            } }),
+            .callback = @ptrCast(&ecs.SystemImpl(sys).exec),
+        }),
+    };
+}
 
 pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
     self.frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .d = self };
@@ -77,6 +93,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
 
                 const aspect = me.d.scene_view_size.x / me.d.scene_view_size.y;
                 me.d.camera.updateMatrices(me.d.camera_pos, me.d.camera_rot, aspect);
+                _ = c.ecs_run(me.app.world.inner, me.d.render_system, me.app.delta, me);
                 // me.app.engine.drawObjects(
                 //     me.cmd,
                 //     me.app.scene.renderables.items,
@@ -143,16 +160,55 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
         });
 
         // FIXME
-        // if (Editor.instance().selection) |selection| {
-        //     gizmo.drawBoundingBox(selection.bounds()) catch @panic("error");
-        //     const transform = &selection.transform;
-        //     gizmo.manipulate(
-        //         transform.position(),
-        //         transform.rotation(),
-        //         transform.scale(),
-        //     ) catch @panic("error");
-        // }
+        blk: {
+            switch (Editor.instance().selection) {
+                .entity => |selection| {
+                    const mesh = ctx.world.getAligned(selection, components.Mesh, 8);
+                    if (mesh == null) {
+                        break :blk;
+                    }
+
+                    const transform = ctx.world.get(selection, components.TransformMatrix);
+                    if (transform == null) {
+                        break :blk;
+                    }
+
+                    const pos = ctx.world.getMut(selection, components.Position);
+                    if (pos == null) {
+                        break :blk;
+                    }
+
+                    const rot = ctx.world.getMut(selection, components.Rotation);
+                    if (rot == null) {
+                        break :blk;
+                    }
+
+                    const scale = ctx.world.getMut(selection, components.Scale);
+                    if (scale == null) {
+                        break :blk;
+                    }
+
+                    const bb = mesh.?.bounds.translate(transform.?.value);
+                    gizmo.drawBoundingBox(bb) catch @panic("error");
+                    gizmo.manipulate(&pos.?.value, &rot.?.value, &scale.?.value) catch @panic("error");
+                },
+                else => {},
+            }
+        }
         gizmo.endFrame();
     }
     c.ImGui_End();
+}
+
+fn sys(it: *ecs.Iter, matrices: []components.TransformMatrix, meshes: []align(8) components.Mesh, materials: []align(8) components.Material) void {
+    const me: *FrameData = @ptrCast(@alignCast(it.param));
+    me.app.engine.drawObjects(
+        me.cmd,
+        matrices,
+        meshes,
+        materials,
+        me.d.editor_camera_and_scene_buffer,
+        me.d.editor_camera_and_scene_set,
+        &me.d.camera,
+    );
 }

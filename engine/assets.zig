@@ -457,7 +457,6 @@ const LoadedAsset = struct {
             },
             .mesh => {
                 const it = self.data.mesh;
-                std.debug.print("HERE {}\n", .{it.uuid});
                 AssetsDatabase.instance.allocator.free(it.vertices[0..it.vertices_count]);
                 AssetsDatabase.instance.allocator.destroy(it);
             },

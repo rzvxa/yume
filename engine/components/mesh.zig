@@ -6,6 +6,7 @@ const m3d = @import("../math3d.zig");
 
 const ecs = @import("../ecs.zig");
 const GameApp = @import("../GameApp.zig");
+const AssetsDatabase = @import("../assets.zig").AssetsDatabase;
 
 const Uuid = @import("../uuid.zig").Uuid;
 const obj_loader = @import("../obj_loader.zig");
@@ -104,17 +105,13 @@ pub const Mesh = extern struct {
     bounds: BoundingBox,
     vertex_buffer: AllocatedBuffer = undefined,
 
-    pub fn default(ptr: *align(8) Mesh, _: ecs.Entity, _: *GameApp) callconv(.C) bool {
-        ptr.* = .{
-            .uuid = Uuid.new(),
-            .vertices_count = 0,
-            .vertices = &[0]Vertex{},
-            .bounds = .{
-                .mins = Vec3.scalar(0),
-                .maxs = Vec3.scalar(0),
-            },
-            .vertex_buffer = .{ .buffer = null, .allocation = null },
-        };
+    pub fn default(ptr: *align(8) Mesh, _: ecs.Entity, _: *GameApp, rr: ecs.ResourceResolver) callconv(.C) bool {
+        const cube = rr("builtin://cube.obj");
+        if (!cube.found) {
+            return false;
+        }
+
+        ptr.* = (AssetsDatabase.getOrLoadMesh(cube.uuid) catch return false).*;
         return true;
     }
 };
@@ -188,7 +185,8 @@ pub fn load_from_obj(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
 
     return Mesh{
         .uuid = Uuid.new(),
-        .vertices = vb.vertices.toOwnedSlice() catch @panic("Failed to make owned slice"),
+        .vertices_count = vb.vertices.items.len,
+        .vertices = (vb.vertices.toOwnedSlice() catch @panic("Failed to make owned slice")).ptr,
         .bounds = vb.bounds,
     };
 }
