@@ -58,7 +58,7 @@ pub const GPUCameraData = struct {
     proj: Mat4,
     view_proj: Mat4,
 
-    fn fromCamera(cam: *Camera) GPUCameraData {
+    fn fromCamera(cam: *const Camera) GPUCameraData {
         return GPUCameraData{
             .view = cam.view,
             .proj = cam.projection,
@@ -1283,7 +1283,7 @@ pub fn drawObjects(
     materials: []align(8) components.Material,
     ubo_buf: AllocatedBuffer,
     ubo_set: c.VkDescriptorSet,
-    cam: *Camera,
+    cam: *const Camera,
 ) void {
     // Create and bind the camera buffer
     const curr_camera_data = GPUCameraData.fromCamera(cam);

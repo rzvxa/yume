@@ -138,7 +138,7 @@ pub fn init(ctx: *GameApp) *Self {
         .project_explorer = ProjectExplorerWindow{},
         .properties_window = PropertiesWindow{},
         .scene_window = SceneWindow.init(ctx),
-        .game_window = GameWindow{},
+        .game_window = GameWindow.init(ctx),
     };
     singleton.bootstrapEditorPipeline(ctx.world);
     singleton.init_descriptors(&ctx.engine);
