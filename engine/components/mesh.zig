@@ -97,55 +97,6 @@ pub const BoundingBox = extern struct {
     }
 };
 
-pub const primitives = extern struct {
-    pub fn cube(allocator: std.mem.Allocator) !Mesh {
-        const verts = try allocator.alloc(Vertex, 24);
-        @memcpy(verts, &[24]Vertex{
-            // Front face
-            .{ .position = Vec3.make(-1, -1, 1), .normal = Vec3.make(0, 0, 1), .color = Vec3.make(1, 0, 0), .uv = Vec2.make(0, 0) },
-            .{ .position = Vec3.make(1, -1, 1), .normal = Vec3.make(0, 0, 1), .color = Vec3.make(0, 1, 0), .uv = Vec2.make(1, 0) },
-            .{ .position = Vec3.make(1, 1, 1), .normal = Vec3.make(0, 0, 1), .color = Vec3.make(0, 0, 1), .uv = Vec2.make(1, 1) },
-            .{ .position = Vec3.make(-1, 1, 1), .normal = Vec3.make(0, 0, 1), .color = Vec3.make(1, 1, 0), .uv = Vec2.make(0, 1) },
-
-            // Back face
-            .{ .position = Vec3.make(-1, -1, -1), .normal = Vec3.make(0, 0, -1), .color = Vec3.make(1, 0, 1), .uv = Vec2.make(0, 0) },
-            .{ .position = Vec3.make(1, -1, -1), .normal = Vec3.make(0, 0, -1), .color = Vec3.make(0, 1, 1), .uv = Vec2.make(1, 0) },
-            .{ .position = Vec3.make(1, 1, -1), .normal = Vec3.make(0, 0, -1), .color = Vec3.make(0, 0, 0), .uv = Vec2.make(1, 1) },
-            .{ .position = Vec3.make(-1, 1, -1), .normal = Vec3.make(0, 0, -1), .color = Vec3.make(1, 1, 1), .uv = Vec2.make(0, 1) },
-
-            // Left face
-            .{ .position = Vec3.make(-1, -1, -1), .normal = Vec3.make(-1, 0, 0), .color = Vec3.make(1, 0, 1), .uv = Vec2.make(0, 0) },
-            .{ .position = Vec3.make(-1, -1, 1), .normal = Vec3.make(-1, 0, 0), .color = Vec3.make(1, 0, 0), .uv = Vec2.make(1, 0) },
-            .{ .position = Vec3.make(-1, 1, 1), .normal = Vec3.make(-1, 0, 0), .color = Vec3.make(1, 1, 0), .uv = Vec2.make(1, 1) },
-            .{ .position = Vec3.make(-1, 1, -1), .normal = Vec3.make(-1, 0, 0), .color = Vec3.make(1, 1, 1), .uv = Vec2.make(0, 1) },
-
-            // Right face
-            .{ .position = Vec3.make(1, -1, -1), .normal = Vec3.make(1, 0, 0), .color = Vec3.make(0, 1, 1), .uv = Vec2.make(0, 0) },
-            .{ .position = Vec3.make(1, -1, 1), .normal = Vec3.make(1, 0, 0), .color = Vec3.make(0, 1, 0), .uv = Vec2.make(1, 0) },
-            .{ .position = Vec3.make(1, 1, 1), .normal = Vec3.make(1, 0, 0), .color = Vec3.make(0, 0, 1), .uv = Vec2.make(1, 1) },
-            .{ .position = Vec3.make(1, 1, -1), .normal = Vec3.make(1, 0, 0), .color = Vec3.make(0, 0, 0), .uv = Vec2.make(0, 1) },
-
-            // Top face
-            .{ .position = Vec3.make(-1, 1, -1), .normal = Vec3.make(0, 1, 0), .color = Vec3.make(1, 1, 1), .uv = Vec2.make(0, 0) },
-            .{ .position = Vec3.make(-1, 1, 1), .normal = Vec3.make(0, 1, 0), .color = Vec3.make(1, 1, 0), .uv = Vec2.make(1, 0) },
-            .{ .position = Vec3.make(1, 1, 1), .normal = Vec3.make(0, 1, 0), .color = Vec3.make(0, 0, 1), .uv = Vec2.make(1, 1) },
-            .{ .position = Vec3.make(1, 1, -1), .normal = Vec3.make(0, 1, 0), .color = Vec3.make(0, 0, 0), .uv = Vec2.make(0, 1) },
-
-            // Bottom face
-            .{ .position = Vec3.make(-1, -1, -1), .normal = Vec3.make(0, -1, 0), .color = Vec3.make(1, 0, 1), .uv = Vec2.make(0, 0) },
-            .{ .position = Vec3.make(-1, -1, 1), .normal = Vec3.make(0, -1, 0), .color = Vec3.make(1, 0, 0), .uv = Vec2.make(1, 0) },
-            .{ .position = Vec3.make(1, -1, 1), .normal = Vec3.make(0, -1, 0), .color = Vec3.make(0, 1, 0), .uv = Vec2.make(1, 1) },
-            .{ .position = Vec3.make(1, -1, -1), .normal = Vec3.make(0, -1, 0), .color = Vec3.make(0, 1, 1), .uv = Vec2.make(0, 1) },
-        });
-        return Mesh{
-            .uuid = Uuid.new(),
-            .vertices_count = verts.len,
-            .vertices = verts.ptr,
-            .bounds = .{ .mins = Vec3.make(-1, -1, -1), .maxs = Vec3.make(1, 1, 1) },
-        };
-    }
-};
-
 pub const Mesh = extern struct {
     uuid: Uuid,
     vertices_count: usize,
@@ -153,10 +104,16 @@ pub const Mesh = extern struct {
     bounds: BoundingBox,
     vertex_buffer: AllocatedBuffer = undefined,
 
-    pub fn default(ptr: *align(8) Mesh, _: ecs.Entity, ctx: *GameApp) callconv(.C) bool {
-        ptr.* = primitives.cube(ctx.allocator) catch |err| {
-            std.debug.print("error initializing default mesh {}", .{err});
-            return false;
+    pub fn default(ptr: *align(8) Mesh, _: ecs.Entity, _: *GameApp) callconv(.C) bool {
+        ptr.* = .{
+            .uuid = Uuid.new(),
+            .vertices_count = 0,
+            .vertices = &[0]Vertex{},
+            .bounds = .{
+                .mins = Vec3.scalar(0),
+                .maxs = Vec3.scalar(0),
+            },
+            .vertex_buffer = .{ .buffer = null, .allocation = null },
         };
         return true;
     }

@@ -35,7 +35,7 @@ pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
     const avail = c.ImGui_GetContentRegionAvail();
     const old_pad_y = c.ImGui_GetStyle().*.FramePadding.y;
     c.ImGui_GetStyle().*.FramePadding.y = 0;
-    _ = c.ImGui_BeginChildFrameEx(c.ImGui_GetID("object type icon"), c.ImVec2{ .x = 48, .y = 48 }, c.ImGuiWindowFlags_NoBackground);
+    _ = c.ImGui_BeginChildFrameEx(c.ImGui_GetID("entity type icon"), c.ImVec2{ .x = 48, .y = 48 }, c.ImGuiWindowFlags_NoBackground);
     c.ImGui_Image(@intFromPtr(icon), c.ImVec2{ .x = 48, .y = 48 });
     c.ImGui_EndChildFrame();
     c.ImGui_GetStyle().*.FramePadding.y = old_pad_y;
@@ -43,7 +43,7 @@ pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
     c.ImGui_SameLine();
 
     _ = c.ImGui_BeginChildFrameEx(c.ImGui_GetID("meta"), c.ImVec2{ .x = avail.x - 48, .y = 48 }, c.ImGuiWindowFlags_NoBackground);
-    c.ImGui_TextDisabled("Object:");
+    c.ImGui_TextDisabled("Entity(#%d):", entity);
     c.ImGui_Separator();
 
     var enabled = true;

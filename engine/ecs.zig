@@ -97,7 +97,7 @@ pub const World = struct {
             .default = switch (@typeInfo(T)) {
                 .Struct => if (@hasDecl(T, "default")) struct {
                     pub fn f(ptr: *anyopaque, entity: Entity, ctx: *GameApp) callconv(.C) bool {
-                        return T.default(@as(*align(8) T, @ptrCast(@alignCast(ptr))), entity, ctx);
+                        return T.default(@ptrCast(@alignCast(ptr)), entity, ctx);
                     }
                 }.f else null,
                 else => null,
@@ -244,6 +244,17 @@ pub const World = struct {
     }
 
     pub fn getMut(self: Self, ent: Entity, comptime T: type) *T {
+        return @ptrCast(@alignCast(c.ecs_get_mut_id(self.inner, ent, typeId(T))));
+    }
+
+    // these two aligned versions of get methods are a hacky workaround for issue with u128 and 16 byte alignemnt in general.
+    // TODO: investigate this issue, perhaps it is an issue with the allocator functions?
+
+    pub fn getAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) *align(alignment) const T {
+        return @ptrCast(@alignCast(c.ecs_get_id(self.inner, ent, typeId(T))));
+    }
+
+    pub fn getMutAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) *align(alignment) T {
         return @ptrCast(@alignCast(c.ecs_get_mut_id(self.inner, ent, typeId(T))));
     }
 
