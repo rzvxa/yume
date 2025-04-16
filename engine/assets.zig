@@ -23,19 +23,19 @@ const log = std.log.scoped(.assets);
 
 const default_max_bytes = 30_000_000;
 
-pub const AssetsDatabase = struct {
+pub const Assets = struct {
     const Self = @This();
 
-    var instance: AssetsDatabase = undefined;
+    var instance: Assets = undefined;
 
     allocator: std.mem.Allocator,
     engine: *Engine,
     loaded_ids: std.AutoHashMap(Uuid, void),
     loaded_assets: std.AutoHashMap(AssetHandle, LoadedAsset),
 
-    loader: AssetLoader,
+    loader: ResourceLoader,
 
-    pub fn init(allocator: std.mem.Allocator, engine: *Engine, loader: AssetLoader) void {
+    pub fn init(allocator: std.mem.Allocator, engine: *Engine, loader: ResourceLoader) void {
         instance = .{
             .allocator = allocator,
             .engine = engine,
@@ -48,18 +48,57 @@ pub const AssetsDatabase = struct {
 
     pub fn deinit() void {
         {
-            var iter = instance.loaded_assets.valueIterator();
-            while (iter.next()) |it| {
-                it.unload();
-            }
+            const RecursiveReverseUnloader = struct {
+                fn unload(assets: std.AutoHashMap(AssetHandle, LoadedAsset)) void {
+                    var iter = assets.valueIterator();
+                    @This().f(&iter);
+                }
+
+                fn f(iter: *std.AutoHashMap(AssetHandle, LoadedAsset).ValueIterator) void {
+                    if (iter.next()) |it| {
+                        @This().f(iter);
+                        it.unload();
+                    }
+                }
+            };
+
+            RecursiveReverseUnloader.unload(instance.loaded_assets);
         }
         instance.loaded_ids.deinit();
         instance.loaded_assets.deinit();
     }
 
+    pub fn getOrLoadImage(id: Uuid) !*Engine.AllocatedImage {
+        const hndl = try loadImage(id);
+        return getImage(hndl);
+    }
+
+    pub fn getImage(hndl: ImageAssetHandle) !*Engine.AllocatedImage {
+        const asset = try getLoadedAsset(hndl.toAssetHandle(), .image);
+        return asset.data.image;
+    }
+
+    pub fn loadImage(id: Uuid) !ImageAssetHandle {
+        if (instance.loaded_ids.contains(id)) {
+            return ImageAssetHandle.fromAssetIdUnsafe(id);
+        }
+        const handle = ImageAssetHandle{ .uuid = id };
+
+        const bytes = try instance.loader(instance.allocator, id, default_max_bytes);
+        defer instance.allocator.free(bytes);
+
+        const image = try instance.allocator.create(Engine.AllocatedImage);
+        image.* = try texs.load_image(instance.engine, bytes, id.urn());
+
+        const loaded = LoadedAsset{ .data = .{ .image = image } };
+        try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
+        try instance.loaded_ids.put(id, {});
+        return handle;
+    }
+
     pub fn getOrLoadTexture(id: Uuid) !*Texture {
         const hndl = try loadTexture(id);
-        return getMaterial(hndl);
+        return getTexture(hndl);
     }
 
     pub fn getTexture(hndl: TextureAssetHandle) !*Texture {
@@ -73,9 +112,7 @@ pub const AssetsDatabase = struct {
         }
         const handle = TextureAssetHandle{ .uuid = id };
 
-        const bytes = try instance.loader(instance.allocator, id, default_max_bytes);
-        defer instance.allocator.free(bytes);
-        const image = try texs.load_image(instance.engine, bytes, id.urn());
+        const image = try Self.getOrLoadImage(id);
 
         const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -355,6 +392,7 @@ pub const AssetsDatabase = struct {
 };
 
 const AssetType = enum {
+    image,
     texture,
     mesh,
     material,
@@ -363,6 +401,22 @@ const AssetType = enum {
 
 pub const AssetHandle = struct {
     uuid: Uuid,
+};
+
+pub const ImageAssetHandle = struct {
+    uuid: Uuid,
+
+    pub inline fn toAssetHandle(hndl: @This()) AssetHandle {
+        return .{ .uuid = hndl.uuid };
+    }
+
+    inline fn fromAssetHandleUnsafe(hndl: AssetHandle) @This() {
+        return .{ .uuid = hndl.uuid };
+    }
+
+    inline fn fromAssetIdUnsafe(id: Uuid) @This() {
+        return .{ .uuid = id };
+    }
 };
 
 pub const TextureAssetHandle = struct {
@@ -432,6 +486,7 @@ pub const SceneAssetHandle = struct {
 const LoadedAsset = struct {
     const Self = @This();
     data: union(AssetType) {
+        image: *Engine.AllocatedImage,
         texture: *Texture,
         mesh: *Mesh,
         material: *Material,
@@ -444,29 +499,33 @@ const LoadedAsset = struct {
 
     fn unload(self: *Self) void {
         switch (self.data) {
+            .image => {
+                const it = self.data.image;
+                var img_del = Engine.VmaImageDeleter{ .image = it.* };
+                img_del.delete(Assets.instance.engine);
+                Assets.instance.allocator.destroy(it);
+            },
             .texture => {
                 const it = self.data.texture;
-                var img_del = Engine.VmaImageDeleter{ .image = it.image };
-                img_del.delete(AssetsDatabase.instance.engine);
                 var view_del = Engine.VulkanDeleter.make(
                     it.image_view,
                     c.vkDestroyImageView,
                 );
-                view_del.delete(AssetsDatabase.instance.engine);
-                AssetsDatabase.instance.allocator.destroy(it);
+                view_del.delete(Assets.instance.engine);
+                Assets.instance.allocator.destroy(it);
             },
             .mesh => {
                 const it = self.data.mesh;
-                AssetsDatabase.instance.allocator.free(it.vertices[0..it.vertices_count]);
-                AssetsDatabase.instance.allocator.destroy(it);
+                Assets.instance.allocator.free(it.vertices[0..it.vertices_count]);
+                Assets.instance.allocator.destroy(it);
             },
             .material => {
                 const it = self.data.material;
                 var layout_del = Engine.VulkanDeleter.make(it.pipeline_layout, c.vkDestroyPipelineLayout);
-                layout_del.delete(AssetsDatabase.instance.engine);
+                layout_del.delete(Assets.instance.engine);
                 var pipeline_del = Engine.VulkanDeleter.make(it.pipeline, c.vkDestroyPipeline);
-                pipeline_del.delete(AssetsDatabase.instance.engine);
-                AssetsDatabase.instance.allocator.destroy(it);
+                pipeline_del.delete(Assets.instance.engine);
+                Assets.instance.allocator.destroy(it);
             },
             .scene => {
                 const it = self.data.scene;
@@ -515,4 +574,4 @@ fn setLayoutFromString(layout: []const u8) !SetLayout {
     } else unreachable;
 }
 
-pub const AssetLoader = *const fn (allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) error{ ResourceNotFound, FailedToOpenResource, FailedToReadResource }![]u8;
+pub const ResourceLoader = *const fn (allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) error{ ResourceNotFound, FailedToOpenResource, FailedToReadResource }![]u8;

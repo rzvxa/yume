@@ -7,23 +7,36 @@ const Object = @import("yume").scene_graph.Object;
 const ecs = @import("yume").ecs;
 const components = @import("yume").components;
 const utils = @import("yume").utils;
+const Assets = @import("yume").assets.Assets;
 
 const Editor = @import("../Editor.zig");
-const Project = @import("../Project.zig");
+const AssetsDatabase = @import("../AssetsDatabase.zig");
 
 const Self = @This();
 
-pub fn draw(_: *Self, ctx: *GameApp) !void {
+loaded_icons: std.AutoHashMap(ecs.Entity, c.VkDescriptorSet),
+
+pub fn init(ctx: *GameApp) Self {
+    return .{
+        .loaded_icons = std.AutoHashMap(ecs.Entity, c.VkDescriptorSet).init(ctx.allocator),
+    };
+}
+
+pub fn deinit(self: *Self) void {
+    self.loaded_icons.deinit();
+}
+
+pub fn draw(self: *Self, ctx: *GameApp) !void {
     if (c.ImGui_Begin("Properties", null, 0)) {
         switch (Editor.instance().selection) {
-            .entity => |e| try drawProperties(e, ctx),
+            .entity => |e| try self.drawProperties(e, ctx),
             else => {},
         }
     }
     c.ImGui_End();
 }
 
-fn drawProperties(entity: ecs.Entity, ctx: *GameApp) !void {
+fn drawProperties(self: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
     var buf: [256]u8 = undefined;
     const gui_id = try std.fmt.bufPrint(&buf, "{}", .{entity});
     c.ImGui_PushID(gui_id.ptr);
@@ -144,7 +157,7 @@ fn drawProperties(entity: ecs.Entity, ctx: *GameApp) !void {
                 const def = ctx.components.get(it.key).?;
                 c.ImGui_PushID(it.key.ptr);
                 const clicked = blk: {
-                    const icon_size = 8;
+                    const icon_size = 16;
                     const label_size = c.ImGui_CalcTextSize(it.key.ptr);
                     const prepos = c.ImGui_GetCursorPos();
                     const btnsz = c.ImVec2{ .x = avail, .y = label_size.y + pad.y * 2 };
@@ -153,22 +166,30 @@ fn drawProperties(entity: ecs.Entity, ctx: *GameApp) !void {
 
                     const label_pad_y = (btnsz.y - label_size.y) / 2;
 
-                    if (def.icon) {
-                        const icon_pad_y = (btnsz.y - icon_size) / 2;
+                    const icon = icn: {
+                        if (def.icon) |icon_path| {
+                            if (self.loaded_icons.get(def.id)) |cached| {
+                                break :icn cached;
+                            } else {
+                                const icon = try Editor.create_imgui_texture(std.mem.span(icon_path), &ctx.engine);
+                                try self.loaded_icons.put(def.id, icon);
+                                break :icn icon;
+                            }
+                        } else {
+                            break :icn Editor.file_icon_ds;
+                        }
+                    };
+                    const icon_pad_y = (btnsz.y - icon_size) / 2;
 
-                        const icon_pos = c.ImVec2{
-                            .x = prepos.x + 2 * pad.x,
-                            .y = prepos.y + icon_pad_y,
-                        };
-                        c.ImGui_SetCursorPos(icon_pos);
+                    const icon_pos = c.ImVec2{
+                        .x = prepos.x + 2 * pad.x,
+                        .y = prepos.y + icon_pad_y,
+                    };
+                    c.ImGui_SetCursorPos(icon_pos);
 
-                        c.ImGui_Image(@intFromPtr(Editor.file_icon_ds), c.ImVec2{ .x = icon_size, .y = icon_size });
-                        c.ImGui_SetCursorPosX(icon_pos.x + icon_size + (2 * pad.x));
-                        c.ImGui_SetCursorPosY(prepos.y + label_pad_y - (pad.y / 2));
-                    } else {
-                        c.ImGui_SetCursorPosX(prepos.x + pad.x);
-                        c.ImGui_SetCursorPosY(prepos.y + label_pad_y);
-                    }
+                    c.ImGui_Image(@intFromPtr(icon), c.ImVec2{ .x = icon_size, .y = icon_size });
+                    c.ImGui_SetCursorPosX(icon_pos.x + icon_size + (2 * pad.x));
+                    c.ImGui_SetCursorPosY(prepos.y + label_pad_y - (pad.y / 2));
 
                     c.ImGui_Text(it.name);
 
@@ -193,7 +214,7 @@ fn drawProperties(entity: ecs.Entity, ctx: *GameApp) !void {
                             const ref = c.ecs_get_mut_id(ctx.world.inner, e, def.id);
                             std.debug.assert(def.default.?(ref.?, e, ctx, extern struct {
                                 fn f(path: [*:0]const u8) callconv(.C) ecs.ResourceResolverResult {
-                                    const uuid = Project.getResourceId(std.mem.span(path)) catch return .{
+                                    const uuid = AssetsDatabase.getResourceId(std.mem.span(path)) catch return .{
                                         .found = false,
                                         .uuid = .{ .raw = 0 },
                                     };

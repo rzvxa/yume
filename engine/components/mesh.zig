@@ -6,7 +6,7 @@ const m3d = @import("../math3d.zig");
 
 const ecs = @import("../ecs.zig");
 const GameApp = @import("../GameApp.zig");
-const AssetsDatabase = @import("../assets.zig").AssetsDatabase;
+const Assets = @import("../assets.zig").Assets;
 
 const Uuid = @import("../uuid.zig").Uuid;
 const obj_loader = @import("../obj_loader.zig");
@@ -105,13 +105,17 @@ pub const Mesh = extern struct {
     bounds: BoundingBox,
     vertex_buffer: AllocatedBuffer = undefined,
 
+    pub fn editorIcon() [*:0]const u8 {
+        return "editor://icons/mesh.png";
+    }
+
     pub fn default(ptr: *align(8) Mesh, _: ecs.Entity, _: *GameApp, rr: ecs.ResourceResolver) callconv(.C) bool {
         const cube = rr("builtin://cube.obj");
         if (!cube.found) {
             return false;
         }
 
-        ptr.* = (AssetsDatabase.getOrLoadMesh(cube.uuid) catch return false).*;
+        ptr.* = (Assets.getOrLoadMesh(cube.uuid) catch return false).*;
         return true;
     }
 };

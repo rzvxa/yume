@@ -5,19 +5,23 @@ const std = @import("std");
 const GameApp = @import("yume").GameApp;
 
 const Editor = @import("Editor.zig");
-const Project = @import("Project.zig");
+const AssetsDatabase = @import("AssetsDatabase.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer if (gpa.deinit() == .leak) {
         @panic("Leaked memory");
     };
+    const allocator = gpa.allocator();
 
     var cwd_buff: [1024]u8 = undefined;
     const cwd = std.process.getCwd(cwd_buff[0..]) catch @panic("cwd_buff too small");
     std.log.info("Running from: {s}", .{cwd});
 
-    var app = GameApp.init(gpa.allocator(), Project.readAssetAlloc, "Yume Editor");
+    try AssetsDatabase.init(allocator);
+    defer AssetsDatabase.deinit();
+
+    var app = GameApp.init(allocator, AssetsDatabase.readAssetAlloc, "Yume Editor");
     defer app.deinit();
 
     app.run(Editor);

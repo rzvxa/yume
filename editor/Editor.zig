@@ -9,8 +9,9 @@ const check_vk = @import("yume").vki.check_vk;
 const Uuid = @import("yume").Uuid;
 const EditorDatabase = @import("EditorDatabase.zig");
 const Editors = @import("editors/editors.zig");
+const AssetsDatabase = @import("AssetsDatabase.zig");
 const Project = @import("Project.zig");
-const AssetsDatabase = @import("yume").AssetsDatabase;
+const Assets = @import("yume").Assets;
 
 const HierarchyWindow = @import("windows/HierarchyWindow.zig");
 const ProjectExplorerWindow = @import("windows/ProjectExplorerWindow.zig");
@@ -51,6 +52,8 @@ const Engine = @import("yume").VulkanEngine;
 const NewProjectModal = @import("NewProjectModal.zig");
 const OpenProjectModal = @import("OpenProjectModal.zig");
 const HelloModal = @import("HelloModal.zig");
+
+const styles = @import("styles.zig");
 
 const ManipulationTool = enum {
     move,
@@ -136,13 +139,13 @@ pub fn init(ctx: *GameApp) *Self {
         .open_project_modal = OpenProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `OpenProjectModal`"),
         .hierarchy_window = HierarchyWindow.init(ctx),
         .project_explorer = ProjectExplorerWindow{},
-        .properties_window = PropertiesWindow{},
+        .properties_window = PropertiesWindow.init(ctx),
         .scene_window = SceneWindow.init(ctx),
         .game_window = GameWindow.init(ctx),
     };
     singleton.bootstrapEditorPipeline(ctx.world);
     singleton.init_descriptors(&ctx.engine);
-    init_imgui(&ctx.engine);
+    init_imgui(&ctx.engine) catch @panic("failed to init imgui");
 
     if (EditorDatabase.storage().last_open_project) |lop| {
         Project.load(ctx.allocator, lop) catch {
@@ -177,6 +180,7 @@ pub fn deinit(self: *Self, ctx: *GameApp) void {
     self.new_project_modal.deinit();
     self.open_project_modal.deinit();
     self.hierarchy_window.deinit();
+    self.properties_window.deinit();
     if (Project.current()) |p| {
         p.unload();
     }
@@ -312,7 +316,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             if (c.ImGui_MenuItem("Load*")) {}
             if (c.ImGui_MenuItemEx("Save", "CTRL+S", false, true)) {
                 if (ctx.scene_handle) |hndl| {
-                    const path = Project.getResourcePath(hndl.uuid) catch @panic("Scene not found!");
+                    const path = AssetsDatabase.getResourcePath(hndl.uuid) catch @panic("Scene not found!");
                     const json = std.json.stringifyAlloc(ctx.allocator, ctx.scene, .{ .whitespace = .indent_4 }) catch @panic("Failed to serialize the scene");
                     defer ctx.allocator.free(json);
                     var file = std.fs.cwd().openFile(path, .{ .mode = .write_only }) catch @panic("Failed to open scene file to save");
@@ -492,7 +496,7 @@ fn init_descriptors(self: *Self, engine: *Engine) void {
     c.vkUpdateDescriptorSets(engine.device, @as(u32, @intCast(editor_camera_and_scene_writes.len)), &editor_camera_and_scene_writes[0], 0, null);
 }
 
-fn init_imgui(engine: *Engine) void {
+fn init_imgui(engine: *Engine) !void {
     const pool_sizes = [_]c.VkDescriptorPoolSize{
         .{
             .type = c.VK_DESCRIPTOR_TYPE_SAMPLER,
@@ -575,27 +579,27 @@ fn init_imgui(engine: *Engine) void {
     _ = c.cImGui_ImplVulkan_Init(&init_info);
     _ = c.cImGui_ImplVulkan_CreateFontsTexture();
 
-    play_icon_ds = create_imgui_texture("assets/editor/icons/play.png", engine);
-    pause_icon_ds = create_imgui_texture("assets/editor/icons/pause.png", engine);
-    stop_icon_ds = create_imgui_texture("assets/editor/icons/stop.png", engine);
-    fast_forward_icon_ds = create_imgui_texture("assets/editor/icons/fast-forward.png", engine);
-    folder_icon_ds = create_imgui_texture("assets/editor/icons/folder.png", engine);
-    file_icon_ds = create_imgui_texture("assets/editor/icons/file.png", engine);
-    object_icon_ds = create_imgui_texture("assets/editor/icons/object.png", engine);
-    move_tool_icon_ds = create_imgui_texture("assets/editor/icons/move-tool.png", engine);
-    rotate_tool_icon_ds = create_imgui_texture("assets/editor/icons/rotate-tool.png", engine);
-    scale_tool_icon_ds = create_imgui_texture("assets/editor/icons/scale-tool.png", engine);
-    close_icon_ds = create_imgui_texture("assets/editor/icons/close.png", engine);
-    browse_icon_ds = create_imgui_texture("assets/editor/icons/browse.png", engine);
+    play_icon_ds = try create_imgui_texture("editor://icons/play.png", engine);
+    pause_icon_ds = try create_imgui_texture("editor://icons/pause.png", engine);
+    stop_icon_ds = try create_imgui_texture("editor://icons/stop.png", engine);
+    fast_forward_icon_ds = try create_imgui_texture("editor://icons/fast-forward.png", engine);
+    folder_icon_ds = try create_imgui_texture("editor://icons/folder.png", engine);
+    file_icon_ds = try create_imgui_texture("editor://icons/file.png", engine);
+    object_icon_ds = try create_imgui_texture("editor://icons/object.png", engine);
+    move_tool_icon_ds = try create_imgui_texture("editor://icons/move-tool.png", engine);
+    rotate_tool_icon_ds = try create_imgui_texture("editor://icons/rotate-tool.png", engine);
+    scale_tool_icon_ds = try create_imgui_texture("editor://icons/scale-tool.png", engine);
+    close_icon_ds = try create_imgui_texture("editor://icons/close.png", engine);
+    browse_icon_ds = try create_imgui_texture("editor://icons/browse.png", engine);
 
-    yume_logo_ds = create_imgui_texture("assets/editor/icons/yume.png", engine);
+    yume_logo_ds = try create_imgui_texture("editor://icons/yume.png", engine);
 
     engine.deletion_queue.append(VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool)) catch @panic("Out of memory");
 
     io.*.ConfigFlags |= c.ImGuiConfigFlags_DockingEnable;
     io.*.ConfigWindowsMoveFromTitleBarOnly = true;
 
-    loadImGuiTheme();
+    styles.visualStudioStyles();
 }
 
 pub fn instance() *Self {
@@ -610,20 +614,15 @@ pub fn openProject(self: *Self) void {
     self.open_project_modal.open();
 }
 
-fn create_imgui_texture(filepath: []const u8, engine: *Engine) c.VkDescriptorSet {
-    var file = std.fs.cwd().openFile(filepath, .{}) catch @panic("Failed to open the file");
-    defer file.close();
-    const content = file.readToEndAlloc(engine.allocator, 30_000_000) catch @panic("OOM");
-    defer engine.allocator.free(content);
-    const img = textures.load_image(engine, content, Uuid.new().urn()) catch @panic("Failed to load image");
-    engine.image_deletion_queue.append(VmaImageDeleter{ .image = img }) catch @panic("Out of memory");
+pub fn create_imgui_texture(uri: []const u8, engine: *Engine) !c.VkDescriptorSet {
+    const image = try Assets.getOrLoadImage(try AssetsDatabase.getResourceId(uri));
 
     // Create the Image View
     var image_view: c.VkImageView = undefined;
     {
         const info = c.VkImageViewCreateInfo{
             .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = img.image,
+            .image = image.image,
             .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
             .format = c.VK_FORMAT_R8G8B8A8_UNORM,
             .subresourceRange = .{
@@ -689,94 +688,6 @@ fn flecs_bootstrap_phase_(world: ecs.World, phase: ecs.Entity, depends_on: ecs.E
 
 fn flecs_entity_compare(e1: c.ecs_entity_t, _: ?*const anyopaque, e2: c.ecs_entity_t, _: ?*const anyopaque) callconv(.C) c_int {
     return @as(c_int, @intCast(@intFromBool((e1 > e2)))) - @intFromBool((e1 < e2));
-}
-
-fn loadImGuiTheme() void {
-    // set visual studio theme
-    const style = c.ImGui_GetStyle();
-    style.*.Alpha = 1.0;
-    style.*.DisabledAlpha = 0.6000000238418579;
-    style.*.WindowPadding = c.ImVec2{ .x = 8.0, .y = 8.0 };
-    style.*.WindowRounding = 0.0;
-    style.*.WindowBorderSize = 1.0;
-    style.*.WindowMinSize = c.ImVec2{ .x = 32.0, .y = 32.0 };
-    style.*.WindowTitleAlign = c.ImVec2{ .x = 0.0, .y = 0.5 };
-    style.*.WindowMenuButtonPosition = c.ImGuiDir_Left;
-    style.*.ChildRounding = 0.0;
-    style.*.ChildBorderSize = 1.0;
-    style.*.PopupRounding = 0.0;
-    style.*.PopupBorderSize = 1.0;
-    style.*.FramePadding = c.ImVec2{ .x = 4.0, .y = 3.0 };
-    style.*.FrameRounding = 0.0;
-    style.*.FrameBorderSize = 0.0;
-    style.*.ItemSpacing = c.ImVec2{ .x = 8.0, .y = 4.0 };
-    style.*.ItemInnerSpacing = c.ImVec2{ .x = 4.0, .y = 4.0 };
-    style.*.CellPadding = c.ImVec2{ .x = 4.0, .y = 2.0 };
-    style.*.IndentSpacing = 21.0;
-    style.*.ColumnsMinSpacing = 6.0;
-    style.*.ScrollbarSize = 14.0;
-    style.*.ScrollbarRounding = 0.0;
-    style.*.GrabMinSize = 10.0;
-    style.*.GrabRounding = 0.0;
-    style.*.TabRounding = 0.0;
-    style.*.TabBorderSize = 0.0;
-    style.*.ColorButtonPosition = c.ImGuiDir_Right;
-    style.*.ButtonTextAlign = c.ImVec2{ .x = 0.5, .y = 0.5 };
-    style.*.SelectableTextAlign = c.ImVec2{ .x = 0.0, .y = 0.0 };
-
-    style.*.Colors[c.ImGuiCol_Text] = c.ImVec4{ .x = 1.0, .y = 1.0, .z = 1.0, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_TextDisabled] = c.ImVec4{ .x = 0.5921568870544434, .y = 0.5921568870544434, .z = 0.5921568870544434, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_WindowBg] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_ChildBg] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_PopupBg] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_Border] = c.ImVec4{ .x = 0.3058823645114899, .y = 0.3058823645114899, .z = 0.3058823645114899, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_BorderShadow] = c.ImVec4{ .x = 0.3058823645114899, .y = 0.3058823645114899, .z = 0.3058823645114899, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_FrameBg] = c.ImVec4{ .x = 0.2000000029802322, .y = 0.2000000029802322, .z = 0.2156862765550613, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_FrameBgHovered] = c.ImVec4{ .x = 0.1137254908680916, .y = 0.5921568870544434, .z = 0.9254902005195618, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_FrameBgActive] = c.ImVec4{ .x = 0.0, .y = 0.4666666686534882, .z = 0.7843137383460999, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_TitleBg] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_TitleBgActive] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_TitleBgCollapsed] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_MenuBarBg] = c.ImVec4{ .x = 0.2000000029802322, .y = 0.2000000029802322, .z = 0.2156862765550613, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_ScrollbarBg] = c.ImVec4{ .x = 0.2000000029802322, .y = 0.2000000029802322, .z = 0.2156862765550613, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_ScrollbarGrab] = c.ImVec4{ .x = 0.321568638086319, .y = 0.321568638086319, .z = 0.3333333432674408, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_ScrollbarGrabHovered] = c.ImVec4{ .x = 0.3529411852359772, .y = 0.3529411852359772, .z = 0.3725490272045135, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_ScrollbarGrabActive] = c.ImVec4{ .x = 0.3529411852359772, .y = 0.3529411852359772, .z = 0.3725490272045135, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_CheckMark] = c.ImVec4{ .x = 0.0, .y = 0.4666666686534882, .z = 0.7843137383460999, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_SliderGrab] = c.ImVec4{ .x = 0.1137254908680916, .y = 0.5921568870544434, .z = 0.9254902005195618, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_SliderGrabActive] = c.ImVec4{ .x = 0.0, .y = 0.4666666686534882, .z = 0.7843137383460999, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_Button] = c.ImVec4{ .x = 0.2000000029802322, .y = 0.2000000029802322, .z = 0.2156862765550613, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_ButtonHovered] = c.ImVec4{ .x = 0.1137254908680916, .y = 0.5921568870544434, .z = 0.9254902005195618, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_ButtonActive] = c.ImVec4{ .x = 0.1137254908680916, .y = 0.5921568870544434, .z = 0.9254902005195618, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_Header] = c.ImVec4{ .x = 0.2000000029802322, .y = 0.2000000029802322, .z = 0.2156862765550613, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_HeaderHovered] = c.ImVec4{ .x = 0.1137254908680916, .y = 0.5921568870544434, .z = 0.9254902005195618, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_HeaderActive] = c.ImVec4{ .x = 0.0, .y = 0.4666666686534882, .z = 0.7843137383460999, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_Separator] = c.ImVec4{ .x = 0.3058823645114899, .y = 0.3058823645114899, .z = 0.3058823645114899, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_SeparatorHovered] = c.ImVec4{ .x = 0.3058823645114899, .y = 0.3058823645114899, .z = 0.3058823645114899, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_SeparatorActive] = c.ImVec4{ .x = 0.3058823645114899, .y = 0.3058823645114899, .z = 0.3058823645114899, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_ResizeGrip] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_ResizeGripHovered] = c.ImVec4{ .x = 0.2000000029802322, .y = 0.2000000029802322, .z = 0.2156862765550613, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_ResizeGripActive] = c.ImVec4{ .x = 0.321568638086319, .y = 0.321568638086319, .z = 0.3333333432674408, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_Tab] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_TabHovered] = c.ImVec4{ .x = 0.1137254908680916, .y = 0.5921568870544434, .z = 0.9254902005195618, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_TabActive] = c.ImVec4{ .x = 0.0, .y = 0.4666666686534882, .z = 0.7843137383460999, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_TabUnfocused] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_TabUnfocusedActive] = c.ImVec4{ .x = 0.0, .y = 0.4666666686534882, .z = 0.7843137383460999, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_PlotLines] = c.ImVec4{ .x = 0.0, .y = 0.4666666686534882, .z = 0.7843137383460999, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_PlotLinesHovered] = c.ImVec4{ .x = 0.1137254908680916, .y = 0.5921568870544434, .z = 0.9254902005195618, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_PlotHistogram] = c.ImVec4{ .x = 0.0, .y = 0.4666666686534882, .z = 0.7843137383460999, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_PlotHistogramHovered] = c.ImVec4{ .x = 0.1137254908680916, .y = 0.5921568870544434, .z = 0.9254902005195618, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_TableHeaderBg] = c.ImVec4{ .x = 0.1882352977991104, .y = 0.1882352977991104, .z = 0.2000000029802322, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_TableBorderStrong] = c.ImVec4{ .x = 0.3098039329051971, .y = 0.3098039329051971, .z = 0.3490196168422699, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_TableBorderLight] = c.ImVec4{ .x = 0.2274509817361832, .y = 0.2274509817361832, .z = 0.2470588237047195, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_TableRowBg] = c.ImVec4{ .x = 0.0, .y = 0.0, .z = 0.0, .w = 0.0 };
-    style.*.Colors[c.ImGuiCol_TableRowBgAlt] = c.ImVec4{ .x = 1.0, .y = 1.0, .z = 1.0, .w = 0.05999999865889549 };
-    style.*.Colors[c.ImGuiCol_TextSelectedBg] = c.ImVec4{ .x = 0.0, .y = 0.4666666686534882, .z = 0.7843137383460999, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_DragDropTarget] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_NavHighlight] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_NavWindowingHighlight] = c.ImVec4{ .x = 1.0, .y = 1.0, .z = 1.0, .w = 0.699999988079071 };
-    style.*.Colors[c.ImGuiCol_NavWindowingDimBg] = c.ImVec4{ .x = 0.800000011920929, .y = 0.800000011920929, .z = 0.800000011920929, .w = 0.2000000029802322 };
-    style.*.Colors[c.ImGuiCol_ModalWindowDimBg] = c.ImVec4{ .x = 0.1450980454683304, .y = 0.1450980454683304, .z = 0.1490196138620377, .w = 1.0 };
 }
 
 var singleton: Self = undefined;

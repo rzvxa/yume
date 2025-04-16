@@ -61,7 +61,6 @@ pub const World = struct {
     }
 
     pub fn component(self: Self, comptime T: type) ComponentDef {
-        std.debug.print("WH? {s}\n", .{typeName(T)});
         if (@sizeOf(T) == 0) {
             @compileError("For registering zero-sized components use `tag` instead");
         }
@@ -94,7 +93,10 @@ pub const World = struct {
         std.debug.assert(meta.id != 0);
         return .{
             .id = meta.id,
-            .icon = false,
+            .icon = switch (@typeInfo(T)) {
+                .Struct => if (@hasDecl(T, "editorIcon")) T.editorIcon() else null,
+                else => null,
+            },
             .size = @sizeOf(T),
             .alignment = @alignOf(T),
             .default = switch (@typeInfo(T)) {
@@ -301,7 +303,7 @@ pub const ResourceResolver = *const fn (path: [*:0]const u8) callconv(.C) Resour
 
 pub const ComponentDef = extern struct {
     id: Entity,
-    icon: bool,
+    icon: ?[*:0]const u8,
     size: usize,
     alignment: usize,
     default: ?*const fn (self: *anyopaque, entity: Entity, ctx: *GameApp, resourceResolver: ResourceResolver) callconv(.C) bool,
