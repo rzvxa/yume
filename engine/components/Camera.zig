@@ -62,6 +62,10 @@ pub const Camera = extern struct {
     projection: Mat4 = Mat4.make(Vec4.ZERO, Vec4.ZERO, Vec4.ZERO, Vec4.ZERO),
     view_projection: Mat4 = Mat4.make(Vec4.ZERO, Vec4.ZERO, Vec4.ZERO, Vec4.ZERO),
 
+    pub fn editorIcon() [*:0]const u8 {
+        return "editor://icons/camera.png";
+    }
+
     pub fn init(object: *Object, opts: CameraOptions) Self {
         var self = switch (opts.kind) {
             .perspective => makePerspectiveCamera(opts.data.perspective),

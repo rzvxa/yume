@@ -12,7 +12,7 @@ pub const vki = @import("vulkan_init.zig");
 pub const textures = @import("textures.zig");
 
 pub const assets = @import("assets.zig");
-pub const AssetsDatabase = assets.AssetsDatabase;
+pub const Assets = assets.Assets;
 pub const AssetHandle = assets.AssetHandle;
 
 pub const scene_graph = @import("scene.zig");

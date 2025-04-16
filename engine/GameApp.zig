@@ -13,7 +13,7 @@ const Uuid = @import("uuid.zig").Uuid;
 const math3d = @import("math3d.zig");
 const Vec3 = math3d.Vec3;
 
-const AssetsDatabase = @import("assets.zig").AssetsDatabase;
+const Assets = @import("assets.zig").Assets;
 const SceneAssetHandle = @import("assets.zig").SceneAssetHandle;
 
 const Scene = @import("scene.zig").Scene;
@@ -45,7 +45,7 @@ scene_handle: ?SceneAssetHandle = null,
 
 delta: f32 = 0.016,
 
-pub fn init(a: std.mem.Allocator, loader: assets.AssetLoader, window_title: []const u8) *Self {
+pub fn init(a: std.mem.Allocator, loader: assets.ResourceLoader, window_title: []const u8) *Self {
     utils.checkSdl(c.SDL_Init(c.SDL_INIT_VIDEO));
 
     const window = c.SDL_CreateWindow(window_title.ptr, window_extent.width, window_extent.height, c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE) orelse @panic("Failed to create SDL window");
@@ -70,7 +70,7 @@ pub fn init(a: std.mem.Allocator, loader: assets.AssetLoader, window_title: []co
 
     self.scene_root = self.world.create("root");
 
-    assets.AssetsDatabase.init(a, &self.engine, loader);
+    Assets.init(a, &self.engine, loader);
 
     std.debug.print("WH? {s}\n", .{ecs.typeName(components.Mesh)});
     self.registerComponent(components.Uuid);
@@ -148,7 +148,7 @@ pub fn deinit(self: *Self) void {
     }
     self.world.deinit();
     self.components.deinit();
-    assets.AssetsDatabase.deinit();
+    Assets.deinit();
     self.engine.deinit();
     self.allocator.destroy(self);
 }
@@ -156,12 +156,12 @@ pub fn deinit(self: *Self) void {
 pub fn loadScene(self: *Self, scene_id: Uuid) !void {
     const old_handle = self.scene_handle;
     var old_scene = self.scene;
-    self.scene_handle = try AssetsDatabase.loadScene(scene_id);
-    self.scene = try AssetsDatabase.getScene(self.scene_handle.?);
+    self.scene_handle = try Assets.loadScene(scene_id);
+    self.scene = try Assets.getScene(self.scene_handle.?);
 
     if (old_handle) |handle| {
         if (handle.uuid.raw != scene_id.raw) {
-            try AssetsDatabase.unload(handle.toAssetHandle());
+            try Assets.unload(handle.toAssetHandle());
         }
     } else {
         old_scene.deinit();

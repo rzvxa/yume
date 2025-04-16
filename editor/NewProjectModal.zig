@@ -12,13 +12,14 @@ const VulkanDeleter = @import("yume").VulkanDeleter;
 const check_vk = @import("yume").vki.check_vk;
 const Camera = @import("yume").Camera;
 const MeshRenderer = @import("yume").MeshRenderer;
-const AssetsDatabase = @import("yume").AssetsDatabase;
+const Assets = @import("yume").Assets;
 const Vec3 = @import("yume").Vec3;
 const Mat4 = @import("yume").Mat4;
 
 const imutils = @import("imutils.zig");
 const Editor = @import("Editor.zig");
 const Project = @import("Project.zig");
+const AssetsDatabase = @import("AssetsDatabase.zig");
 const utils = @import("yume").utils;
 
 const Self = @This();
@@ -180,7 +181,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
         .scenes = std.ArrayList(Uuid).init(self.allocator),
         .default_scene = Uuid.new(),
 
-        .resources = std.AutoHashMap(Uuid, Project.Resource).init(self.allocator),
+        .resources = std.AutoHashMap(Uuid, AssetsDatabase.Resource).init(self.allocator),
 
         .resources_index = undefined,
         .resources_builtins = undefined,
@@ -189,7 +190,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
 
     try project.resources.put(
         project.default_scene,
-        Project.Resource{
+        AssetsDatabase.Resource{
             .id = project.default_scene,
             .path = try self.allocator.dupe(u8, "scenes/Default Scene.scene"),
         },
@@ -225,8 +226,8 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
         // }) catch @panic("OOM");
         // defer monkey.deref();
         // monkey.addComponent(MeshRenderer, .{
-        //     .mesh = AssetsDatabase.getOrLoadMesh(try Project.current().?.getResourceId("builtin://u.obj")) catch @panic("Failed to get monkey mesh"),
-        //     .material = AssetsDatabase.getOrLoadMaterial(try Project.current().?.getResourceId("builtin://materials/none.mat.json")) catch @panic("Failed to get none material"),
+        //     .mesh = Assets.getOrLoadMesh(try Project.current().?.getResourceId("builtin://u.obj")) catch @panic("Failed to get monkey mesh"),
+        //     .material = Assets.getOrLoadMaterial(try Project.current().?.getResourceId("builtin://materials/none.mat.json")) catch @panic("Failed to get none material"),
         // });
         // apes.addChildren(monkey);
         //
@@ -235,7 +236,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
         //     .transform = Mat4.translation(Vec3.make(5.0, -10.0, 0.0)),
         // }) catch @panic("OOM");
         // defer empire.deref();
-        // var empire_material = AssetsDatabase.getOrLoadMaterial(try Project.current().?.getResourceId("builtin://materials/default.mat.json")) catch @panic("Failed to get default mesh material");
+        // var empire_material = Assets.getOrLoadMaterial(try Project.current().?.getResourceId("builtin://materials/default.mat.json")) catch @panic("Failed to get default mesh material");
         //
         // // Allocate descriptor set for signle-texture to use on the material
         // const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
@@ -261,8 +262,8 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
         // check_vk(c.vkCreateSampler(ctx.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
         // ctx.engine.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("Out of memory");
         //
-        // const lost_empire_tex_handle = AssetsDatabase.loadTexture(try Project.current().?.getResourceId("builtin://lost_empire-RGBA.png")) catch @panic("Failed to load texture");
-        // const lost_empire_tex = AssetsDatabase.getTexture(lost_empire_tex_handle) catch @panic("Failed to get empire texture");
+        // const lost_empire_tex_handle = Assets.loadTexture(try Project.current().?.getResourceId("builtin://lost_empire-RGBA.png")) catch @panic("Failed to load texture");
+        // const lost_empire_tex = Assets.getTexture(lost_empire_tex_handle) catch @panic("Failed to get empire texture");
         // // const lost_empire_tex = (ctx.engine.textures.get("empire_diffuse") orelse @panic("Failed to get empire texture"));
         //
         // const descriptor_image_info = std.mem.zeroInit(c.VkDescriptorImageInfo, .{
@@ -283,7 +284,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
         // c.vkUpdateDescriptorSets(ctx.engine.device, 1, &write_descriptor_set, 0, null);
         //
         // empire.addComponent(MeshRenderer, .{
-        //     .mesh = AssetsDatabase.getOrLoadMesh(try Project.current().?.getResourceId("builtin://lost_empire.obj")) catch @panic("Failed to get triangle mesh"),
+        //     .mesh = Assets.getOrLoadMesh(try Project.current().?.getResourceId("builtin://lost_empire.obj")) catch @panic("Failed to get triangle mesh"),
         //     .material = empire_material,
         // });
     }
