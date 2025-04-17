@@ -179,6 +179,7 @@ pub fn deinit(self: *Self, ctx: *GameApp) void {
     self.hello_modal.deinit();
     self.new_project_modal.deinit();
     self.open_project_modal.deinit();
+    self.game_window.deinit();
     self.hierarchy_window.deinit();
     self.properties_window.deinit();
     if (Project.current()) |p| {

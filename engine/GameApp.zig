@@ -72,8 +72,9 @@ pub fn init(a: std.mem.Allocator, loader: assets.ResourceLoader, window_title: [
 
     Assets.init(a, &self.engine, loader);
 
-    std.debug.print("WH? {s}\n", .{ecs.typeName(components.Mesh)});
     self.registerComponent(components.Uuid);
+    self.registerComponent(components.Meta);
+    self.registerComponent(components.HierarchyOrder);
 
     self.registerComponent(components.Position);
     self.registerComponent(components.Rotation);
@@ -178,18 +179,23 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
     }
 
     while (try dfs.next()) |obj| {
-        const entity = self.world.create(obj.name);
+        const entity = self.world.create(null);
 
         try entity_map.put(obj.uuid, entity);
 
         std.debug.print("entity {s} {d}\n", .{ obj.name, entity });
+
+        var idx: usize = 0;
         if (obj.parent) |parent| {
+            idx = parent.findChildren(obj).?;
             const parent_entity = entity_map.get(parent.uuid).?;
             std.debug.print("entity {s} parent {d}\n", .{ obj.name, parent_entity });
             self.world.addPair(entity, ecs.relations.ChildOf, parent_entity);
         }
 
         self.world.set(entity, components.Uuid, .{ .value = obj.uuid });
+        self.world.set(entity, components.Meta, .{ .allocator = @ptrCast(&self.allocator), .title = try self.allocator.dupeZ(u8, obj.name) });
+        self.world.set(entity, components.HierarchyOrder, .{ .value = @intCast(idx) });
 
         self.world.set(entity, components.Position, .{ .value = obj.transform.position() });
         self.world.set(entity, components.Rotation, .{ .value = obj.transform.rotation() });

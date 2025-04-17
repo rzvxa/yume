@@ -2,6 +2,7 @@ const std = @import("std");
 
 pub const ecs = @import("ecs.zig");
 
+pub const Meta = @import("components/Meta.zig").Meta;
 pub const Uuid = @import("components/Uuid.zig").Uuid;
 
 pub const Position = @import("components/transform.zig").Position;
@@ -16,5 +17,7 @@ pub const material = @import("components/material.zig");
 pub const Camera = camera.Camera;
 pub const Mesh = mesh.Mesh;
 pub const Material = material.Material;
+
+pub const HierarchyOrder = @import("components/HierarchyOrder.zig").HierarchyOrder;
 
 pub const ComponentDef = ecs.ComponentDef;

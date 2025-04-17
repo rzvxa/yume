@@ -94,3 +94,15 @@ pub fn buttonCenteredOnLine(label: [*c]const u8, alignment: f32) bool {
     alignHorizontal(size, alignment);
     return c.ImGui_Button(label);
 }
+
+pub fn collapsingHeaderWithCheckBox(label: [*c]const u8, checked: [*c]bool, flags: c.ImGuiTreeNodeFlags) bool {
+    c.ImGui_PushID(label);
+    defer c.ImGui_PopID();
+    if (checked != null) {
+        _ = c.ImGui_Checkbox("###enable", checked);
+        const x = c.ImGui_GetCursorPosX();
+        const style = c.ImGui_GetStyle();
+        c.ImGui_SameLineEx(x + c.ImGui_GetFrameHeight() + style.*.ItemInnerSpacing.x - 1, 0);
+    }
+    return c.ImGui_CollapsingHeader(label, flags);
+}

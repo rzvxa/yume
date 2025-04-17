@@ -53,6 +53,10 @@ pub fn init(ctx: *GameApp) Self {
     };
 }
 
+pub fn deinit(self: *Self) void {
+    self.camera_query.deinit();
+}
+
 pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
     self.frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .d = self };
     if (c.ImGui_Begin("Game", null, 0)) {
@@ -87,7 +91,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
 
                 var iter = me.d.camera_query.iter();
                 const aspect = me.d.game_view_size.x / me.d.game_view_size.y;
-                while (c.ecs_query_next(&iter)) {
+                while (iter.next()) {
                     const cameras = ecs.field(&iter, components.Camera, @alignOf(components.Camera), 0).?;
                     const positions = ecs.field(&iter, components.Position, @alignOf(components.Position), 1).?;
                     const rotations = ecs.field(&iter, components.Rotation, @alignOf(components.Rotation), 2).?;
@@ -95,7 +99,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                         camera.updateMatrices(pos.value, rot.value, aspect);
                         var new_me = me.*;
                         new_me.camera = camera;
-                        _ = c.ecs_run(iter.real_world, me.d.render_system, me.app.delta, &new_me);
+                        _ = c.ecs_run(iter.inner.real_world, me.d.render_system, me.app.delta, &new_me);
                     }
                 }
 
@@ -106,7 +110,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
             }
         }.f, &self.frame_userdata);
         c.ImDrawList_AddCallback(game_image, c.ImDrawCallback_ResetRenderState, null);
-        if (!c.ecs_query_is_true(&self.camera_query.inner)) {
+        if (!self.camera_query.isTrue()) {
             const text = "No Camera";
             const size = c.ImGui_CalcTextSize(text);
             const avail = c.ImGui_GetContentRegionAvail();

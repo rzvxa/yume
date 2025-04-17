@@ -20,11 +20,10 @@ pub fn deinit(_: *Self) void {}
 pub fn draw(self: *Self, ctx: *GameApp) void {
     if (c.ImGui_Begin("Hierarchy", null, 0)) {
         {
-            var childs = c.ecs_children(ctx.world.inner, ctx.scene_root);
-            while (c.ecs_iter_next(&childs)) {
-                for (0..@intCast(childs.count)) |i| {
-                    self.drawHierarchyNode(ctx.world, childs.entities[i], 0, ctx);
-                }
+            const childs = ctx.world.childrenSorted(ctx.scene_root, ctx.allocator) catch @panic("Failed to retrieve sorted children");
+            defer ctx.allocator.free(childs);
+            for (childs) |child| {
+                self.drawHierarchyNode(ctx.world, child, 0, ctx) catch @panic("Failed to draw node");
             }
         }
         const avail = c.ImGui_GetContentRegionAvail();
@@ -47,14 +46,15 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
     c.ImGui_End();
 }
 
-fn drawHierarchyNode(self: *Self, world: ecs.World, entity: ecs.Entity, level: usize, ctx: *GameApp) void {
+fn drawHierarchyNode(self: *Self, world: ecs.World, entity: ecs.Entity, level: usize, ctx: *GameApp) !void {
     const name = world.getName(entity);
     var child_it = world.children(entity);
-    var has_next = c.ecs_iter_next(&child_it);
+    defer child_it.deinit();
+    var has_next = child_it.next();
 
     c.ImGui_PushID(name);
     defer c.ImGui_PopID();
-    var node_flags = c.ImGuiTreeNodeFlags_OpenOnArrow | c.ImGuiTreeNodeFlags_SpanAvailWidth;
+    var node_flags = c.ImGuiTreeNodeFlags_OpenOnArrow | c.ImGuiTreeNodeFlags_SpanAvailWidth | c.ImGuiTreeNodeFlags_DefaultOpen;
     if (!has_next) {
         node_flags |= c.ImGuiTreeNodeFlags_Leaf;
     }
@@ -84,8 +84,8 @@ fn drawHierarchyNode(self: *Self, world: ecs.World, entity: ecs.Entity, level: u
                     if (pl_parent == ent_parent) {
                         ctx.world.removePair(pl.*, ecs.relations.ChildOf, pl_parent);
                     }
-                    // TODO: change the ordering
                     ctx.world.addPair(pl.*, ecs.relations.ChildOf, ent_parent);
+                    try ctx.world.changeEntityOrder(pl.*, ctx.world.getHierarchyOrder(entity), ctx.allocator);
                 }
             }
         }
@@ -127,9 +127,9 @@ fn drawHierarchyNode(self: *Self, world: ecs.World, entity: ecs.Entity, level: u
     c.ImGui_SameLine();
     c.ImGui_Text(name);
     if (open) {
-        while (has_next) : (has_next = c.ecs_iter_next(&child_it)) {
-            for (0..@intCast(child_it.count)) |i| {
-                self.drawHierarchyNode(world, child_it.entities[i], level + 1, ctx);
+        while (has_next) : (has_next = child_it.next()) {
+            for (0..@intCast(child_it.inner.count)) |i| {
+                try self.drawHierarchyNode(world, child_it.inner.entities[i], level + 1, ctx);
             }
         }
         c.ImGui_TreePop();
@@ -142,6 +142,8 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) bool {
         if (c.ImGui_BeginMenu("New")) {
             if (c.ImGui_MenuItem("Entity")) {
                 const new_entity = ctx.world.create("New Entity");
+                const x = c.ecs_lookup_path_w_sep(ctx.world.inner, entity, "New Entity", ".", null, false);
+                std.debug.print("x is {?}\n", .{x});
                 ctx.world.addPair(new_entity, ecs.relations.ChildOf, entity);
             }
             c.ImGui_Separator();

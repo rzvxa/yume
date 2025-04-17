@@ -3,30 +3,63 @@ const std = @import("std");
 
 const GameApp = @import("GameApp.zig");
 const Uuid = @import("uuid.zig").Uuid;
+const components = @import("components.zig");
 
 pub const TypeId = c.ecs_id_t;
 pub const Entity = c.ecs_entity_t;
 pub const System = c.ecs_system_desc_t;
 pub const QueryDesc = c.ecs_query_desc_t;
-pub const Iterator = c.ecs_iter_t;
 
 pub const Query = extern struct {
     const Self = @This();
     inner: c.ecs_query_t,
 
-    pub fn deinit(self: *Self) void {
+    inline fn from(raw: *c.ecs_query_t) *Query {
+        return @ptrCast(raw);
+    }
+
+    pub inline fn deinit(self: *Self) void {
         c.ecs_query_fini(self.castMut());
     }
 
-    pub fn iter(self: *const Self) Iterator {
-        return c.ecs_query_iter(self.inner.world orelse self.inner.real_world.?, self.cast());
+    pub inline fn iter(self: *const Self) Iterator {
+        return Iterator{ .inner = c.ecs_query_iter(self.inner.world orelse self.inner.real_world.?, self.cast()) };
     }
 
-    fn cast(self: *const Self) *const c.ecs_query_t {
+    pub inline fn cast(self: *const Self) *const c.ecs_query_t {
         return @ptrCast(self);
     }
 
-    fn castMut(self: *Self) *c.ecs_query_t {
+    pub inline fn castMut(self: *Self) *c.ecs_query_t {
+        return @ptrCast(self);
+    }
+
+    pub inline fn isTrue(self: *const Self) bool {
+        return c.ecs_query_is_true(self.cast());
+    }
+};
+
+pub const Iterator = extern struct {
+    const Self = @This();
+    inner: c.ecs_iter_t,
+
+    inline fn from(raw: *c.ecs_iter_t) *Iterator {
+        return @ptrCast(raw);
+    }
+
+    pub inline fn deinit(self: *Self) void {
+        c.ecs_iter_fini(self.castMut());
+    }
+
+    pub inline fn next(self: *Self) bool {
+        return c.ecs_iter_next(self.castMut());
+    }
+
+    pub inline fn cast(self: *const Self) *const c.ecs_iter_t {
+        return @ptrCast(self);
+    }
+
+    pub inline fn castMut(self: *Self) *c.ecs_iter_t {
         return @ptrCast(self);
     }
 };
@@ -80,8 +113,10 @@ pub const World = struct {
                 .hooks = .{
                     .dtor = switch (@typeInfo(T)) {
                         .Struct => if (@hasDecl(T, "deinit")) struct {
-                            pub fn f(ptr: *anyopaque, _: i32, _: *const c.ecs_type_info_t) callconv(.C) void {
-                                T.deinit(@as(*T, @ptrCast(@alignCast(ptr))).*);
+                            pub fn f(ptr: ?*anyopaque, count: i32, _: [*c]const TypeInfo) callconv(.C) void {
+                                var c_ptr = @as([*c]T, @ptrCast(@alignCast(ptr)));
+                                var span = c_ptr[0..@intCast(count)];
+                                for (0..span.len) |i| T.deinit(&span[i]);
                             }
                         }.f else null,
                         else => null,
@@ -101,12 +136,12 @@ pub const World = struct {
             .alignment = @alignOf(T),
             .default = switch (@typeInfo(T)) {
                 .Struct => if (@hasDecl(T, "default")) struct {
-                    pub fn f(ptr: *anyopaque, entity: Entity, ctx: *GameApp, resolver: ResourceResolver) callconv(.C) bool {
+                    pub fn f(ptr: *anyopaque, ent: Entity, ctx: *GameApp, resolver: ResourceResolver) callconv(.C) bool {
                         const params = @typeInfo(@TypeOf(T.default)).Fn.params;
                         if (params[params.len - 1].type == ResourceResolver) {
-                            return T.default(@ptrCast(@alignCast(ptr)), entity, ctx, resolver);
+                            return T.default(@ptrCast(@alignCast(ptr)), ent, ctx, resolver);
                         } else {
-                            return T.default(@ptrCast(@alignCast(ptr)), entity, ctx);
+                            return T.default(@ptrCast(@alignCast(ptr)), ent, ctx);
                         }
                     }
                 }.f else null,
@@ -166,65 +201,76 @@ pub const World = struct {
         return c.ecs_system_init(self.inner, system_desc);
     }
 
-    pub fn systemEx(self: Self, desc: SystemDesc) Entity {
+    pub inline fn systemEx(self: Self, desc: SystemDesc) Entity {
         return mkp_system_init(self.inner, &desc);
     }
 
-    pub fn create(self: Self, name: [*:0]const u8) Entity {
-        return c.ecs_entity_init(self.inner, &.{ .name = name });
+    pub inline fn entity(self: Self, name: [*:0]const u8) Entity {
+        // const entity = self.create("");
+        c.ecs_entity_init(self.inner, &.{ .name = name });
     }
 
-    pub fn createEx(self: Self, desc: *const c.ecs_entity_desc_t) Entity {
+    pub inline fn create(self: Self, ident: ?[*:0]const u8) Entity {
+        return c.ecs_entity_init(self.inner, &.{ .name = ident });
+    }
+
+    pub inline fn createEx(self: Self, desc: *const c.ecs_entity_desc_t) Entity {
         return c.ecs_entity_init(self.inner, desc);
     }
 
-    pub fn delete(self: Self, ent: Entity) void {
+    pub inline fn delete(self: Self, ent: Entity) void {
         c.ecs_delete(self.inner, ent);
     }
 
-    pub fn clear(self: Self, ent: Entity) void {
+    pub inline fn clear(self: Self, ent: Entity) void {
         c.ecs_clear(self.inner, ent);
     }
 
     // add
 
-    pub fn add(self: Self, ent: Entity, comptime T: type) void {
+    pub inline fn add(self: Self, ent: Entity, comptime T: type) void {
         c.ecs_add_id(self.inner, ent, typeId(T));
     }
 
-    pub fn addId(self: Self, ent: Entity, id: Entity) void {
+    pub inline fn addId(self: Self, ent: Entity, id: Entity) void {
         c.ecs_add_id(self.inner, ent, id);
     }
 
-    pub fn addPair(self: Self, subject: Entity, first: Entity, second: Entity) void {
+    pub inline fn addPair(self: Self, subject: Entity, first: Entity, second: Entity) void {
         c.ecs_add_id(self.inner, subject, pair(first, second));
     }
 
-    pub fn addSingleton(self: Self, comptime T: type) void {
+    pub inline fn addSingleton(self: Self, comptime T: type) void {
         self.add(typeId(T), T);
     }
 
     // remove
 
-    pub fn remove(self: Self, ent: Entity, comptime T: type) void {
+    pub inline fn remove(self: Self, ent: Entity, comptime T: type) void {
         return c.ecs_remove_id(self.inner, ent, typeId(T));
     }
 
-    pub fn removeId(self: Self, ent: Entity, id: Entity) void {
+    pub inline fn removeId(self: Self, ent: Entity, id: Entity) void {
         return c.ecs_remove_id(self.inner, ent, id);
     }
 
-    pub fn removePair(self: Self, subject: Entity, first: Entity, second: Entity) void {
+    pub inline fn removePair(self: Self, subject: Entity, first: Entity, second: Entity) void {
         return c.ecs_remove_id(self.inner, subject, pair(first, second));
     }
 
     // set
 
-    pub fn setName(self: Self, ent: Entity, new_name: [*:0]const u8) Entity {
+    pub inline fn setName(self: Self, ent: Entity, new_name: [*:0]const u8) Entity {
         return c.ecs_set_name(self.inner, ent, new_name);
     }
 
-    pub fn set(self: Self, ent: Entity, comptime T: type, value: T) void {
+    // works like setName but provides name suffixes when there is already an entity with the given name
+    pub inline fn setNameWithSuffix(self: Self, ent: Entity, new_name: [*:0]const u8) Entity {
+        c.ecs_set_name(self.inner, ent, new_name);
+        @compileError("TODO");
+    }
+
+    pub inline fn set(self: Self, ent: Entity, comptime T: type, value: T) void {
         self.setId(ent, typeId(T), @sizeOf(T), @ptrCast(&value));
     }
 
@@ -232,7 +278,7 @@ pub const World = struct {
         c.ecs_set_id(self.inner, ent, comp, size, value);
     }
 
-    pub fn setPair(
+    pub inline fn setPair(
         self: Self,
         subject: Entity,
         first: Entity,
@@ -243,55 +289,161 @@ pub const World = struct {
         return c.ecs_set_id(self.inner, subject, pair(first, second), @sizeOf(T), @ptrCast(&value));
     }
 
-    pub fn setSingleton(self: Self, comptime T: type, value: T) void {
+    pub inline fn setSingleton(self: Self, comptime T: type, value: T) void {
         return self.set(typeId(T), T, value);
     }
 
     // get
 
-    pub fn get(self: Self, ent: Entity, comptime T: type) ?*const T {
+    pub inline fn get(self: Self, ent: Entity, comptime T: type) ?*const T {
         return @ptrCast(@alignCast(c.ecs_get_id(self.inner, ent, typeId(T))));
     }
 
-    pub fn getMut(self: Self, ent: Entity, comptime T: type) ?*T {
+    pub inline fn getMut(self: Self, ent: Entity, comptime T: type) ?*T {
         return @ptrCast(@alignCast(c.ecs_get_mut_id(self.inner, ent, typeId(T))));
+    }
+
+    pub inline fn getPair(self: Self, subject: Entity, first: Entity, second: Entity, comptime T: type) ?*T {
+        const val = c.ecs_get_id(self.inner, subject, pair(first, second));
+        return @ptrCast(@alignCast(val));
+    }
+
+    pub inline fn getTarget(self: Self, ent: Entity, rel: Entity, index: i32) Entity {
+        return c.ecs_get_target(self.inner, ent, rel, index);
+    }
+
+    pub inline fn getParent(self: Self, ent: Entity) ?Entity {
+        const parent = c.ecs_get_parent(self.inner, ent);
+        if (parent == 0) {
+            return null;
+        } else {
+            return parent;
+        }
+    }
+
+    pub inline fn has(self: Self, ent: Entity, comptime T: type) bool {
+        return c.ecs_has_id(self.inner, ent, typeId(T));
     }
 
     // these two aligned versions of get methods are a hacky workaround for issue with u128 and 16 byte alignemnt in general.
     // TODO: investigate this issue, perhaps it is an issue with the allocator functions?
 
-    pub fn getAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) ?*align(alignment) const T {
+    pub inline fn getAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) ?*align(alignment) const T {
         return @ptrCast(@alignCast(c.ecs_get_id(self.inner, ent, typeId(T))));
     }
 
-    pub fn getMutAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) ?*align(alignment) T {
+    pub inline fn getMutAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) ?*align(alignment) T {
         return @ptrCast(@alignCast(c.ecs_get_mut_id(self.inner, ent, typeId(T))));
     }
 
-    pub fn getName(self: Self, ent: Entity) [:0]const u8 {
+    pub inline fn getName(self: Self, ent: Entity) [:0]const u8 {
         return if (c.ecs_get_name(self.inner, ent)) |name| std.mem.span(name) else "";
     }
 
-    pub fn progress(self: Self, dt: f32) bool {
+    pub inline fn getHierarchyOrder(self: Self, ent: Entity) u32 {
+        return if (self.get(ent, components.HierarchyOrder)) |it| it.value else std.math.maxInt(u32);
+    }
+
+    pub inline fn progress(self: Self, dt: f32) bool {
         return c.ecs_progress(self.inner, dt);
     }
 
-    pub fn query(self: Self, q: *const QueryDesc) *Query {
-        return @ptrCast(c.ecs_query_init(self.inner, q));
+    pub inline fn query(self: Self, q: *const QueryDesc) *Query {
+        return Query.from(c.ecs_query_init(self.inner, q));
     }
 
-    pub fn enable(self: Self, ent: Entity, enabled: bool) void {
+    pub inline fn enable(self: Self, ent: Entity, enabled: bool) void {
         c.ecs_enable(self.inner, ent, enabled);
     }
 
-    pub fn enable_component(self: Self, ent: Entity, comptime T: type, enabled: bool) void {
+    pub inline fn enable_component(self: Self, ent: Entity, comptime T: type, enabled: bool) void {
         c.ecs_enable_id(self.inner, ent, typeId(T), enabled);
+    }
+
+    pub inline fn lookup(self: Self, path: [*:0]const u8) Entity {
+        return c.ecs_lookup(self.inner, path);
+    }
+
+    pub inline fn lookupEx(self: Self, opts: struct {
+        parent: Entity,
+        path: [*:0]const u8,
+        recursive: bool,
+    }) Entity {
+        return c.ecs_lookup_path_w_sep(self.inner, opts.parent, opts.path, ".", null, opts.recursive);
     }
 
     // iterators
 
-    pub fn children(self: Self, ent: Entity) c.ecs_iter_t {
-        return c.ecs_children(self.inner, ent);
+    pub inline fn children(self: Self, ent: Entity) Iterator {
+        return Iterator{ .inner = c.ecs_children(self.inner, ent) };
+    }
+
+    pub fn childrenSorted(self: Self, ent: Entity, allocator: std.mem.Allocator) ![]Entity {
+        var child_it = self.children(ent);
+        defer child_it.deinit();
+
+        // Create an array to collect entities
+        var sorted_children = try std.ArrayList(Entity).initCapacity(allocator, @intCast(child_it.inner.count));
+        while (child_it.next()) {
+            for (0..@intCast(child_it.inner.count)) |i| {
+                try sorted_children.append(child_it.inner.entities[i]);
+            }
+        }
+
+        // Sort using a custom comparison function
+        std.mem.sort(Entity, sorted_children.items, self, struct {
+            pub fn f(ctx: Self, a: Entity, b: Entity) bool {
+                return ctx.getHierarchyOrder(a) < ctx.getHierarchyOrder(b);
+            }
+        }.f);
+
+        return try sorted_children.toOwnedSlice();
+    }
+
+    pub fn changeEntityOrder(self: Self, ent: Entity, new_order: u32, allocator: std.mem.Allocator) !void {
+        // Get the parent of the entity
+        const parent = self.getParent(ent) orelse return;
+
+        // Fetch and sort all children of the parent
+        const sorted_children = try self.childrenSorted(parent, allocator);
+        defer allocator.free(sorted_children);
+
+        // Check if the new order value already exists among the siblings
+        var order_conflict = false;
+        for (sorted_children) |child| {
+            const current_order = if (self.get(child, components.HierarchyOrder)) |it| it.value else null;
+            if (current_order == new_order) {
+                order_conflict = true;
+                break;
+            }
+        }
+
+        // Resolve conflicts by incrementing order values of affected siblings
+        if (order_conflict) {
+            for (sorted_children) |child| {
+                const current_order = self.getHierarchyOrder(child);
+                if (current_order >= new_order) {
+                    self.set(child, components.HierarchyOrder, .{ .value = current_order + 1 });
+                }
+            }
+        }
+
+        // Update the order for the specified entity
+        self.set(ent, components.HierarchyOrder, .{ .value = new_order });
+
+        // Re-sort siblings after resolving order conflicts
+        std.mem.sort(Entity, sorted_children, self, struct {
+            pub fn f(ctx: Self, a: Entity, b: Entity) bool {
+                const ord_a = if (ctx.get(a, components.HierarchyOrder)) |it| it.value else 0;
+                const ord_b = if (ctx.get(b, components.HierarchyOrder)) |it| it.value else 0;
+                return ord_a < ord_b;
+            }
+        }.f);
+
+        // Reassign continuous order values to all children
+        for (sorted_children, 0..) |child, index| {
+            self.set(child, components.HierarchyOrder, .{ .value = @intCast(index) });
+        }
     }
 };
 
@@ -321,10 +473,10 @@ pub fn typeId(comptime T: type) c.ecs_id_t {
     return Reflect(T).id;
 }
 
-pub fn field(it: *c.ecs_iter_t, comptime T: type, comptime alignment: usize, index: i8) ?[]align(alignment) T {
-    if (c.ecs_field_w_size(it, @sizeOf(T), index)) |anyptr| {
+pub fn field(it: *Iterator, comptime T: type, comptime alignment: usize, index: i8) ?[]align(alignment) T {
+    if (c.ecs_field_w_size(it.castMut(), @sizeOf(T), index)) |anyptr| {
         const ptr = @as([*]align(alignment) T, @ptrCast(@alignCast(anyptr)));
-        return ptr[0..@intCast(it.count)];
+        return ptr[0..@intCast(it.inner.count)];
     }
     return null;
 }
@@ -635,7 +787,7 @@ pub fn SystemImpl(comptime fn_system: anytype) type {
             inline for (start_index..fn_type.Fn.params.len) |i| {
                 const p = fn_type.Fn.params[i];
                 const info = @typeInfo(p.type.?);
-                args_tuple[i] = field(it, info.Pointer.child, info.Pointer.alignment, i - start_index).?;
+                args_tuple[i] = field(Iterator.from(it), info.Pointer.child, info.Pointer.alignment, i - start_index).?;
             }
 
             //NOTE: .always_inline seems ok, but unsure. Replace to .auto if it breaks

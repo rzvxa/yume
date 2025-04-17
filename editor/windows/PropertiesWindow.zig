@@ -43,17 +43,16 @@ fn drawProperties(self: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
     defer c.ImGui_PopID();
 
     Editor.instance().editors.editEntityMeta(entity, ctx);
-    c.ImGui_Spacing();
-
     c.ImGui_Separator();
 
-    c.ImGui_Spacing();
-    Editor.instance().editors.editEntityTransform(entity, ctx);
-    c.ImGui_Spacing();
+    for (0..2) |_| c.ImGui_Spacing();
 
-    c.ImGui_Separator();
-
-    c.ImGui_Spacing();
+    if (ctx.world.has(entity, components.TransformMatrix)) {
+        Editor.instance().editors.editEntityTransform(entity, ctx);
+        c.ImGui_Spacing();
+        c.ImGui_Separator();
+        for (0..2) |_| c.ImGui_Spacing();
+    }
 
     const typ = c.ecs_get_type(ctx.world.inner, entity);
     const editor = Editor.instance();
