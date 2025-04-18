@@ -4,6 +4,7 @@ const std = @import("std");
 const ecs = @import("../ecs.zig");
 const GameApp = @import("../GameApp.zig");
 const Assets = @import("../assets.zig").Assets;
+const Dynamic = @import("../serialization/dynamic.zig").Dynamic;
 
 const Uuid = @import("../uuid.zig").Uuid;
 
@@ -24,5 +25,11 @@ pub const Material = extern struct {
         }
         ptr.* = (Assets.getOrLoadMaterial(mat.uuid) catch return false).*;
         return true;
+    }
+
+    pub fn deserialize(self: *align(8) @This(), value: *const Dynamic, _: std.mem.Allocator) !void {
+        const urn = try value.expectString();
+        const uuid = try Uuid.fromUrnSlice(std.mem.span(urn));
+        self.* = (try Assets.getOrLoadMaterial(uuid)).*;
     }
 };

@@ -4,6 +4,7 @@ const ecs = @import("../ecs.zig");
 const GameApp = @import("../GameApp.zig");
 const Component = @import("../scene.zig").Component;
 const typeId = @import("../utils.zig").typeId;
+const Dynamic = @import("../serialization/dynamic.zig").Dynamic;
 const math3d = @import("../math3d.zig");
 const Vec2 = math3d.Vec2;
 const Vec3 = math3d.Vec3;
@@ -63,8 +64,8 @@ pub const Camera = extern struct {
         return "editor://icons/camera.png";
     }
 
-    pub fn default(ptr: *Camera, _: ecs.Entity, _: *GameApp) callconv(.C) bool {
-        ptr.* = .{
+    pub fn default(self: *Camera, _: ecs.Entity, _: *GameApp) callconv(.C) bool {
+        self.* = .{
             .opts = .{
                 .kind = .perspective,
                 .data = .{
@@ -77,6 +78,35 @@ pub const Camera = extern struct {
             },
         };
         return true;
+    }
+
+    pub fn deserialize(self: *@This(), value: *const Dynamic, _: std.mem.Allocator) !void {
+        const obj = try value.expectObject();
+        const kind: CameraKind = blk: {
+            const s = std.mem.span(try (try obj.expectField("type")).value.expectString());
+            if (std.mem.eql(u8, s, "perspective")) {
+                break :blk .perspective;
+            } else if (std.mem.eql(u8, s, "orthographic")) {
+                break :blk .orthographic;
+            }
+            return error.InvalidCameraType;
+        };
+
+        switch (kind) {
+            .perspective => self.* = .{
+                .opts = .{
+                    .kind = kind,
+                    .data = .{
+                        .perspective = .{
+                            .fovy_rad = try (try obj.expectField("fovy_rad")).value.expectNumber(),
+                            .near = try (try obj.expectField("near")).value.expectNumber(),
+                            .far = try (try obj.expectField("far")).value.expectNumber(),
+                        },
+                    },
+                },
+            },
+            .orthographic => @panic("unimplemented orthographic camera deserialization"),
+        }
     }
 
     pub fn makePerspectiveCamera(opts: PerspectiveOptions) Self {

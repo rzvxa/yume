@@ -258,14 +258,9 @@ const Object = struct {
                 return error.UnexpectedToken;
             } else if (std.mem.eql(u8, field_name, "components")) {
                 const dyn = try Dynamic.jsonParse(a, jrs, o);
-                switch (dyn.type) {
-                    .object => {
-                        for (0..dyn.count) |i| {
-                            const field = dyn.value.object[i];
-                            try result.components.put(std.mem.span(field.key), field.value);
-                        }
-                    },
-                    else => return error.UnexpectedToken,
+                const obj = dyn.expect(.object) catch return error.UnexpectedToken;
+                for (obj.fields()) |field| {
+                    try result.components.put(std.mem.span(field.key), field.value);
                 }
             } else if (std.mem.eql(u8, field_name, "children")) {
                 std.debug.assert(try jrs.next() == .array_begin);
@@ -285,116 +280,6 @@ const Object = struct {
                 try jrs.skipValue();
             }
         }
-
-        return result;
-    }
-};
-
-pub const Transform = struct {
-    const Self = @This();
-
-    matrix: Mat4,
-    // after any change to this struct, the user should call `updateMatrices` method to reflect it correctly.
-    raw: struct {
-        position: Vec3,
-        rotation: Vec3,
-        scale: Vec3,
-    },
-
-    pub inline fn position(self: *const Self) Vec3 {
-        return self.raw.position;
-    }
-
-    pub inline fn rotation(self: *const Self) Vec3 {
-        return self.raw.rotation;
-    }
-
-    pub inline fn scale(self: *const Self) Vec3 {
-        return self.raw.scale;
-    }
-
-    pub inline fn setPosition(self: *Self, pos: Vec3) void {
-        self.raw.position = pos;
-    }
-
-    pub inline fn setRotation(self: *Self) Vec3 {
-        return self.raw.rotation;
-    }
-
-    pub inline fn setScale(self: *Self) Vec3 {
-        return self.raw.scale;
-    }
-
-    pub fn fromMatrix(m: Mat4) Self {
-        const parts = m.decompose();
-        var self = Self{
-            .matrix = undefined,
-            .raw = .{
-                .position = parts.translation,
-                .rotation = parts.rotation.toEuler(),
-                .scale = parts.scale,
-            },
-        };
-        self.updateMatrices();
-        return self;
-    }
-
-    pub inline fn getMatrix(self: *const Self) Mat4 {
-        return Mat4.compose(self.position(), Quat.fromEuler(self.rotation()), self.scale());
-    }
-
-    pub inline fn updateMatrices(self: *Self) void {
-        self.matrix = Mat4.compose(self.position(), Quat.fromEuler(self.rotation()), self.scale());
-    }
-
-    pub fn jsonStringify(self: Self, jws: anytype) !void {
-        try jws.beginObject();
-
-        try jws.objectField("position");
-        try jws.write(self.raw.position);
-
-        try jws.objectField("rotation");
-        try jws.write(self.raw.rotation);
-
-        try jws.objectField("scale");
-        try jws.write(self.raw.scale);
-
-        try jws.endObject();
-    }
-
-    pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, o: anytype) !Self {
-        var tk = try jrs.next();
-        if (tk != .object_begin) return error.UnexpectedEndOfInput;
-
-        var result = Self{
-            .matrix = undefined,
-            .raw = undefined,
-        };
-
-        while (true) {
-            tk = try jrs.nextAlloc(a, .alloc_if_needed);
-            if (tk == .object_end) break;
-
-            const field_name = switch (tk) {
-                inline .string, .allocated_string => |slice| slice,
-                else => {
-                    std.debug.print("{}\n", .{tk});
-                    return error.UnexpectedToken;
-                },
-            };
-
-            if (std.mem.eql(u8, field_name, "position")) {
-                result.raw.position = try Vec3.jsonParse(a, jrs, o);
-            } else if (std.mem.eql(u8, field_name, "rotation")) {
-                result.raw.rotation = try Vec3.jsonParse(a, jrs, o);
-            } else if (std.mem.eql(u8, field_name, "scale")) {
-                result.raw.scale = try Vec3.jsonParse(a, jrs, o);
-            } else {
-                try jrs.skipValue();
-            }
-        }
-
-        result.updateMatrices();
 
         return result;
     }

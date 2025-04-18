@@ -15,7 +15,32 @@ pub const Dynamic = extern struct {
         number: f32,
         string: [*:0]u8,
         array: [*]Dynamic,
-        object: [*]Field,
+        object: Fields,
+    };
+    pub const Fields = extern struct {
+        items: [*]Field,
+        len: usize,
+
+        pub inline fn fields(self: *const @This()) []const Field {
+            return self.items[0..self.len];
+        }
+
+        pub fn field(self: *const @This(), name: [*:0]const u8) ?*const Field {
+            for (self.fields()) |*f| {
+                if (std.mem.eql(u8, std.mem.span(f.key), std.mem.span(name))) {
+                    return f;
+                }
+            }
+            return null;
+        }
+
+        pub fn expectField(self: *const @This(), name: [*:0]const u8) !*const Field {
+            if (self.field(name)) |f| {
+                return f;
+            } else {
+                return error.UndefinedField;
+            }
+        }
     };
     pub const Field = extern struct {
         key: [*:0]u8,
@@ -38,6 +63,30 @@ pub const Dynamic = extern struct {
             return @field(self.value, @tagName(ty));
         }
         return error.UnexpectedType;
+    }
+
+    pub inline fn expectNull(self: *const Dynamic) !void {
+        return self.expect(.null);
+    }
+
+    pub inline fn expectBool(self: *const Dynamic) !bool {
+        return self.expect(.bool);
+    }
+
+    pub inline fn expectNumber(self: *const Dynamic) !f32 {
+        return self.expect(.number);
+    }
+
+    pub inline fn expectString(self: *const Dynamic) ![*:0]u8 {
+        return self.expect(.string);
+    }
+
+    pub inline fn expectArray(self: *const Dynamic) ![*]Dynamic {
+        return self.expect(.array);
+    }
+
+    pub inline fn expectObject(self: *const Dynamic) !Fields {
+        return self.expect(.object);
     }
 
     pub fn jsonParse(allocator: std.mem.Allocator, jrs: *std.json.Scanner, o: anytype) !Dynamic {
@@ -88,8 +137,12 @@ pub const Dynamic = extern struct {
                     const value = try Dynamic.jsonParse(allocator, jrs, o);
                     try fields.append(.{ .key = key, .value = value });
                 }
-                const count = fields.items.len;
-                return .{ .type = .object, .value = .{ .object = (try fields.toOwnedSlice()).ptr }, .count = count };
+                const len = fields.items.len;
+                return .{
+                    .type = .object,
+                    .value = .{ .object = .{ .items = (try fields.toOwnedSlice()).ptr, .len = len } },
+                    .count = len,
+                };
             },
             else => return error.UnexpectedToken,
         }

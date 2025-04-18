@@ -7,6 +7,7 @@ const m3d = @import("../math3d.zig");
 const ecs = @import("../ecs.zig");
 const GameApp = @import("../GameApp.zig");
 const Assets = @import("../assets.zig").Assets;
+const Dynamic = @import("../serialization/dynamic.zig").Dynamic;
 
 const Uuid = @import("../uuid.zig").Uuid;
 const obj_loader = @import("../obj_loader.zig");
@@ -117,6 +118,12 @@ pub const Mesh = extern struct {
 
         ptr.* = (Assets.getOrLoadMesh(cube.uuid) catch return false).*;
         return true;
+    }
+
+    pub fn deserialize(self: *align(8) @This(), value: *const Dynamic, _: std.mem.Allocator) !void {
+        const urn = try value.expectString();
+        const uuid = try Uuid.fromUrnSlice(std.mem.span(urn));
+        self.* = (try Assets.getOrLoadMesh(uuid)).*;
     }
 };
 

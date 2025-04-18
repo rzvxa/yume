@@ -198,9 +198,7 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
 
         var iter = decl.components.iterator();
         while (iter.next()) |it| {
-            std.debug.print("{s} =>\n", .{it.key_ptr.*});
             if (self.components.get(it.key_ptr.*)) |def| {
-                std.debug.print("\t{}\n", .{def});
                 if (def.deserialize) |de| {
                     self.world.addId(entity, def.id);
                     const ptr = c.ecs_get_mut_id(self.world.inner, entity, def.id).?;
@@ -216,16 +214,7 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
                 std.debug.print("error: Component {s} not found!\n", .{it.key_ptr.*});
                 return error.FailedToLoadScene;
             }
-            // for (it.value_ptr.value.array[0..it.value_ptr.count]) |val| {
-            //     def.?.deserialize.?()
-            //     std.debug.print("\t {}\n", .{val});
-            // }
         }
-
-        // self.world.set(entity, components.Position, .{ .value = decl.transform.position() });
-        // self.world.set(entity, components.Rotation, .{ .value = decl.transform.rotation() });
-        // self.world.set(entity, components.Scale, .{ .value = decl.transform.scale() });
-        // self.world.set(entity, components.TransformMatrix, .{ .value = decl.transform.getMatrix() });
     }
 }
 
