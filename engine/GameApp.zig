@@ -218,6 +218,14 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
     }
 }
 
+// pub fn serializeScene(self: *Self) !void {
+//     if (self.scene_root == 0) {
+//         return error.SceneRootZero;
+//     }
+//
+//     try self.world.childrenSorted(self.scene_root, self.allocator);
+// }
+
 pub fn registerComponent(self: *Self, comptime T: type) void {
     const comp = self.world.component(T);
     self.components.put(ecs.typeName(T), comp) catch @panic("OOM");

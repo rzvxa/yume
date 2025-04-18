@@ -451,6 +451,10 @@ pub const World = struct {
         return try sorted_children.toOwnedSlice();
     }
 
+    pub fn sortedDfs(self: Self, ent: Entity, allocator: std.mem.Allocator) !SortedDfs {
+        return try SortedDfs.init(allocator, self, ent);
+    }
+
     pub fn changeEntityOrder(self: Self, ent: Entity, new_order: u32, allocator: std.mem.Allocator) !void {
         // Get the parent of the entity
         const parent = self.getParent(ent) orelse return;
@@ -560,6 +564,63 @@ pub fn ids(comptime N: usize, args: [N]c.ecs_id_t) [*c]c.ecs_id_t {
     result[args.len] = 0;
     return result[0..];
 }
+
+pub const SortedDfs = struct {
+    const Self = @This();
+
+    world: World,
+    stack: std.ArrayList(Entity),
+
+    pub fn init(allocator: std.mem.Allocator, world: World, root: Entity) !Self {
+        var self = Self{
+            .world = world,
+            .stack = try std.ArrayList(Entity).initCapacity(allocator, 1),
+        };
+        self.stack.appendAssumeCapacity(root);
+        return self;
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.stack.deinit();
+    }
+
+    pub fn next(self: *Self) !?Entity {
+        if (self.stack.items.len == 0) return null;
+
+        const ent = self.stack.pop();
+        var child_it = self.world.children(ent);
+        defer child_it.deinit();
+
+        // Create an array to collect entities
+        var sorted_children = try std.ArrayList(Entity).initCapacity(self.stack.allocator, @intCast(child_it.inner.count));
+        while (child_it.next()) {
+            for (0..@intCast(child_it.inner.count)) |i| {
+                try sorted_children.append(child_it.inner.entities[i]);
+            }
+        }
+
+        // Sort using a custom comparison function
+        std.mem.sort(Entity, sorted_children.items, self.world, struct {
+            pub fn f(ctx: World, a: Entity, b: Entity) bool {
+                return ctx.getHierarchyOrder(a) < ctx.getHierarchyOrder(b);
+            }
+        }.f);
+
+        try self.stack.appendSlice(try sorted_children.toOwnedSlice());
+
+        return ent;
+    }
+
+    // drains the iterator and returns all the items, calling deinit on the iterator is safe but unsavory
+    pub fn collect(self: *Self) ![]Entity {
+        var collected = std.ArrayList(Entity).init(self.stack.allocator);
+        while (try self.next()) |nx| {
+            try collected.append(nx);
+        }
+        self.stack.clearAndFree();
+        return collected.items;
+    }
+};
 
 // called on first world initialization, setting all static values
 fn staticEsqueInitializer() void {
