@@ -7,8 +7,6 @@ const components = @import("yume").components;
 
 const GameApp = @import("yume").GameApp;
 const Uuid = @import("yume").Uuid;
-const Object = @import("yume").Object;
-const Component = @import("yume").Component;
 const MeshRenderer = @import("yume").MeshRenderer;
 const EntityMetaEditor = @import("entity.zig");
 const ObjectTransformEditor = @import("transform.zig");

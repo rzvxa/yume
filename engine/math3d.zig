@@ -155,6 +155,18 @@ pub const Vec3 = extern struct {
 
         return fromArray(xyz);
     }
+
+    pub fn deserialize(self: *@This(), value: *const @import("serialization/dynamic.zig").Dynamic, _: std.mem.Allocator) !void {
+        if (value.type != .array or value.count != 3) {
+            return error.UnexpectedValue;
+        }
+
+        self.* = Vec3.make(
+            try value.value.array[0].expect(.number),
+            try value.value.array[1].expect(.number),
+            try value.value.array[2].expect(.number),
+        );
+    }
 };
 
 pub const Vec4 = extern struct {
@@ -215,6 +227,19 @@ pub const Vec4 = extern struct {
 
     pub inline fn dot(a: Self, b: Self) f32 {
         return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+    }
+
+    pub fn deserialize(self: *@This(), value: *const @import("serialization/dynamic.zig").Dynamic, _: std.mem.Allocator) !void {
+        if (value.type != .array or value.count != 4) {
+            return error.UnexpectedValue;
+        }
+
+        self.* = Vec4.make(
+            try value.value.array[0].expect(.number),
+            try value.value.array[1].expect(.number),
+            try value.value.array[2].expect(.number),
+            try value.value.array[3].expect(.number),
+        );
     }
 };
 
@@ -679,6 +704,17 @@ pub const Mat4 = extern union {
         // Extract rotation quaternion
         const rot = Quat.fromMat4(m);
         return .{ .translation = t, .rotation = rot, .scale = s };
+    }
+
+    pub fn deserialize(self: *@This(), value: *const @import("serialization/dynamic.zig").Dynamic, allocator: std.mem.Allocator) !void {
+        if (value.type != .array or value.count != 4) {
+            return error.UnexpectedValue;
+        }
+
+        try Vec4.deserialize(&self.vec4[0], &value.value.array[0], allocator);
+        try Vec4.deserialize(&self.vec4[1], &value.value.array[1], allocator);
+        try Vec4.deserialize(&self.vec4[2], &value.value.array[2], allocator);
+        try Vec4.deserialize(&self.vec4[3], &value.value.array[3], allocator);
     }
 };
 

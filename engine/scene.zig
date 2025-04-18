@@ -1,11 +1,11 @@
 const std = @import("std");
 
+const Dynamic = @import("serialization/dynamic.zig").Dynamic;
 const Uuid = @import("uuid.zig").Uuid;
 const Vec3 = @import("math3d.zig").Vec3;
 const Mat4 = @import("math3d.zig").Mat4;
 const Quat = @import("math3d.zig").Quat;
 const utils = @import("utils.zig");
-// const MeshRenderer = @import("components/MeshRenderer.zig");
 const Camera = @import("components/camera.zig").Camera;
 const BoundingBox = @import("components/mesh.zig").BoundingBox;
 
@@ -13,64 +13,31 @@ pub const Scene = struct {
     const Self = @This();
 
     root: *Object,
-    main_camera: ?*Camera = null,
-    // renderables: std.ArrayList(*MeshRenderer),
-    live_object: std.ArrayList(*Object),
+    arena: *std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) !*Self {
         const self = try allocator.create(Self);
+
+        var arena = try allocator.create(std.heap.ArenaAllocator);
+        arena.* = std.heap.ArenaAllocator.init(allocator);
+        const a = arena.allocator();
+
         self.* = .{
-            .allocator = allocator,
-            // .renderables = std.ArrayList(*MeshRenderer).init(allocator),
-            .live_object = std.ArrayList(*Object).init(allocator),
+            .arena = arena,
+            .allocator = a,
             .root = undefined,
         };
-        self.root = Object.create(self, try allocator.dupeZ(u8, "root"), Mat4.IDENTITY) catch @panic("OOM");
-        try self.live_object.append(self.root.ref());
+        self.root = Object.create(self, try a.dupeZ(u8, "root")) catch @panic("OOM");
 
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        // self.renderables.deinit();
-        if (self.main_camera) |main_camera| {
-            main_camera.object.deref();
-            self.main_camera = null;
-        }
-        self.root.clear(true);
-        self.root.deref();
-        for (self.live_object.items) |obj| {
-            if (obj.refc > 1) {
-                std.log.debug("meamory leak! obj name: {s}, refc: {}", .{ obj.name, obj.refc - 1 });
-                @panic("meamory leak!");
-            }
-            obj.deref();
-        }
-        self.live_object.deinit();
-        self.allocator.destroy(self);
-    }
-
-    pub fn newObject(self: *Scene, options: struct {
-        name: ?[:0]u8 = null,
-        parent: ?*Object = null,
-        transform: Mat4 = Mat4.IDENTITY,
-    }) !*Object {
-        const parent = blk: {
-            if (options.parent) |parent| {
-                if (parent.scene != self) {
-                    return error.InvalidParent;
-                }
-                break :blk parent;
-            } else {
-                break :blk self.root;
-            }
-        };
-        const name = if (options.name) |n| n else parent.scene.allocator.dupeZ(u8, "Object") catch @panic("OOM");
-        const obj = Object.create(self, name, options.transform) catch @panic("OOM");
-        self.live_object.append(obj) catch @panic("OOM");
-        parent.addChildren(obj);
-        return obj.ref();
+        const allocator = self.arena.child_allocator;
+        self.arena.deinit();
+        allocator.destroy(self.arena);
+        allocator.destroy(self);
     }
 
     pub fn dfs(self: *Scene) std.mem.Allocator.Error!Dfs {
@@ -91,15 +58,22 @@ pub const Scene = struct {
         if (tk != .object_begin) return error.UnexpectedEndOfInput;
 
         var result = try allocator.create(Self);
+        errdefer allocator.destroy(result);
+
+        var arena = try allocator.create(std.heap.ArenaAllocator);
+        errdefer allocator.destroy(arena);
+        arena.* = std.heap.ArenaAllocator.init(allocator);
+        errdefer arena.deinit();
+        const a = arena.allocator();
+
         result.* = Self{
-            .allocator = allocator,
-            // .renderables = std.ArrayList(*MeshRenderer).init(allocator),
-            .live_object = std.ArrayList(*Object).init(allocator),
+            .arena = arena,
+            .allocator = a,
             .root = undefined,
         };
 
         while (true) {
-            tk = try jrs.nextAlloc(allocator, .alloc_if_needed);
+            tk = try jrs.nextAlloc(a, .alloc_if_needed);
             if (tk == .object_end) break;
 
             const field_name = switch (tk) {
@@ -111,9 +85,9 @@ pub const Scene = struct {
             };
 
             if (std.mem.eql(u8, field_name, "root")) {
-                var ptrmap = std.AutoHashMap(Uuid, *anyopaque).init(allocator);
+                var ptrmap = std.AutoHashMap(Uuid, *anyopaque).init(a);
                 defer ptrmap.deinit();
-                result.root = try Object.jsonParseGraph(allocator, jrs, o, .{
+                result.root = try Object.jsonParseGraph(a, jrs, o, .{
                     .scene = result,
                     .ptrmap = &ptrmap,
                 });
@@ -143,105 +117,46 @@ pub const Dfs = struct {
         var self = Self{
             .stack = try std.ArrayList(*Object).initCapacity(allocator, 1),
         };
-        self.stack.appendAssumeCapacity(root.ref());
+        self.stack.appendAssumeCapacity(root);
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        for (self.stack.items) |o| {
-            o.deinit();
-        }
         self.stack.deinit();
     }
 
-    // the caller is responsible to deref the returned object
     pub fn next(self: *Self) !?*Object {
         if (self.stack.items.len == 0) return null;
 
         const obj = self.stack.pop();
         for (obj.children.items) |o| {
-            try self.stack.append(o.ref());
+            try self.stack.append(o);
         }
         return obj;
     }
 };
 
-const ComponentDeinitializer = struct {
-    ptr: *anyopaque,
-    deinitalizer: *const fn (allocator: std.mem.Allocator, ptr: *anyopaque) void,
-};
-
-pub const Object = struct {
+const Object = struct {
     const Self = @This();
-
-    refc: u32 = 1,
 
     uuid: Uuid,
     name: [:0]u8,
-    transform: Transform,
     parent: ?*Object = null,
     children: std.ArrayList(*Object),
-    components: std.ArrayList(Component),
-    components_deinit_handles: std.ArrayList(ComponentDeinitializer),
+    components: std.StringArrayHashMap(Component),
     scene: *Scene,
 
-    pub fn create(scene: *Scene, name: [:0]u8, transform: Mat4) !*Object {
+    fn create(scene: *Scene, name: [:0]u8) !*Object {
         const self = try scene.allocator.create(Self);
         self.* = .{
             .uuid = Uuid.new(),
             .name = name,
-            .transform = Transform.fromMatrix(transform),
             .children = std.ArrayList(*Object).init(scene.allocator),
-            .components = std.ArrayList(Component).init(scene.allocator),
-            .components_deinit_handles = std.ArrayList(ComponentDeinitializer).init(scene.allocator),
+            .components = std.StringArrayHashMap(Component).init(scene.allocator),
 
             .scene = scene,
         };
         return self;
-    }
-
-    pub fn ref(self: *Self) *Self {
-        self.refc += 1;
-        return self;
-    }
-
-    // returns true if we had the last reference and object destroyed.
-    pub fn deref(self: *Self) void {
-        self.refc -= 1;
-        if (self.refc == 0) {
-            self.deinit();
-        }
-    }
-
-    pub fn clear(self: *Self, recursive: bool) void {
-        var i: usize = self.children.items.len;
-        while (i > 0) {
-            i -= 1;
-            const child = self.children.items[i];
-            if (recursive) {
-                child.clear(true);
-            }
-            self.removeChildren(child);
-        }
-    }
-
-    fn deinit(self: *Self) void {
-        var i: usize = self.children.items.len;
-        while (i > 0) {
-            i -= 1;
-            self.removeChildren(self.children.items[i]);
-        }
-        self.children.deinit();
-        for (self.components.items) |component| {
-            component.deinit(component.ptr);
-        }
-        self.components.deinit();
-        for (self.components_deinit_handles.items) |handle| {
-            handle.deinitalizer(self.scene.allocator, handle.ptr);
-        }
-        self.components_deinit_handles.deinit();
-        self.scene.allocator.free(self.name);
-        self.scene.allocator.destroy(self);
     }
 
     pub fn findChildren(self: *Self, obj: *Object) ?usize {
@@ -251,67 +166,6 @@ pub const Object = struct {
             }
         }
         return null;
-    }
-
-    pub fn insertChildren(self: *Self, i: usize, obj: *Object) void {
-        std.debug.assert(obj.parent != self);
-        _ = obj.ref();
-        if (obj.parent) |old_parent| {
-            old_parent.removeChildren(obj);
-        }
-        obj.parent = self;
-        self.children.insert(i, obj) catch @panic("OOM");
-    }
-
-    pub fn swapChildrens(self: *Self, i: usize, j: usize) void {
-        std.debug.assert(i != j);
-        const tmp = self.children.items[i];
-        self.children.items[i] = self.children.items[j];
-        self.children.items[j] = tmp;
-    }
-
-    pub inline fn addChildren(self: *Self, obj: *Object) void {
-        self.insertChildren(self.children.items.len, obj);
-    }
-
-    pub fn removeChildren(self: *Self, obj: *Object) void {
-        std.debug.assert(obj.parent == self);
-        const index: usize = self.findChildren(obj) orelse @panic("not found");
-        _ = self.children.orderedRemove(index);
-        obj.parent = null;
-        obj.deref();
-    }
-
-    pub fn getComponent(self: *Self, comptime C: type) ?*C {
-        for (self.components.items) |comp| {
-            if (comp.type_id == utils.typeId(C)) {
-                return @as(*C, @ptrCast(@alignCast(comp.ptr)));
-            }
-        }
-        return null;
-    }
-
-    pub fn translate(self: *Self, translation: Mat4) void {
-        self.transform = self.transform.mul(translation);
-        for (self.components) |component| {
-            component.onTransformChange(self.transform);
-        }
-        for (self.children.items) |children| {
-            children.setTransform(translation);
-        }
-    }
-
-    pub fn bounds(self: *const Self) BoundingBox {
-        var bb = BoundingBox{
-            .mins = Vec3.scalar(std.math.floatMax(f32)),
-            .maxs = Vec3.scalar(std.math.floatMin(f32)),
-        };
-        for (self.components.items) |component| {
-            if (component.bounds) |b| {
-                bb.accumulateBB(b(component.ptr));
-            }
-        }
-        return bb.translate(self.transform.matrix);
     }
 
     pub fn jsonStringify(self: Self, jws: anytype) !void {
@@ -326,9 +180,6 @@ pub const Object = struct {
 
         try jws.objectField("name");
         try jws.write(self.name);
-
-        try jws.objectField("transform");
-        try jws.write(self.transform);
 
         try jws.objectField("parent");
         try jws.write(self.parent);
@@ -361,11 +212,9 @@ pub const Object = struct {
         const result = try a.create(Object);
         result.* = .{
             .uuid = .{ .raw = 0 },
-            .name = undefined,
-            .transform = undefined,
+            .name = try a.allocSentinel(u8, 0, 0),
             .children = std.ArrayList(*Object).init(a),
-            .components = std.ArrayList(Component).init(a),
-            .components_deinit_handles = std.ArrayList(ComponentDeinitializer).init(a),
+            .components = std.StringArrayHashMap(Component).init(a),
 
             .scene = ctx.scene,
         };
@@ -393,8 +242,6 @@ pub const Object = struct {
                         return error.UnexpectedToken;
                     },
                 };
-            } else if (std.mem.eql(u8, field_name, "transform")) {
-                result.transform = try Transform.jsonParse(a, jrs, o);
             } else if (std.mem.eql(u8, field_name, "parent")) {
                 if (try jrs.peekNextTokenType() == .null) {
                     _ = try jrs.next();
@@ -409,6 +256,17 @@ pub const Object = struct {
                 }
                 std.debug.print("Failed to resolve reference {s}", .{parent_id.urn()});
                 return error.UnexpectedToken;
+            } else if (std.mem.eql(u8, field_name, "components")) {
+                const dyn = try Dynamic.jsonParse(a, jrs, o);
+                switch (dyn.type) {
+                    .object => {
+                        for (0..dyn.count) |i| {
+                            const field = dyn.value.object[i];
+                            try result.components.put(std.mem.span(field.key), field.value);
+                        }
+                    },
+                    else => return error.UnexpectedToken,
+                }
             } else if (std.mem.eql(u8, field_name, "children")) {
                 std.debug.assert(try jrs.next() == .array_begin);
                 if (result.uuid.raw == 0) {
@@ -542,29 +400,4 @@ pub const Transform = struct {
     }
 };
 
-pub const Component = struct {
-    type_id: usize,
-    name: [:0]const u8,
-    enable: bool = true,
-    ptr: *anyopaque,
-    uuid: Uuid = undefined,
-    update: *const fn (self: *anyopaque, dt: f32) void = struct {
-        fn noop(_: *anyopaque, _: f32) void {}
-    }.noop,
-    onTransformChange: *const fn (self: *anyopaque, transform: Mat4) void = struct {
-        fn noop(_: *anyopaque, _: Mat4) void {}
-    }.noop,
-    bounds: ?*const fn (_: *anyopaque) BoundingBox = null,
-    deinit: *const fn (_: *anyopaque) void = struct {
-        fn noop(_: *anyopaque) void {}
-    }.noop,
-};
-
-pub const ComponentDefinition = struct {
-    type_id: usize,
-    name: [:0]const u8,
-    create_default: *const fn (allocator: std.mem.Allocator, obj: *Object) anyerror!Component,
-    destroy: *const fn (allocator: std.mem.Allocator, ptr: *anyopaque) void,
-    fromJson: *const fn (s: []const u8, ptr: *anyopaque) anyerror!void,
-    toJson: *const fn (self: *anyopaque) []u8,
-};
+pub const Component = Dynamic;

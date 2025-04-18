@@ -8,7 +8,6 @@ const ecs = @import("yume").ecs;
 const Vec3 = @import("yume").Vec3;
 const Engine = @import("yume").VulkanEngine;
 const GameApp = @import("yume").GameApp;
-const Object = @import("yume").scene_graph.Object;
 const components = @import("yume").components;
 const AllocatedBuffer = @import("yume").AllocatedBuffer;
 
@@ -47,7 +46,7 @@ render_system: ecs.Entity,
 
 pub fn init(ctx: *GameApp) Self {
     return .{
-        .render_system = ctx.world.systemEx(.{
+        .render_system = ctx.world.systemEx(&.{
             .entity = ctx.world.create("Editor Render System"),
             .query = std.mem.zeroInit(c.ecs_query_desc_t, .{ .terms = .{
                 .{ .id = ecs.typeId(components.TransformMatrix) },

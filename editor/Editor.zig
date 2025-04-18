@@ -26,13 +26,13 @@ const Texture = textures.Texture;
 
 const Camera = @import("yume").Camera;
 const Scene = @import("yume").scene_graph.Scene;
-const Object = @import("yume").scene_graph.Object;
 const MeshRenderer = @import("yume").MeshRenderer;
 const ScanCode = @import("yume").inputs.ScanCode;
 const MouseButton = @import("yume").inputs.MouseButton;
 const InputsContext = @import("yume").inputs.InputContext;
 
 const ecs = @import("yume").ecs;
+const components = @import("yume").components;
 const systems = @import("yume").systems;
 const GameApp = @import("yume").GameApp;
 const Vec3 = @import("yume").math3d.Vec3;
@@ -124,6 +124,31 @@ pub fn init(ctx: *GameApp) *Self {
     ctx.world.enable(ecs.typeId(Playing), false);
     const tmu_entity = ctx.world.systemFn("transform-matrix-update", ecs.systems.PostUpdate, systems.transformMatrices);
     ctx.world.add(tmu_entity, RunInEditor);
+    // _ = ctx.world.observerFn(&ecs.ObserverDesc{
+    //     .query = std.mem.zeroInit(ecs.QueryDesc, .{ .terms = .{
+    //         .{ .id = ecs.typeId(components.Position) },
+    //         .{ .id = ecs.typeId(components.Rotation) },
+    //         .{ .id = ecs.typeId(components.Scale) },
+    //         .{ .id = ecs.typeId(components.TransformMatrix) },
+    //     } }),
+    //     .events = [_]ecs.Entity{c.EcsOnSet} ++ [_]ecs.Entity{0} ** 7,
+    //     .callback = &struct {
+    //         fn f(it: *ecs.Iter) callconv(.C) void {
+    //             if (it.event_id == ecs.typeId(components.Position) or
+    //                 it.event_id == ecs.typeId(components.Rotation) or
+    //                 it.event_id == ecs.typeId(components.Scale))
+    //             {
+    //                 const positions = ecs.field(@ptrCast(it), components.Position, @alignOf(components.Position), 0).?;
+    //                 const rotations = ecs.field(@ptrCast(it), components.Rotation, @alignOf(components.Rotation), 1).?;
+    //                 const scales = ecs.field(@ptrCast(it), components.Scale, @alignOf(components.Scale), 2).?;
+    //                 const transformMatrices = ecs.field(@ptrCast(it), components.TransformMatrix, @alignOf(components.TransformMatrix), 3).?;
+    //                 for (positions, rotations, scales, transformMatrices) |p, r, s, *t| {
+    //                     t.value = Mat4.compose(p.value, Quat.fromEuler(r.value), s.value);
+    //                 }
+    //             }
+    //         }
+    //     }.f,
+    // });
 
     const home_dir = std.fs.selfExeDirPathAlloc(ctx.allocator) catch @panic("OOM");
     defer ctx.allocator.free(home_dir);
@@ -149,17 +174,17 @@ pub fn init(ctx: *GameApp) *Self {
 
     if (EditorDatabase.storage().last_open_project) |lop| {
         Project.load(ctx.allocator, lop) catch {
-            std.debug.print("Failed to load previously loaded project {s}", .{lop});
+            std.debug.print("Failed to load previously loaded project {s}\n", .{lop});
         };
 
         if (EditorDatabase.storage().last_open_scene) |los| {
-            ctx.loadScene(los) catch {
-                std.debug.print("Failed to load previously loaded project {s}", .{lop});
+            ctx.loadScene(los) catch |e| {
+                std.debug.print("Failed to load previously loaded project {s} {?}\n", .{ lop, e });
             };
         }
     }
 
-    render_system = ctx.world.systemEx(.{
+    render_system = ctx.world.systemEx(&.{
         .entity = ctx.world.create("Render"),
         .query = std.mem.zeroInit(c.ecs_query_desc_t, .{ .terms = .{
             .{ .id = c.EcsAny },
@@ -187,7 +212,7 @@ pub fn deinit(self: *Self, ctx: *GameApp) void {
     }
     check_vk(c.vkDeviceWaitIdle(ctx.engine.device)) catch @panic("Failed to wait for device idle");
     c.cImGui_ImplVulkan_Shutdown();
-    EditorDatabase.flush() catch std.debug.print("Failed to flush the editor database", .{});
+    EditorDatabase.flush() catch std.debug.print("Failed to flush the editor database\n", .{});
     EditorDatabase.deinit();
 }
 

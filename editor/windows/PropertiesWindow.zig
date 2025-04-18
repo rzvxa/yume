@@ -3,7 +3,6 @@ const std = @import("std");
 
 const Uuid = @import("yume").Uuid;
 const GameApp = @import("yume").GameApp;
-const Object = @import("yume").scene_graph.Object;
 const ecs = @import("yume").ecs;
 const components = @import("yume").components;
 const utils = @import("yume").utils;

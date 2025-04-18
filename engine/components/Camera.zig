@@ -1,10 +1,8 @@
 const std = @import("std");
 
 const ecs = @import("../ecs.zig");
-const Object = @import("../scene.zig").Object;
 const GameApp = @import("../GameApp.zig");
 const Component = @import("../scene.zig").Component;
-const ComponentDefinition = @import("../scene.zig").ComponentDefinition;
 const typeId = @import("../utils.zig").typeId;
 const math3d = @import("../math3d.zig");
 const Vec2 = math3d.Vec2;
@@ -55,7 +53,6 @@ pub const CameraOptions = extern struct {
 pub const Camera = extern struct {
     const Self = @This();
 
-    object: *Object = undefined,
     opts: CameraOptions,
 
     view: Mat4 = Mat4.make(Vec4.ZERO, Vec4.ZERO, Vec4.ZERO, Vec4.ZERO),
@@ -64,15 +61,6 @@ pub const Camera = extern struct {
 
     pub fn editorIcon() [*:0]const u8 {
         return "editor://icons/camera.png";
-    }
-
-    pub fn init(object: *Object, opts: CameraOptions) Self {
-        var self = switch (opts.kind) {
-            .perspective => makePerspectiveCamera(opts.data.perspective),
-            .orthographic => makeOrthographicCamera(opts.data.orthographic),
-        };
-        self.object = object;
-        return self;
     }
 
     pub fn default(ptr: *Camera, _: ecs.Entity, _: *GameApp) callconv(.C) bool {
@@ -261,17 +249,6 @@ pub const Camera = extern struct {
             .type_id = typeId(Self),
             .name = "Camera",
             .ptr = self,
-        };
-    }
-
-    pub fn definition() ComponentDefinition {
-        return .{
-            .type_id = typeId(Self),
-            .name = "Camera",
-            .create_default = @ptrCast(&Self.default),
-            .destroy = @ptrCast(&Self.destroy),
-            .fromJson = @ptrCast(&Self.fromJson),
-            .toJson = @ptrCast(&Self.toJson),
         };
     }
 };

@@ -34,18 +34,21 @@ pub fn edit(_: *Self, entity: ecs.Entity, ctx: *GameApp) void {
     if (imutils.collapsingHeaderWithCheckBox("Transform", null, c.ImGuiTreeNodeFlags_DefaultOpen)) {
         if (position) |pos| {
             if (inputVec3("Position", &pos.value, 0.01)) {
+                ctx.world.modified(entity, components.Position);
                 changed = true;
             }
         }
 
         if (rotation) |rot| {
             if (inputVec3("Rotation", &rot.value, 1)) {
+                ctx.world.modified(entity, components.Rotation);
                 changed = true;
             }
         }
 
         if (scale) |skale| {
             if (inputVec3("Scale", &skale.value, 0.01)) {
+                ctx.world.modified(entity, components.Scale);
                 changed = true;
             }
         }

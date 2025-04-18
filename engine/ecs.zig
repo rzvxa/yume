@@ -4,10 +4,10 @@ const std = @import("std");
 const GameApp = @import("GameApp.zig");
 const Uuid = @import("uuid.zig").Uuid;
 const components = @import("components.zig");
+const Dynamic = @import("serialization/dynamic.zig").Dynamic;
 
 pub const TypeId = c.ecs_id_t;
 pub const Entity = c.ecs_entity_t;
-pub const System = c.ecs_system_desc_t;
 pub const QueryDesc = c.ecs_query_desc_t;
 
 pub const Query = extern struct {
@@ -53,6 +53,10 @@ pub const Iterator = extern struct {
 
     pub inline fn next(self: *Self) bool {
         return c.ecs_iter_next(self.castMut());
+    }
+
+    pub inline fn changed(self: *Self) bool {
+        return c.ecs_iter_changed(self.castMut());
     }
 
     pub inline fn cast(self: *const Self) *const c.ecs_iter_t {
@@ -147,12 +151,21 @@ pub const World = struct {
                 }.f else null,
                 else => null,
             },
+            .deserialize = switch (@typeInfo(T)) {
+                .Struct => if (@hasDecl(T, "deserialize")) struct {
+                    pub fn f(ptr: *anyopaque, value: *const Dynamic, allocator: *std.mem.Allocator) callconv(.C) bool {
+                        T.deserialize(@ptrCast(@alignCast(ptr)), value, allocator.*) catch return false;
+                        return true;
+                    }
+                }.f else null,
+                else => null,
+            },
         };
     }
 
-    pub fn autoSystemFnDesc(comptime fn_system: anytype) c.ecs_system_desc_t {
+    pub fn autoFunctionTerms(comptime func: anytype) [32]c.ecs_term_t {
         var terms = std.mem.zeroes([32]c.ecs_term_t);
-        const fn_type = @typeInfo(@TypeOf(fn_system)).Fn;
+        const fn_type = @typeInfo(@TypeOf(func)).Fn;
         const has_it_param = comptime hasItParam(fn_type.params);
         const start_index = if (has_it_param) 1 else 0;
         inline for (start_index..fn_type.params.len) |i| {
@@ -161,14 +174,18 @@ pub const World = struct {
             const inout = if (param_type_info.is_const) c.EcsIn else c.EcsInOut;
             terms[i - start_index] = .{ .id = typeId(param_type_info.child), .inout = inout };
         }
-        return systemFnDesc(fn_system, terms);
+        return terms;
     }
 
-    pub fn systemFnDesc(comptime fn_system: anytype, terms: [32]c.ecs_term_t) c.ecs_system_desc_t {
+    pub fn autoSystemFnDesc(comptime fn_system: anytype) SystemDesc {
+        return systemFnDesc(fn_system, autoFunctionTerms(fn_system));
+    }
+
+    pub fn systemFnDesc(comptime fn_system: anytype, terms: [32]c.ecs_term_t) SystemDesc {
         const system_struct = SystemImpl(fn_system);
 
-        var system_desc = System{};
-        system_desc.callback = system_struct.exec;
+        var system_desc = SystemDesc{};
+        system_desc.callback = @ptrCast(&system_struct.exec);
         system_desc.query.terms = terms;
 
         return system_desc;
@@ -188,7 +205,7 @@ pub const World = struct {
         self: Self,
         name: [*:0]const u8,
         phase: Entity,
-        system_desc: *c.ecs_system_desc_t,
+        system_desc: *const SystemDesc,
     ) Entity {
         var entity_desc = c.ecs_entity_desc_t{};
         entity_desc.id = c.ecs_new(self.inner);
@@ -197,12 +214,42 @@ pub const World = struct {
         const second = phase;
         entity_desc.add = &[_]c.ecs_id_t{ first, second, 0 };
 
+        var desc = system_desc.*;
+        desc.entity = self.createEx(&entity_desc);
+        return self.systemEx(&desc);
+    }
+
+    pub inline fn systemEx(self: Self, desc: *const SystemDesc) Entity {
+        return mkp_system_init(self.inner, desc);
+    }
+
+    pub fn observerFn(
+        self: Self,
+        name: [*:0]const u8,
+        // events: [8]Event,
+        comptime fn_observer: anytype,
+    ) Entity {
+        var desc = autoSystemFnDesc(fn_observer);
+        return self.system(name, 0, &desc);
+    }
+
+    pub fn observer(
+        self: Self,
+        name: [*:0]const u8,
+        events: [8]Event,
+        system_desc: *c.ecs_system_desc_t,
+    ) Entity {
+        var entity_desc = c.ecs_entity_desc_t{};
+        entity_desc.id = c.ecs_new(self.inner);
+        entity_desc.name = name;
+        _ = events;
+
         system_desc.entity = self.createEx(&entity_desc);
         return c.ecs_system_init(self.inner, system_desc);
     }
 
-    pub inline fn systemEx(self: Self, desc: SystemDesc) Entity {
-        return mkp_system_init(self.inner, &desc);
+    pub inline fn observerEx(self: Self, o: *const ObserverDesc) Entity {
+        return c.ecs_observer_init(self.inner, @ptrCast(o));
     }
 
     pub inline fn entity(self: Self, name: [*:0]const u8) Entity {
@@ -352,6 +399,10 @@ pub const World = struct {
         return Query.from(c.ecs_query_init(self.inner, q));
     }
 
+    pub inline fn modified(self: Self, ent: Entity, comptime T: type) void {
+        c.ecs_modified_id(self.inner, ent, typeId(T));
+    }
+
     pub inline fn enable(self: Self, ent: Entity, enabled: bool) void {
         c.ecs_enable(self.inner, ent, enabled);
     }
@@ -459,6 +510,7 @@ pub const ComponentDef = extern struct {
     size: usize,
     alignment: usize,
     default: ?*const fn (self: *anyopaque, entity: Entity, ctx: *GameApp, resourceResolver: ResourceResolver) callconv(.C) bool,
+    deserialize: ?*const fn (self: *anyopaque, value: *const Dynamic, allocator: *std.mem.Allocator) callconv(.C) bool,
 };
 
 fn Reflect(comptime T: type) type {
@@ -561,13 +613,13 @@ fn staticEsqueInitializer() void {
     identifier_tags.Symbol = c.EcsSymbol;
     identifier_tags.Alias = c.EcsAlias;
 
-    events.OnAdd = c.EcsOnAdd;
-    events.OnRemove = c.EcsOnRemove;
-    events.OnSet = c.EcsOnSet;
-    events.OnDelete = c.EcsOnDelete;
-    events.OnDeleteTarget = c.EcsOnDeleteTarget;
-    events.OnTableCreate = c.EcsOnTableCreate;
-    events.OnTableDelete = c.EcsOnTableDelete;
+    std.debug.assert(@intFromEnum(Event.add) == c.EcsOnAdd);
+    std.debug.assert(@intFromEnum(Event.remove) == c.EcsOnRemove);
+    std.debug.assert(@intFromEnum(Event.set) == c.EcsOnSet);
+    std.debug.assert(@intFromEnum(Event.delete) == c.EcsOnDelete);
+    std.debug.assert(@intFromEnum(Event.deleteTarget) == c.EcsOnDeleteTarget);
+    std.debug.assert(@intFromEnum(Event.tableCreate) == c.EcsOnTableCreate);
+    std.debug.assert(@intFromEnum(Event.tableDelete) == c.EcsOnTableDelete);
 
     actions.Remove = c.EcsRemove;
     actions.Delete = c.EcsDelete;
@@ -676,15 +728,14 @@ pub const identifier_tags = struct {
     pub var Alias: Entity = undefined;
 };
 
-// Events
-pub const events = struct {
-    pub var OnAdd: Entity = undefined;
-    pub var OnRemove: Entity = undefined;
-    pub var OnSet: Entity = undefined;
-    pub var OnDelete: Entity = undefined;
-    pub var OnDeleteTarget: Entity = undefined;
-    pub var OnTableCreate: Entity = undefined;
-    pub var OnTableDelete: Entity = undefined;
+pub const Event = enum(Entity) {
+    add = c.FLECS_HI_COMPONENT_ID + 40,
+    remove = c.FLECS_HI_COMPONENT_ID + 41,
+    set = c.FLECS_HI_COMPONENT_ID + 42,
+    delete = c.FLECS_HI_COMPONENT_ID + 43,
+    deleteTarget = c.FLECS_HI_COMPONENT_ID + 44,
+    tableCreate = c.FLECS_HI_COMPONENT_ID + 45,
+    tableDelete = c.FLECS_HI_COMPONENT_ID + 46,
 };
 
 // Actions
@@ -822,6 +873,26 @@ pub const SystemDesc = extern struct {
     tick_source: c.ecs_entity_t = @import("std").mem.zeroes(c.ecs_entity_t),
     multi_threaded: bool = @import("std").mem.zeroes(bool),
     immediate: bool = @import("std").mem.zeroes(bool),
+};
+
+pub const ObserverDesc = extern struct {
+    _canary: i32 = @import("std").mem.zeroes(i32),
+    entity: c.ecs_entity_t = @import("std").mem.zeroes(c.ecs_entity_t),
+    query: c.ecs_query_desc_t = @import("std").mem.zeroes(c.ecs_query_desc_t),
+    events: [8]c.ecs_entity_t = @import("std").mem.zeroes([8]c.ecs_entity_t),
+    yield_existing: bool = @import("std").mem.zeroes(bool),
+    callback: ?*const fn (it: *Iter) callconv(.C) void = @import("std").mem.zeroes(?*const fn (it: *Iter) callconv(.C) void),
+    run: c.ecs_run_action_t = @import("std").mem.zeroes(c.ecs_run_action_t),
+    ctx: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+    ctx_free: c.ecs_ctx_free_t = @import("std").mem.zeroes(c.ecs_ctx_free_t),
+    callback_ctx: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+    callback_ctx_free: c.ecs_ctx_free_t = @import("std").mem.zeroes(c.ecs_ctx_free_t),
+    run_ctx: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+    run_ctx_free: c.ecs_ctx_free_t = @import("std").mem.zeroes(c.ecs_ctx_free_t),
+    observable: ?*c.ecs_poly_t = @import("std").mem.zeroes(?*c.ecs_poly_t),
+    last_event_id: [*c]i32 = @import("std").mem.zeroes([*c]i32),
+    term_index_: i8 = @import("std").mem.zeroes(i8),
+    flags_: c.ecs_flags32_t = @import("std").mem.zeroes(c.ecs_flags32_t),
 };
 
 pub const Iter = extern struct {

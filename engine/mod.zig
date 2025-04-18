@@ -16,8 +16,6 @@ pub const Assets = assets.Assets;
 pub const AssetHandle = assets.AssetHandle;
 
 pub const scene_graph = @import("scene.zig");
-pub const Object = scene_graph.Object;
-pub const Component = scene_graph.Component;
 
 pub const math3d = @import("math3d.zig");
 pub const Vec2 = math3d.Vec2;

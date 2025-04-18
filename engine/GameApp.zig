@@ -17,7 +17,6 @@ const Assets = @import("assets.zig").Assets;
 const SceneAssetHandle = @import("assets.zig").SceneAssetHandle;
 
 const Scene = @import("scene.zig").Scene;
-const ComponentDefinition = @import("scene.zig").ComponentDefinition;
 const components = @import("components.zig");
 
 const ecs = @import("ecs.zig");
@@ -175,34 +174,58 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
     self.world.clear(self.scene_root);
     if (try dfs.next()) |root| {
         try entity_map.put(root.uuid, self.scene_root);
-        root.deref();
     }
 
-    while (try dfs.next()) |obj| {
+    while (try dfs.next()) |decl| {
         const entity = self.world.create(null);
 
-        try entity_map.put(obj.uuid, entity);
+        try entity_map.put(decl.uuid, entity);
 
-        std.debug.print("entity {s} {d}\n", .{ obj.name, entity });
+        std.debug.print("entity {s} {d}\n", .{ decl.name, entity });
 
         var idx: usize = 0;
-        if (obj.parent) |parent| {
-            idx = parent.findChildren(obj).?;
+        if (decl.parent) |parent| {
+            idx = parent.findChildren(decl).?;
             const parent_entity = entity_map.get(parent.uuid).?;
-            std.debug.print("entity {s} parent {d}\n", .{ obj.name, parent_entity });
+            std.debug.print("entity {s} parent {d}\n", .{ decl.name, parent_entity });
             self.world.addPair(entity, ecs.relations.ChildOf, parent_entity);
         }
 
-        self.world.set(entity, components.Uuid, .{ .value = obj.uuid });
-        self.world.set(entity, components.Meta, .{ .allocator = @ptrCast(&self.allocator), .title = try self.allocator.dupeZ(u8, obj.name) });
+        _ = self.world.setName(entity, decl.name);
+        self.world.set(entity, components.Uuid, .{ .value = decl.uuid });
+        // self.world.set(entity, components.Meta, .{ .allocator = @ptrCast(&self.allocator), .title = try self.allocator.dupeZ(u8, decl.name) });
         self.world.set(entity, components.HierarchyOrder, .{ .value = @intCast(idx) });
 
-        self.world.set(entity, components.Position, .{ .value = obj.transform.position() });
-        self.world.set(entity, components.Rotation, .{ .value = obj.transform.rotation() });
-        self.world.set(entity, components.Scale, .{ .value = obj.transform.scale() });
-        self.world.set(entity, components.TransformMatrix, .{ .value = obj.transform.getMatrix() });
+        var iter = decl.components.iterator();
+        while (iter.next()) |it| {
+            std.debug.print("{s} =>\n", .{it.key_ptr.*});
+            if (self.components.get(it.key_ptr.*)) |def| {
+                std.debug.print("\t{}\n", .{def});
+                if (def.deserialize) |de| {
+                    self.world.addId(entity, def.id);
+                    const ptr = c.ecs_get_mut_id(self.world.inner, entity, def.id).?;
+                    if (!de(ptr, it.value_ptr, &self.allocator)) {
+                        std.debug.print("error: Failed to deserialize {s}.\n", .{it.key_ptr.*});
+                        return error.FailedToLoadScene;
+                    }
+                } else {
+                    std.debug.print("error: Component {s} found but has no deserializer\n", .{it.key_ptr.*});
+                    return error.FailedToLoadScene;
+                }
+            } else {
+                std.debug.print("error: Component {s} not found!\n", .{it.key_ptr.*});
+                return error.FailedToLoadScene;
+            }
+            // for (it.value_ptr.value.array[0..it.value_ptr.count]) |val| {
+            //     def.?.deserialize.?()
+            //     std.debug.print("\t {}\n", .{val});
+            // }
+        }
 
-        obj.deref();
+        // self.world.set(entity, components.Position, .{ .value = decl.transform.position() });
+        // self.world.set(entity, components.Rotation, .{ .value = decl.transform.rotation() });
+        // self.world.set(entity, components.Scale, .{ .value = decl.transform.scale() });
+        // self.world.set(entity, components.TransformMatrix, .{ .value = decl.transform.getMatrix() });
     }
 }
 
