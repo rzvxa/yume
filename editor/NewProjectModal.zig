@@ -15,12 +15,13 @@ const MeshRenderer = @import("yume").MeshRenderer;
 const Assets = @import("yume").Assets;
 const Vec3 = @import("yume").Vec3;
 const Mat4 = @import("yume").Mat4;
+const utils = @import("yume").utils;
 
 const imutils = @import("imutils.zig");
 const Editor = @import("Editor.zig");
 const Project = @import("Project.zig");
 const AssetsDatabase = @import("AssetsDatabase.zig");
-const utils = @import("yume").utils;
+const EditorDatabase = @import("EditorDatabase.zig");
 
 const Self = @This();
 
@@ -213,6 +214,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
 
     try Project.load(self.allocator, projfile);
     try ctx.loadScene(project.default_scene);
+    EditorDatabase.storage().last_open_scene = project.default_scene;
     self.close();
 }
 

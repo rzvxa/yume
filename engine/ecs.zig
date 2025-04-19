@@ -267,9 +267,21 @@ pub const World = struct {
         return c.ecs_observer_init(self.inner, @ptrCast(o));
     }
 
-    pub inline fn entity(self: Self, name: [*:0]const u8) Entity {
-        // const entity = self.create("");
-        c.ecs_entity_init(self.inner, &.{ .name = name });
+    pub inline fn entity(self: Self, opts: struct {
+        uuid: ?Uuid = null,
+        name: ?[*:0]const u8 = null,
+        parent: ?Entity = null,
+    }) Entity {
+        const ent = self.create(opts.name);
+        if (opts.parent) |parent| {
+            self.addPair(ent, relations.ChildOf, parent);
+        }
+        self.set(ent, components.Uuid, .{ .value = opts.uuid orelse Uuid.new() });
+        self.set(ent, components.Position, .{});
+        self.set(ent, components.Rotation, .{});
+        self.set(ent, components.Scale, .{});
+        self.add(ent, components.TransformMatrix);
+        return ent;
     }
 
     pub inline fn create(self: Self, ident: ?[*:0]const u8) Entity {

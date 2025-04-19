@@ -144,21 +144,11 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) !bool {
     if (c.ImGui_BeginPopupContextItemEx("context-menu", c.ImGuiPopupFlags_MouseButtonRight)) {
         if (c.ImGui_BeginMenu("New")) {
             if (c.ImGui_MenuItem("Entity")) {
-                const new_entity = ctx.world.create("New Entity");
-                ctx.world.addPair(new_entity, ecs.relations.ChildOf, entity);
-                ctx.world.set(new_entity, components.Position, .{ .value = Vec3.scalar(0) });
-                ctx.world.set(new_entity, components.Rotation, .{ .value = Vec3.scalar(0) });
-                ctx.world.set(new_entity, components.Scale, .{ .value = Vec3.scalar(1) });
-                ctx.world.add(new_entity, components.TransformMatrix);
+                _ = ctx.world.entity(.{ .name = "New Entity", .parent = entity });
             }
             c.ImGui_Separator();
             if (c.ImGui_MenuItem("Cube")) {
-                const new_entity = ctx.world.create("Cube");
-                ctx.world.addPair(new_entity, ecs.relations.ChildOf, entity);
-                ctx.world.set(new_entity, components.Position, .{ .value = Vec3.scalar(0) });
-                ctx.world.set(new_entity, components.Rotation, .{ .value = Vec3.scalar(0) });
-                ctx.world.set(new_entity, components.Scale, .{ .value = Vec3.scalar(1) });
-                ctx.world.add(new_entity, components.TransformMatrix);
+                const new_entity = ctx.world.entity(.{ .name = "Cube", .parent = entity });
                 ctx.world.set(new_entity, components.Mesh, (try Assets.getOrLoadMesh(try AssetsDatabase.getResourceId("builtin://cube.obj"))).*);
                 ctx.world.set(new_entity, components.Material, (try Assets.getOrLoadMaterial(try AssetsDatabase.getResourceId("builtin://materials/none.mat"))).*);
             }
@@ -166,12 +156,7 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) !bool {
             _ = c.ImGui_MenuItem("Plane*");
             c.ImGui_Separator();
             if (c.ImGui_MenuItem("Camera")) {
-                const new_entity = ctx.world.create("Camera");
-                ctx.world.addPair(new_entity, ecs.relations.ChildOf, entity);
-                ctx.world.set(new_entity, components.Position, .{ .value = Vec3.scalar(0) });
-                ctx.world.set(new_entity, components.Rotation, .{ .value = Vec3.scalar(0) });
-                ctx.world.set(new_entity, components.Scale, .{ .value = Vec3.scalar(1) });
-                ctx.world.add(new_entity, components.TransformMatrix);
+                const new_entity = ctx.world.entity(.{ .name = "Camera", .parent = entity });
                 ctx.world.set(new_entity, components.Camera, components.Camera.makePerspectiveCamera(.{
                     .fovy_rad = std.math.degreesToRadians(75),
                     .near = 0.1,

@@ -5,7 +5,7 @@ const Mat4 = @import("../math3d.zig").Mat4;
 const Dynamic = @import("../serialization/dynamic.zig").Dynamic;
 
 pub const Position = extern struct {
-    value: Vec3,
+    value: Vec3 = Vec3.scalar(0),
 
     pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
         return try Vec3.serialize(&self.value, allocator);
@@ -17,7 +17,7 @@ pub const Position = extern struct {
 };
 
 pub const Rotation = extern struct {
-    value: Vec3,
+    value: Vec3 = Vec3.scalar(0),
 
     pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
         return try Vec3.serialize(&self.value, allocator);
@@ -29,7 +29,7 @@ pub const Rotation = extern struct {
 };
 
 pub const Scale = extern struct {
-    value: Vec3,
+    value: Vec3 = Vec3.scalar(1),
 
     pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
         return try Vec3.serialize(&self.value, allocator);
