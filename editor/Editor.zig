@@ -347,7 +347,7 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
                     const path = AssetsDatabase.getResourcePath(hndl.uuid) catch @panic("Scene not found!");
                     const json = std.json.stringifyAlloc(ctx.allocator, scene, .{ .whitespace = .indent_4 }) catch @panic("Failed to serialize the scene");
                     defer ctx.allocator.free(json);
-                    std.debug.print("attempting to save to {s}\n", .{path});
+                    std.debug.print("saving scene \"{s}\" to save to \"{s}\"\n", .{ hndl.uuid.urn(), path });
                     var file = std.fs.cwd().createFile(path, .{}) catch @panic("Failed to open scene file to save");
                     defer file.close();
                     file.setEndPos(0) catch @panic("Failed to truncate the scene file");
