@@ -70,7 +70,7 @@ pub const Camera = extern struct {
                 .kind = .perspective,
                 .data = .{
                     .perspective = .{
-                        .fovy_rad = std.math.degreesToRadians(70.0),
+                        .fovy_rad = std.math.degreesToRadians(75),
                         .far = 200,
                         .near = 0.1,
                     },

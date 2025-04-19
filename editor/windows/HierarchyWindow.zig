@@ -2,9 +2,12 @@ const c = @import("clibs");
 const std = @import("std");
 
 const ecs = @import("yume").ecs;
-const AssetsDatabase = @import("yume").AssetsDatabase;
+const components = @import("yume").components;
+const Assets = @import("yume").Assets;
 const GameApp = @import("yume").GameApp;
-const MeshRenderer = @import("yume").MeshRenderer;
+const Vec3 = @import("yume").Vec3;
+
+const AssetsDatabase = @import("../AssetsDatabase.zig");
 
 const Project = @import("../Project.zig");
 const Editor = @import("../Editor.zig");
@@ -26,9 +29,9 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
                 self.drawHierarchyNode(ctx.world, child, 0, ctx) catch @panic("Failed to draw node");
             }
         }
-        const avail = c.ImGui_GetContentRegionAvail();
+        const avail = noZero(c.ImGui_GetContentRegionAvail());
         _ = c.ImGui_InvisibleButton("outside-the-tree", c.ImVec2{ .x = avail.x, .y = avail.y }, 0);
-        if (!drawContextMenu(ctx.scene_root, ctx)) {
+        if (!(drawContextMenu(ctx.scene_root, ctx) catch @panic("failed to draw context menu"))) {
             return;
         }
         if (c.ImGui_BeginDragDropTarget()) {
@@ -62,7 +65,7 @@ fn drawHierarchyNode(self: *Self, world: ecs.World, entity: ecs.Entity, level: u
         node_flags |= c.ImGuiTreeNodeFlags_Selected;
     }
 
-    const avail = c.ImGui_GetContentRegionAvail();
+    const avail = noZero(c.ImGui_GetContentRegionAvail());
 
     const edge_size = (c.ImGui_GetFrameHeight() + c.ImGui_GetStyle().*.FramePadding.y) / 3;
     const cursor = c.ImGui_GetCursorPos();
@@ -94,7 +97,7 @@ fn drawHierarchyNode(self: *Self, world: ecs.World, entity: ecs.Entity, level: u
     c.ImGui_SetCursorPosY(c.ImGui_GetCursorPosY() - edge_size);
 
     const open = c.ImGui_TreeNodeEx("##", node_flags);
-    if (!drawContextMenu(entity, ctx)) {
+    if (!try drawContextMenu(entity, ctx)) {
         if (open) {
             c.ImGui_TreePop();
         }
@@ -136,33 +139,45 @@ fn drawHierarchyNode(self: *Self, world: ecs.World, entity: ecs.Entity, level: u
     }
 }
 
-fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) bool {
+fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) !bool {
     var cont = true;
     if (c.ImGui_BeginPopupContextItemEx("context-menu", c.ImGuiPopupFlags_MouseButtonRight)) {
         if (c.ImGui_BeginMenu("New")) {
             if (c.ImGui_MenuItem("Entity")) {
                 const new_entity = ctx.world.create("New Entity");
-                const x = c.ecs_lookup_path_w_sep(ctx.world.inner, entity, "New Entity", ".", null, false);
-                std.debug.print("x is {?}\n", .{x});
                 ctx.world.addPair(new_entity, ecs.relations.ChildOf, entity);
+                ctx.world.set(new_entity, components.Position, .{ .value = Vec3.scalar(0) });
+                ctx.world.set(new_entity, components.Rotation, .{ .value = Vec3.scalar(0) });
+                ctx.world.set(new_entity, components.Scale, .{ .value = Vec3.scalar(1) });
+                ctx.world.add(new_entity, components.TransformMatrix);
             }
             c.ImGui_Separator();
             if (c.ImGui_MenuItem("Cube")) {
-                // FIXME
-                // var new_obj = obj.scene.newObject(.{ .parent = obj }) catch @panic("Failed to add new object");
-                // new_obj.addComponent(
-                //     MeshRenderer,
-                //     .{
-                //         .mesh = AssetsDatabase.getOrLoadMesh(Project.current().?.getResourceId("builtin://cube.obj") catch @panic("Cube mesh not found")) catch @panic("Failed to load cube mesh"),
-                //         .material = AssetsDatabase.getOrLoadMaterial(Project.current().?.getResourceId("builtin://materials/none.mat") catch @panic("None material not found")) catch @panic("Failed to load none material"),
-                //     },
-                // );
-                // new_obj.deref();
+                const new_entity = ctx.world.create("Cube");
+                ctx.world.addPair(new_entity, ecs.relations.ChildOf, entity);
+                ctx.world.set(new_entity, components.Position, .{ .value = Vec3.scalar(0) });
+                ctx.world.set(new_entity, components.Rotation, .{ .value = Vec3.scalar(0) });
+                ctx.world.set(new_entity, components.Scale, .{ .value = Vec3.scalar(1) });
+                ctx.world.add(new_entity, components.TransformMatrix);
+                ctx.world.set(new_entity, components.Mesh, (try Assets.getOrLoadMesh(try AssetsDatabase.getResourceId("builtin://cube.obj"))).*);
+                ctx.world.set(new_entity, components.Material, (try Assets.getOrLoadMaterial(try AssetsDatabase.getResourceId("builtin://materials/none.mat"))).*);
             }
             _ = c.ImGui_MenuItem("Sphere*");
             _ = c.ImGui_MenuItem("Plane*");
             c.ImGui_Separator();
-            _ = c.ImGui_MenuItem("Camera*");
+            if (c.ImGui_MenuItem("Camera")) {
+                const new_entity = ctx.world.create("Camera");
+                ctx.world.addPair(new_entity, ecs.relations.ChildOf, entity);
+                ctx.world.set(new_entity, components.Position, .{ .value = Vec3.scalar(0) });
+                ctx.world.set(new_entity, components.Rotation, .{ .value = Vec3.scalar(0) });
+                ctx.world.set(new_entity, components.Scale, .{ .value = Vec3.scalar(1) });
+                ctx.world.add(new_entity, components.TransformMatrix);
+                ctx.world.set(new_entity, components.Camera, components.Camera.makePerspectiveCamera(.{
+                    .fovy_rad = std.math.degreesToRadians(75),
+                    .near = 0.1,
+                    .far = 200,
+                }));
+            }
             c.ImGui_Separator();
             _ = c.ImGui_MenuItem("Directional Light*");
             _ = c.ImGui_MenuItem("Point Light*");
@@ -182,4 +197,15 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) bool {
         c.ImGui_EndPopup();
     }
     return cont;
+}
+
+fn noZero(i: c.ImVec2) c.ImVec2 {
+    var r = i;
+    if (r.x == 0) {
+        r.x = 0.01;
+    }
+    if (r.y == 0) {
+        r.y = 0.01;
+    }
+    return r;
 }

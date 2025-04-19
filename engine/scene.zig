@@ -316,7 +316,7 @@ const Object = struct {
                 const uuid = Uuid.new();
                 std.debug.print(
                     "Attempting to serialize an entity without a UUID," ++
-                        " assigning a new UUID {s} to the entity {d} to it.",
+                        " assigning a new UUID {s} to the entity {d} to it.\n",
                     .{ uuid.urn(), entity },
                 );
                 world.set(entity, components.Uuid, .{ .value = uuid });
