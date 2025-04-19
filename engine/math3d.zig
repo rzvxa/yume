@@ -1,4 +1,5 @@
 const std = @import("std");
+const Dynamic = @import("serialization/dynamic.zig").Dynamic;
 
 pub const Vec2 = extern struct {
     const Self = @This();
@@ -156,15 +157,27 @@ pub const Vec3 = extern struct {
         return fromArray(xyz);
     }
 
-    pub fn deserialize(self: *@This(), value: *const @import("serialization/dynamic.zig").Dynamic, _: std.mem.Allocator) !void {
-        if (value.type != .array or value.count != 3) {
+    pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
+        const elements = try allocator.alloc(Dynamic, 3);
+        elements[0] = .{ .type = .number, .value = .{ .number = self.x } };
+        elements[1] = .{ .type = .number, .value = .{ .number = self.y } };
+        elements[2] = .{ .type = .number, .value = .{ .number = self.z } };
+        return .{
+            .type = .array,
+            .value = .{ .array = .{ .items = elements.ptr, .len = elements.len } },
+        };
+    }
+
+    pub fn deserialize(self: *@This(), value: *const Dynamic, _: std.mem.Allocator) !void {
+        const array = try value.expectArray();
+        if (array.len != 3) {
             return error.UnexpectedValue;
         }
 
         self.* = Vec3.make(
-            try value.value.array[0].expect(.number),
-            try value.value.array[1].expect(.number),
-            try value.value.array[2].expect(.number),
+            try array.items[0].expect(.number),
+            try array.items[1].expect(.number),
+            try array.items[2].expect(.number),
         );
     }
 };
@@ -229,16 +242,29 @@ pub const Vec4 = extern struct {
         return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
     }
 
+    pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
+        const elements = try allocator.alloc(Dynamic, 4);
+        elements[0] = .{ .type = .number, .value = .{ .number = self.x } };
+        elements[1] = .{ .type = .number, .value = .{ .number = self.y } };
+        elements[2] = .{ .type = .number, .value = .{ .number = self.z } };
+        elements[3] = .{ .type = .number, .value = .{ .number = self.w } };
+        return .{
+            .type = .array,
+            .value = .{ .array = .{ .items = elements.ptr, .len = elements.len } },
+        };
+    }
+
     pub fn deserialize(self: *@This(), value: *const @import("serialization/dynamic.zig").Dynamic, _: std.mem.Allocator) !void {
-        if (value.type != .array or value.count != 4) {
+        const array = try value.expectArray();
+        if (array.len != 4) {
             return error.UnexpectedValue;
         }
 
         self.* = Vec4.make(
-            try value.value.array[0].expect(.number),
-            try value.value.array[1].expect(.number),
-            try value.value.array[2].expect(.number),
-            try value.value.array[3].expect(.number),
+            try array.items[0].expect(.number),
+            try array.items[1].expect(.number),
+            try array.items[2].expect(.number),
+            try array.items[3].expect(.number),
         );
     }
 };
@@ -706,15 +732,28 @@ pub const Mat4 = extern union {
         return .{ .translation = t, .rotation = rot, .scale = s };
     }
 
+    pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
+        const elements = try allocator.alloc(Dynamic, 4);
+        elements[0] = try Vec4.serialize(&self.vec4[0], allocator);
+        elements[1] = try Vec4.serialize(&self.vec4[1], allocator);
+        elements[2] = try Vec4.serialize(&self.vec4[2], allocator);
+        elements[3] = try Vec4.serialize(&self.vec4[3], allocator);
+        return .{
+            .type = .array,
+            .value = .{ .array = .{ .items = elements.ptr, .len = elements.len } },
+        };
+    }
+
     pub fn deserialize(self: *@This(), value: *const @import("serialization/dynamic.zig").Dynamic, allocator: std.mem.Allocator) !void {
-        if (value.type != .array or value.count != 4) {
+        const array = try value.expectArray();
+        if (array.len != 4) {
             return error.UnexpectedValue;
         }
 
-        try Vec4.deserialize(&self.vec4[0], &value.value.array[0], allocator);
-        try Vec4.deserialize(&self.vec4[1], &value.value.array[1], allocator);
-        try Vec4.deserialize(&self.vec4[2], &value.value.array[2], allocator);
-        try Vec4.deserialize(&self.vec4[3], &value.value.array[3], allocator);
+        try Vec4.deserialize(&self.vec4[0], &array.items[0], allocator);
+        try Vec4.deserialize(&self.vec4[1], &array.items[1], allocator);
+        try Vec4.deserialize(&self.vec4[2], &array.items[2], allocator);
+        try Vec4.deserialize(&self.vec4[3], &array.items[3], allocator);
     }
 };
 

@@ -3,6 +3,7 @@ const std = @import("std");
 const ecs = @import("ecs.zig");
 const components = @import("components.zig");
 const Dynamic = @import("serialization/dynamic.zig").Dynamic;
+const GameApp = @import("GameApp.zig");
 const Uuid = @import("uuid.zig").Uuid;
 const Vec3 = @import("math3d.zig").Vec3;
 const Mat4 = @import("math3d.zig").Mat4;
@@ -46,11 +47,11 @@ pub const Scene = struct {
         return try Dfs.init(self.allocator, self.root);
     }
 
-    pub fn fromEcs(allocator: std.mem.Allocator, world: ecs.World, root: ecs.Entity) !*Self {
+    pub fn fromEcs(allocator: std.mem.Allocator, world: ecs.World, root: ecs.Entity, ctx: *GameApp) !*Self {
         var self = try Self.init(allocator);
 
         self.root.deinit();
-        self.root = try Object.fromEcs(self.allocator, world, root);
+        self.root = try Object.fromEcs(self.allocator, world, root, null, ctx);
         const root_name = try self.allocator.realloc(self.root.name, 4);
         self.root.name = @ptrCast(root_name);
         @memset(self.root.name, 0);
@@ -200,8 +201,17 @@ const Object = struct {
         try jws.objectField("parent");
         try jws.write(self.parent);
 
-        // try jws.objectField("components");
-        // try jws.write(self.components.items);
+        try jws.objectField("components");
+        try jws.beginObject();
+        {
+            var iter = self.components.iterator();
+            while (iter.next()) |entry| {
+                try jws.objectField(entry.key_ptr.*);
+                try jws.write(entry.value_ptr.*);
+            }
+        }
+        try jws.endObject();
+        // try jws.write(self.components.key);
 
         try jws.objectField("children");
         try jws.beginArray();
@@ -297,22 +307,58 @@ const Object = struct {
         return result;
     }
 
-    pub fn fromEcs(allocator: std.mem.Allocator, world: ecs.World, entity: ecs.Entity) !*Self {
+    pub fn fromEcs(allocator: std.mem.Allocator, world: ecs.World, entity: ecs.Entity, parent: ?*Self, ctx: *GameApp) !*Self {
         const name = world.getName(entity);
-        const uuid_comp: ?*const components.Uuid = world.get(entity, components.Uuid);
-        const uuid = if (uuid_comp) |it| it.value else Uuid.new();
+        const uuid = blk: {
+            if (world.getUuid(entity)) |uuid| {
+                break :blk uuid;
+            } else {
+                const uuid = Uuid.new();
+                std.debug.print(
+                    "Attempting to serialize an entity without a UUID," ++
+                        " assigning a new UUID {s} to the entity {d} to it.",
+                    .{ uuid.urn(), entity },
+                );
+                world.set(entity, components.Uuid, .{ .value = uuid });
+                break :blk uuid;
+            }
+        };
         var self = try allocator.create(Self);
         self.* = .{
             .uuid = uuid,
             .name = try allocator.dupeZ(u8, name),
+            .parent = parent,
             .children = std.ArrayList(*Object).init(allocator),
             .components = std.StringArrayHashMap(Component).init(allocator),
         };
 
+        for (try world.getType(entity)) |id| {
+            std.log.debug("comp :: {d}\n", .{id});
+
+            if (ecs.isPair(id)) {
+                const rel = world.pairFirst(id);
+                const target = world.pairSecond(id);
+                std.debug.print("skipping rel: {s}, target: {s}\n", .{ world.getName(rel), world.getName(target) });
+                continue;
+            }
+            const comp_id = id & ecs.masks.component;
+            const comp_path = try world.getPathAlloc(comp_id, allocator);
+            std.debug.print("entity: {s}\n", .{comp_path});
+            const def = ctx.components.get(comp_path) orelse return error.ComponentDefinitionNotFound;
+            const ser = def.serialize orelse continue;
+            const ptr = world.getId(entity, id).?;
+            const res = ser(ptr, &allocator);
+            if (!res.ok) {
+                return error.FailedToSerializeComponent;
+            }
+
+            try self.components.put(comp_path, res.result);
+        }
+
         const children = try world.childrenSorted(entity, allocator);
         defer allocator.free(children);
         for (children) |child| {
-            const serialized = try Self.fromEcs(allocator, world, child);
+            const serialized = try Self.fromEcs(allocator, world, child, self, ctx);
             try self.children.append(serialized);
         }
         return self;

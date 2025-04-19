@@ -120,6 +120,10 @@ pub const Mesh = extern struct {
         return true;
     }
 
+    pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
+        return .{ .type = .string, .value = .{ .string = try allocator.dupeZ(u8, &self.uuid.urn()) } };
+    }
+
     pub fn deserialize(self: *@This(), value: *const Dynamic, _: std.mem.Allocator) !void {
         const urn = try value.expectString();
         const uuid = try Uuid.fromUrnSlice(std.mem.span(urn));

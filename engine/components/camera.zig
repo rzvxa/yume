@@ -80,6 +80,32 @@ pub const Camera = extern struct {
         return true;
     }
 
+    pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
+        switch (self.opts.kind) {
+            .perspective => {
+                const fields = try allocator.alloc(Dynamic.Field, 4);
+                fields[0] = .{
+                    .key = try allocator.dupeZ(u8, "type"),
+                    .value = .{ .type = .string, .value = .{ .string = try allocator.dupeZ(u8, "perspective") } },
+                };
+                fields[1] = .{
+                    .key = try allocator.dupeZ(u8, "fovy_rad"),
+                    .value = .{ .type = .number, .value = .{ .number = self.opts.data.perspective.fovy_rad } },
+                };
+                fields[2] = .{
+                    .key = try allocator.dupeZ(u8, "near"),
+                    .value = .{ .type = .number, .value = .{ .number = self.opts.data.perspective.near } },
+                };
+                fields[3] = .{
+                    .key = try allocator.dupeZ(u8, "far"),
+                    .value = .{ .type = .number, .value = .{ .number = self.opts.data.perspective.far } },
+                };
+                return .{ .type = .object, .value = .{ .object = .{ .items = fields.ptr, .len = fields.len } } };
+            },
+            .orthographic => @panic("unimplemented orthographic camera serialization"),
+        }
+    }
+
     pub fn deserialize(self: *@This(), value: *const Dynamic, _: std.mem.Allocator) !void {
         const obj = try value.expectObject();
         const kind: CameraKind = blk: {

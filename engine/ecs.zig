@@ -102,6 +102,10 @@ pub const World = struct {
             @compileError("For registering zero-sized components use `tag` instead");
         }
 
+        if (@typeInfo(T) != .Struct) {
+            @compileError("ECS componenets must be a struct instead got " ++ @typeName(T));
+        }
+
         const meta = Reflect(T);
         std.debug.assert(meta.id == 0);
 
@@ -138,28 +142,39 @@ pub const World = struct {
             },
             .size = @sizeOf(T),
             .alignment = @alignOf(T),
-            .default = switch (@typeInfo(T)) {
-                .Struct => if (@hasDecl(T, "default")) struct {
-                    pub fn f(ptr: *anyopaque, ent: Entity, ctx: *GameApp, resolver: ResourceResolver) callconv(.C) bool {
-                        const params = @typeInfo(@TypeOf(T.default)).Fn.params;
-                        if (params[params.len - 1].type == ResourceResolver) {
-                            return T.default(@ptrCast(@alignCast(ptr)), ent, ctx, resolver);
-                        } else {
-                            return T.default(@ptrCast(@alignCast(ptr)), ent, ctx);
-                        }
+            .default = if (@hasDecl(T, "default")) struct {
+                pub fn f(ptr: *anyopaque, ent: Entity, ctx: *GameApp, resolver: ResourceResolver) callconv(.C) bool {
+                    const params = @typeInfo(@TypeOf(T.default)).Fn.params;
+                    if (params[params.len - 1].type == ResourceResolver) {
+                        return T.default(@ptrCast(@alignCast(ptr)), ent, ctx, resolver);
+                    } else {
+                        return T.default(@ptrCast(@alignCast(ptr)), ent, ctx);
                     }
-                }.f else null,
-                else => null,
-            },
-            .deserialize = switch (@typeInfo(T)) {
-                .Struct => if (@hasDecl(T, "deserialize")) struct {
-                    pub fn f(ptr: *anyopaque, value: *const Dynamic, allocator: *std.mem.Allocator) callconv(.C) bool {
+                }
+            }.f else null,
+            .serialize = if (@hasDecl(T, "serialize")) struct {
+                pub fn f(ptr: *const anyopaque, allocator: *const std.mem.Allocator) callconv(.C) SerializationResult {
+                    const result = T.serialize(@ptrCast(@alignCast(ptr)), allocator.*) catch return .{ .ok = false };
+                    return .{ .ok = true, .result = result };
+                }
+            }.f else if (@hasDecl(T, "serialize"))
+                @compileError("ECS componenet '" ++ @typeName(T) ++ "' has a `serialize` method doesn't provide a `deserialize` method declaration")
+            else
+                null,
+            .deserialize = if (@hasDecl(T, "deserialize")) blk: {
+                if (!@hasDecl(T, "serialize")) {
+                    std.debug.print("warning: ECS componenet '" ++ @typeName(T) ++ "' has a `deserialize` method but doesn't provide a `serialize` method declaration.\n", .{});
+                }
+                break :blk struct {
+                    pub fn f(ptr: *anyopaque, value: *const Dynamic, allocator: *const std.mem.Allocator) callconv(.C) bool {
                         T.deserialize(@ptrCast(@alignCast(ptr)), value, allocator.*) catch return false;
                         return true;
                     }
-                }.f else null,
-                else => null,
-            },
+                }.f;
+            } else if (@hasDecl(T, "serialize"))
+                @compileError("ECS componenet '" ++ @typeName(T) ++ "' has a `serialize` method doesn't provide a `deserialize` method declaration")
+            else
+                null,
         };
     }
 
@@ -317,6 +332,10 @@ pub const World = struct {
         @compileError("TODO");
     }
 
+    pub inline fn setUuid(self: Self, ent: Entity, uuid: Uuid) void {
+        self.set(ent, components.Uuid, .{ .value = uuid });
+    }
+
     pub inline fn set(self: Self, ent: Entity, comptime T: type, value: T) void {
         self.setId(ent, typeId(T), @sizeOf(T), @ptrCast(&value));
     }
@@ -342,17 +361,33 @@ pub const World = struct {
 
     // get
 
+    pub inline fn getId(self: Self, ent: Entity, id: Entity) ?*const anyopaque {
+        return c.ecs_get_id(self.inner, ent, id);
+    }
+
+    pub inline fn getMutId(self: Self, ent: Entity, id: Entity) ?*anyopaque {
+        return c.ecs_get_mut_id(self.inner, ent, id);
+    }
+
     pub inline fn get(self: Self, ent: Entity, comptime T: type) ?*const T {
-        return @ptrCast(@alignCast(c.ecs_get_id(self.inner, ent, typeId(T))));
+        return @ptrCast(@alignCast(self.getId(ent, typeId(T))));
     }
 
     pub inline fn getMut(self: Self, ent: Entity, comptime T: type) ?*T {
-        return @ptrCast(@alignCast(c.ecs_get_mut_id(self.inner, ent, typeId(T))));
+        return @ptrCast(@alignCast(self.getMutId(ent, typeId(T))));
     }
 
     pub inline fn getPair(self: Self, subject: Entity, first: Entity, second: Entity, comptime T: type) ?*T {
         const val = c.ecs_get_id(self.inner, subject, pair(first, second));
         return @ptrCast(@alignCast(val));
+    }
+
+    pub inline fn pairFirst(self: Self, p: Entity) Entity {
+        return c.ecs_get_alive(self.inner, c.ECS_PAIR_FIRST(p));
+    }
+
+    pub inline fn pairSecond(self: Self, p: Entity) Entity {
+        return c.ecs_get_alive(self.inner, c.ECS_PAIR_SECOND(p));
     }
 
     pub inline fn getTarget(self: Self, ent: Entity, rel: Entity, index: i32) Entity {
@@ -372,9 +407,6 @@ pub const World = struct {
         return c.ecs_has_id(self.inner, ent, typeId(T));
     }
 
-    // these two aligned versions of get methods are a hacky workaround for issue with u128 and 16 byte alignemnt in general.
-    // TODO: investigate this issue, perhaps it is an issue with the allocator functions?
-
     pub inline fn getAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) ?*align(alignment) const T {
         return @ptrCast(@alignCast(c.ecs_get_id(self.inner, ent, typeId(T))));
     }
@@ -383,8 +415,25 @@ pub const World = struct {
         return @ptrCast(@alignCast(c.ecs_get_mut_id(self.inner, ent, typeId(T))));
     }
 
+    pub fn getType(self: Self, ent: Entity) ![]const Entity {
+        const info = c.ecs_get_type(self.inner, ent) orelse return error.EntityNotFound;
+        std.debug.print("here {?}\n\t{any}\n", .{ info.*, info.*.array[0..@intCast(info.*.count)] });
+        return info.*.array[0..@intCast(info.*.count)];
+    }
+
     pub inline fn getName(self: Self, ent: Entity) [:0]const u8 {
         return if (c.ecs_get_name(self.inner, ent)) |name| std.mem.span(name) else "";
+    }
+
+    pub inline fn getPathAlloc(self: Self, ent: Entity, allocator: std.mem.Allocator) ![:0]u8 {
+        var buf = c.ECS_STRBUF_INIT;
+        c.ecs_get_path_w_sep_buf(self.inner, 0, ent, ".", null, &buf, false);
+        return try allocator.dupeZ(u8, buf.content[0..@intCast(buf.length)]);
+    }
+
+    pub inline fn getUuid(self: Self, ent: Entity) ?Uuid {
+        const uuid_comp = self.get(ent, components.Uuid);
+        return if (uuid_comp) |it| it.value else null;
     }
 
     pub inline fn getHierarchyOrder(self: Self, ent: Entity) u32 {
@@ -508,13 +557,19 @@ pub const ResourceResolverResult = extern struct {
 };
 pub const ResourceResolver = *const fn (path: [*:0]const u8) callconv(.C) ResourceResolverResult;
 
+pub const SerializationResult = extern struct {
+    ok: bool,
+    result: Dynamic = Dynamic{ .type = .null, .value = .{ .null = {} } },
+};
+
 pub const ComponentDef = extern struct {
     id: Entity,
     icon: ?[*:0]const u8,
     size: usize,
     alignment: usize,
     default: ?*const fn (self: *anyopaque, entity: Entity, ctx: *GameApp, resourceResolver: ResourceResolver) callconv(.C) bool,
-    deserialize: ?*const fn (self: *anyopaque, value: *const Dynamic, allocator: *std.mem.Allocator) callconv(.C) bool,
+    serialize: ?*const fn (self: *const anyopaque, allocator: *const std.mem.Allocator) callconv(.C) SerializationResult,
+    deserialize: ?*const fn (self: *anyopaque, value: *const Dynamic, allocator: *const std.mem.Allocator) callconv(.C) bool,
 };
 
 fn Reflect(comptime T: type) type {
@@ -556,6 +611,9 @@ pub fn typeName(comptime T: type) @TypeOf(@typeName(T)) {
 }
 
 pub const pair = c.ecs_pair;
+pub fn isPair(id: Entity) bool {
+    return c.ECS_IS_PAIR(id);
+}
 
 pub fn ids(comptime N: usize, args: [N]c.ecs_id_t) [*c]c.ecs_id_t {
     const len = N + 1;
@@ -854,6 +912,13 @@ pub const operators = struct {
     pub var AndFrom: i16 = undefined;
     pub var OrFrom: i16 = undefined;
     pub var NotFrom: i16 = undefined;
+};
+
+pub const masks = struct {
+    pub const idFlags = c.ECS_ID_FLAGS_MASK;
+    pub const entity = c.ECS_ENTITY_MASK;
+    pub const generation = c.ECS_GENERATION_MASK;
+    pub const component = c.ECS_COMPONENT_MASK;
 };
 
 /// Taken from <https://github.com/zig-gamedev/zflecs/blob/ee2cd434fa2ec2454008988a1cc1201b242f030e/src/zflecs.zig#L2652C1-L2693C2>

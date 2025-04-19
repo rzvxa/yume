@@ -174,6 +174,7 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
     self.world.clear(self.scene_root);
     if (try dfs.next()) |root| {
         try entity_map.put(root.uuid, self.scene_root);
+        self.world.setUuid(self.scene_root, root.uuid);
     }
 
     while (try dfs.next()) |decl| {
@@ -223,7 +224,7 @@ pub fn snapshotLiveScene(self: *Self) !*Scene {
         return error.SceneRootZero;
     }
 
-    return try Scene.fromEcs(self.allocator, self.world, self.scene_root);
+    return try Scene.fromEcs(self.allocator, self.world, self.scene_root, self);
 }
 
 pub fn registerComponent(self: *Self, comptime T: type) void {

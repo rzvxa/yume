@@ -14,8 +14,20 @@ pub const Dynamic = extern struct {
         bool: bool,
         number: f32,
         string: [*:0]u8,
-        array: [*]Dynamic,
+        array: Elements,
         object: Fields,
+    };
+    pub const Elements = extern struct {
+        items: [*]Dynamic,
+        len: usize,
+
+        pub inline fn elements(self: *const @This()) []const Dynamic {
+            return self.items[0..self.len];
+        }
+
+        pub fn jsonStringify(self: Elements, jws: anytype) !void {
+            try jws.write(self.elements());
+        }
     };
     pub const Fields = extern struct {
         items: [*]Field,
@@ -41,6 +53,15 @@ pub const Dynamic = extern struct {
                 return error.UndefinedField;
             }
         }
+
+        pub fn jsonStringify(self: Fields, jws: anytype) !void {
+            try jws.beginObject();
+            for (self.fields()) |f| {
+                try jws.objectField(std.mem.span(f.key));
+                try jws.write(f.value);
+            }
+            try jws.endObject();
+        }
     };
     pub const Field = extern struct {
         key: [*:0]u8,
@@ -49,7 +70,6 @@ pub const Dynamic = extern struct {
 
     type: Type,
     value: Value,
-    count: usize,
 
     pub fn expect(self: *const Dynamic, comptime ty: Type) !blk: {
         for (@typeInfo(Value).Union.fields) |field| {
@@ -81,7 +101,7 @@ pub const Dynamic = extern struct {
         return self.expect(.string);
     }
 
-    pub inline fn expectArray(self: *const Dynamic) ![*]Dynamic {
+    pub inline fn expectArray(self: *const Dynamic) !Elements {
         return self.expect(.array);
     }
 
@@ -92,20 +112,20 @@ pub const Dynamic = extern struct {
     pub fn jsonParse(allocator: std.mem.Allocator, jrs: *std.json.Scanner, o: anytype) !Dynamic {
         switch (try jrs.next()) {
             .null => {
-                return .{ .type = .null, .value = .{ .null = {} }, .count = 1 };
+                return .{ .type = .null, .value = .{ .null = {} } };
             },
             .true => {
-                return .{ .type = .bool, .value = .{ .bool = true }, .count = 1 };
+                return .{ .type = .bool, .value = .{ .bool = true } };
             },
             .false => {
-                return .{ .type = .bool, .value = .{ .bool = false }, .count = 1 };
+                return .{ .type = .bool, .value = .{ .bool = false } };
             },
             .number, .allocated_number => |slice| {
                 const number = std.fmt.parseFloat(f32, slice) catch return error.SyntaxError;
-                return .{ .type = .number, .value = .{ .number = number }, .count = 1 };
+                return .{ .type = .number, .value = .{ .number = number } };
             },
             .string, .allocated_string => |slice| {
-                return .{ .type = .string, .value = .{ .string = try allocator.dupeZ(u8, slice) }, .count = slice.len };
+                return .{ .type = .string, .value = .{ .string = try allocator.dupeZ(u8, slice) } };
             },
             .array_begin => {
                 var array = std.ArrayList(Dynamic).init(allocator);
@@ -118,7 +138,10 @@ pub const Dynamic = extern struct {
                     try array.append(element);
                 }
                 const count = array.items.len;
-                return .{ .type = .array, .value = .{ .array = (try array.toOwnedSlice()).ptr }, .count = count };
+                return .{
+                    .type = .array,
+                    .value = .{ .array = .{ .items = (try array.toOwnedSlice()).ptr, .len = count } },
+                };
             },
             .object_begin => {
                 var fields = std.ArrayList(Field).init(allocator);
@@ -141,10 +164,20 @@ pub const Dynamic = extern struct {
                 return .{
                     .type = .object,
                     .value = .{ .object = .{ .items = (try fields.toOwnedSlice()).ptr, .len = len } },
-                    .count = len,
                 };
             },
             else => return error.UnexpectedToken,
         }
+    }
+
+    pub fn jsonStringify(self: Dynamic, jws: anytype) !void {
+        try switch (self.type) {
+            .null => jws.write(null),
+            .bool => jws.write(self.value.bool),
+            .number => jws.write(self.value.number),
+            .string => jws.write(self.value.string),
+            .array => jws.write(self.value.array),
+            .object => jws.write(self.value.object),
+        };
     }
 };

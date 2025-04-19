@@ -7,6 +7,10 @@ const Dynamic = @import("../serialization/dynamic.zig").Dynamic;
 pub const Position = extern struct {
     value: Vec3,
 
+    pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
+        return try Vec3.serialize(&self.value, allocator);
+    }
+
     pub fn deserialize(self: *@This(), value: *const Dynamic, allocator: std.mem.Allocator) !void {
         try Vec3.deserialize(&self.value, value, allocator);
     }
@@ -14,6 +18,10 @@ pub const Position = extern struct {
 
 pub const Rotation = extern struct {
     value: Vec3,
+
+    pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
+        return try Vec3.serialize(&self.value, allocator);
+    }
 
     pub fn deserialize(self: *@This(), value: *const Dynamic, allocator: std.mem.Allocator) !void {
         try Vec3.deserialize(&self.value, value, allocator);
@@ -23,6 +31,10 @@ pub const Rotation = extern struct {
 pub const Scale = extern struct {
     value: Vec3,
 
+    pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
+        return try Vec3.serialize(&self.value, allocator);
+    }
+
     pub fn deserialize(self: *@This(), value: *const Dynamic, allocator: std.mem.Allocator) !void {
         try Vec3.deserialize(&self.value, value, allocator);
     }
@@ -30,6 +42,10 @@ pub const Scale = extern struct {
 
 pub const TransformMatrix = extern struct {
     value: Mat4,
+
+    pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
+        return try Mat4.serialize(&self.value, allocator);
+    }
 
     pub fn deserialize(self: *@This(), value: *const Dynamic, allocator: std.mem.Allocator) !void {
         try Mat4.deserialize(&self.value, value, allocator);
