@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const ecs = @import("ecs.zig");
+const components = @import("components.zig");
 const Dynamic = @import("serialization/dynamic.zig").Dynamic;
 const Uuid = @import("uuid.zig").Uuid;
 const Vec3 = @import("math3d.zig").Vec3;
@@ -28,7 +30,7 @@ pub const Scene = struct {
             .allocator = a,
             .root = undefined,
         };
-        self.root = Object.create(self, try a.dupeZ(u8, "root")) catch @panic("OOM");
+        self.root = Object.create(self.allocator, try a.dupeZ(u8, "root")) catch @panic("OOM");
 
         return self;
     }
@@ -42,6 +44,18 @@ pub const Scene = struct {
 
     pub fn dfs(self: *Scene) std.mem.Allocator.Error!Dfs {
         return try Dfs.init(self.allocator, self.root);
+    }
+
+    pub fn fromEcs(allocator: std.mem.Allocator, world: ecs.World, root: ecs.Entity) !*Self {
+        var self = try Self.init(allocator);
+
+        self.root.deinit();
+        self.root = try Object.fromEcs(self.allocator, world, root);
+        const root_name = try self.allocator.realloc(self.root.name, 4);
+        self.root.name = @ptrCast(root_name);
+        @memset(self.root.name, 0);
+        @memcpy(self.root.name[0..4], "root");
+        return self;
     }
 
     pub fn fromJson(
@@ -87,10 +101,7 @@ pub const Scene = struct {
             if (std.mem.eql(u8, field_name, "root")) {
                 var ptrmap = std.AutoHashMap(Uuid, *anyopaque).init(a);
                 defer ptrmap.deinit();
-                result.root = try Object.jsonParseGraph(a, jrs, o, .{
-                    .scene = result,
-                    .ptrmap = &ptrmap,
-                });
+                result.root = try Object.jsonParseGraph(a, jrs, o, .{ .ptrmap = &ptrmap });
             } else {
                 try jrs.skipValue();
             }
@@ -144,19 +155,24 @@ const Object = struct {
     parent: ?*Object = null,
     children: std.ArrayList(*Object),
     components: std.StringArrayHashMap(Component),
-    scene: *Scene,
 
-    fn create(scene: *Scene, name: [:0]u8) !*Object {
-        const self = try scene.allocator.create(Self);
+    fn create(allocator: std.mem.Allocator, name: [:0]const u8) !*Object {
+        const self = try allocator.create(Self);
         self.* = .{
             .uuid = Uuid.new(),
-            .name = name,
-            .children = std.ArrayList(*Object).init(scene.allocator),
-            .components = std.StringArrayHashMap(Component).init(scene.allocator),
-
-            .scene = scene,
+            .name = try allocator.dupeZ(u8, name),
+            .children = std.ArrayList(*Object).init(allocator),
+            .components = std.StringArrayHashMap(Component).init(allocator),
         };
         return self;
+    }
+
+    fn deinit(self: *Self) void {
+        const allocator = self.children.allocator;
+        allocator.free(self.name);
+        self.children.deinit();
+        self.components.deinit();
+        allocator.destroy(self);
     }
 
     pub fn findChildren(self: *Self, obj: *Object) ?usize {
@@ -202,7 +218,6 @@ const Object = struct {
         jrs: anytype,
         o: anytype,
         ctx: struct {
-            scene: *Scene,
             ptrmap: *std.AutoHashMap(Uuid, *anyopaque),
         },
     ) !*Self {
@@ -215,8 +230,6 @@ const Object = struct {
             .name = try a.allocSentinel(u8, 0, 0),
             .children = std.ArrayList(*Object).init(a),
             .components = std.StringArrayHashMap(Component).init(a),
-
-            .scene = ctx.scene,
         };
 
         while (true) {
@@ -282,6 +295,27 @@ const Object = struct {
         }
 
         return result;
+    }
+
+    pub fn fromEcs(allocator: std.mem.Allocator, world: ecs.World, entity: ecs.Entity) !*Self {
+        const name = world.getName(entity);
+        const uuid_comp: ?*const components.Uuid = world.get(entity, components.Uuid);
+        const uuid = if (uuid_comp) |it| it.value else Uuid.new();
+        var self = try allocator.create(Self);
+        self.* = .{
+            .uuid = uuid,
+            .name = try allocator.dupeZ(u8, name),
+            .children = std.ArrayList(*Object).init(allocator),
+            .components = std.StringArrayHashMap(Component).init(allocator),
+        };
+
+        const children = try world.childrenSorted(entity, allocator);
+        defer allocator.free(children);
+        for (children) |child| {
+            const serialized = try Self.fromEcs(allocator, world, child);
+            try self.children.append(serialized);
+        }
+        return self;
     }
 };
 

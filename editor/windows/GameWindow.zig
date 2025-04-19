@@ -124,7 +124,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
     c.ImGui_End();
 }
 
-fn renderSys(it: *ecs.Iter, matrices: []components.TransformMatrix, meshes: []align(8) components.Mesh, materials: []align(8) components.Material) void {
+fn renderSys(it: *ecs.Iter, matrices: []components.TransformMatrix, meshes: []components.Mesh, materials: []components.Material) void {
     const me: *FrameData = @ptrCast(@alignCast(it.param));
     me.app.engine.drawObjects(
         me.cmd,

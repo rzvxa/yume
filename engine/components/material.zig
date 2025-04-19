@@ -18,7 +18,7 @@ pub const Material = extern struct {
         return "editor://icons/material.png";
     }
 
-    pub fn default(ptr: *align(8) Material, _: ecs.Entity, _: *GameApp, rr: ecs.ResourceResolver) callconv(.C) bool {
+    pub fn default(ptr: *Material, _: ecs.Entity, _: *GameApp, rr: ecs.ResourceResolver) callconv(.C) bool {
         const mat = rr("builtin://materials/none.mat");
         if (!mat.found) {
             return false;
@@ -27,7 +27,7 @@ pub const Material = extern struct {
         return true;
     }
 
-    pub fn deserialize(self: *align(8) @This(), value: *const Dynamic, _: std.mem.Allocator) !void {
+    pub fn deserialize(self: *@This(), value: *const Dynamic, _: std.mem.Allocator) !void {
         const urn = try value.expectString();
         const uuid = try Uuid.fromUrnSlice(std.mem.span(urn));
         self.* = (try Assets.getOrLoadMaterial(uuid)).*;

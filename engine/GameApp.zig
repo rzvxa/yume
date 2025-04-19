@@ -218,13 +218,13 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
     }
 }
 
-// pub fn serializeScene(self: *Self) !void {
-//     if (self.scene_root == 0) {
-//         return error.SceneRootZero;
-//     }
-//
-//     try self.world.childrenSorted(self.scene_root, self.allocator);
-// }
+pub fn snapshotLiveScene(self: *Self) !*Scene {
+    if (self.scene_root == 0) {
+        return error.SceneRootZero;
+    }
+
+    return try Scene.fromEcs(self.allocator, self.world, self.scene_root);
+}
 
 pub fn registerComponent(self: *Self, comptime T: type) void {
     const comp = self.world.component(T);

@@ -110,7 +110,7 @@ pub const Mesh = extern struct {
         return "editor://icons/mesh.png";
     }
 
-    pub fn default(ptr: *align(8) Mesh, _: ecs.Entity, _: *GameApp, rr: ecs.ResourceResolver) callconv(.C) bool {
+    pub fn default(ptr: *Mesh, _: ecs.Entity, _: *GameApp, rr: ecs.ResourceResolver) callconv(.C) bool {
         const cube = rr("builtin://cube.obj");
         if (!cube.found) {
             return false;
@@ -120,7 +120,7 @@ pub const Mesh = extern struct {
         return true;
     }
 
-    pub fn deserialize(self: *align(8) @This(), value: *const Dynamic, _: std.mem.Allocator) !void {
+    pub fn deserialize(self: *@This(), value: *const Dynamic, _: std.mem.Allocator) !void {
         const urn = try value.expectString();
         const uuid = try Uuid.fromUrnSlice(std.mem.span(urn));
         self.* = (try Assets.getOrLoadMesh(uuid)).*;
