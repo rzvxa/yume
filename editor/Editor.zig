@@ -345,12 +345,10 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
                     const scene = ctx.snapshotLiveScene() catch @panic("Faield to serialize scene");
                     defer scene.deinit();
                     const path = AssetsDatabase.getResourcePath(hndl.uuid) catch @panic("Scene not found!");
-                    const bak_path = std.fmt.allocPrint(ctx.allocator, "{s}.bak", .{path}) catch @panic("Failed to join paths");
-                    defer ctx.allocator.free(bak_path);
                     const json = std.json.stringifyAlloc(ctx.allocator, scene, .{ .whitespace = .indent_4 }) catch @panic("Failed to serialize the scene");
                     defer ctx.allocator.free(json);
-                    std.debug.print("attempting to save to {s}\n", .{bak_path});
-                    var file = std.fs.cwd().createFile(bak_path, .{}) catch @panic("Failed to open scene file to save");
+                    std.debug.print("attempting to save to {s}\n", .{path});
+                    var file = std.fs.cwd().createFile(path, .{}) catch @panic("Failed to open scene file to save");
                     defer file.close();
                     file.setEndPos(0) catch @panic("Failed to truncate the scene file");
                     file.seekTo(0) catch @panic("Failed to seek the start of the scene file");

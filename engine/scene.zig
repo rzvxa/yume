@@ -333,17 +333,11 @@ const Object = struct {
         };
 
         for (try world.getType(entity)) |id| {
-            std.log.debug("comp :: {d}\n", .{id});
-
             if (ecs.isPair(id)) {
-                const rel = world.pairFirst(id);
-                const target = world.pairSecond(id);
-                std.debug.print("skipping rel: {s}, target: {s}\n", .{ world.getName(rel), world.getName(target) });
                 continue;
             }
             const comp_id = id & ecs.masks.component;
             const comp_path = try world.getPathAlloc(comp_id, allocator);
-            std.debug.print("entity: {s}\n", .{comp_path});
             const def = ctx.components.get(comp_path) orelse return error.ComponentDefinitionNotFound;
             const ser = def.serialize orelse continue;
             const ptr = world.getId(entity, id).?;

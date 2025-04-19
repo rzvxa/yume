@@ -417,7 +417,6 @@ pub const World = struct {
 
     pub fn getType(self: Self, ent: Entity) ![]const Entity {
         const info = c.ecs_get_type(self.inner, ent) orelse return error.EntityNotFound;
-        std.debug.print("here {?}\n\t{any}\n", .{ info.*, info.*.array[0..@intCast(info.*.count)] });
         return info.*.array[0..@intCast(info.*.count)];
     }
 
