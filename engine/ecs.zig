@@ -498,6 +498,16 @@ pub const World = struct {
         return c.ecs_lookup_path_w_sep(self.inner, opts.parent, opts.path, ".", null, opts.recursive);
     }
 
+    pub inline fn hasAncestor(self: Self, ent: Entity, maybe_ancestor: Entity) bool {
+        var it = ent;
+        while (self.getParent(it)) |parent| : (it = parent) {
+            if (parent == maybe_ancestor) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // iterators
 
     pub inline fn children(self: Self, ent: Entity) Iterator {

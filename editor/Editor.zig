@@ -644,12 +644,62 @@ pub fn openProject(self: *Self) void {
     self.open_project_modal.open();
 }
 
-pub fn trySetUniquePathName(world: ecs.World, entity: ecs.Entity, new_name: ?[*:0]const u8, allocator: std.mem.Allocator) !SetUniquePathName {
+pub fn trySetParentKeepUniquePathName(world: ecs.World, entity: ecs.Entity, new_parent: ecs.Entity, allocator: std.mem.Allocator) !void {
+    if (world.getParent(entity)) |parent| {
+        if (parent == new_parent) {
+            return;
+        }
+    }
+    if (world.hasAncestor(new_parent, entity)) {
+        return error.CyclicRelation;
+    }
+
+    const old_name = world.getPathName(entity) orelse {
+        world.removePair(entity, ecs.relations.ChildOf, ecs.core.Wildcard);
+        world.addPair(entity, ecs.relations.ChildOf, new_parent);
+        return;
+    };
+
+    switch (try makeUniquePathNameIn(world, new_parent, old_name, allocator)) {
+        .base => {
+            world.removePair(entity, ecs.relations.ChildOf, ecs.core.Wildcard);
+            world.addPair(entity, ecs.relations.ChildOf, new_parent);
+        },
+        .new => |new| {
+            defer allocator.free(new);
+            const message = try std.fmt.allocPrintZ(allocator,
+                \\Do you want to rename "{s}" to "{s}"?
+                \\
+                \\There is already an entity with the same path name.
+            , .{ old_name, new });
+            defer allocator.free(message);
+            const selected = try messageBox(.{
+                .title = "Rename Entity",
+                .message = message,
+                .kind = .warn,
+            });
+            if (selected == 1) {
+                return error.Cancel;
+            }
+            _ = world.setPathName(entity, null);
+            _ = world.removePair(entity, ecs.relations.ChildOf, ecs.core.Wildcard);
+            _ = world.addPair(entity, ecs.relations.ChildOf, new_parent);
+            _ = world.setPathName(entity, new);
+        },
+    }
+}
+
+pub fn trySetUniquePathName(world: ecs.World, entity: ecs.Entity, new_name: ?[*:0]const u8, allocator: std.mem.Allocator) !ecs.Entity {
     if (new_name) |name| {
-        switch (try makeUniquePathName(world, entity, name, allocator)) {
+        const old_name = world.getPathName(entity);
+        if (old_name != null and std.mem.eql(u8, old_name.?, std.mem.span(name))) {
+            return entity;
+        }
+
+        const parent = world.getParent(entity) orelse 0;
+        switch (try makeUniquePathNameIn(world, parent, name, allocator)) {
             .base => |base| {
-                const res = world.setPathName(entity, base);
-                return .{ .accept = res };
+                return world.setPathName(entity, base);
             },
             .new => |new| {
                 defer allocator.free(new);
@@ -665,23 +715,20 @@ pub fn trySetUniquePathName(world: ecs.World, entity: ecs.Entity, new_name: ?[*:
                     .kind = .warn,
                 });
                 if (selected == 1) {
-                    return .cancel;
+                    return error.Cancel;
                 }
-                const res = world.setPathName(entity, new);
-                return .{ .accept = res };
+                return world.setPathName(entity, new);
             },
         }
     } else {
-        const res = world.setPathName(entity, null);
-        return .{ .accept = res };
+        return world.setPathName(entity, null);
     }
 }
 
-pub fn makeUniquePathName(world: ecs.World, entity: ecs.Entity, base_name: [*:0]const u8, allocator: std.mem.Allocator) !UniquePathName {
-    const parent = world.getParent(entity) orelse 0;
+pub fn makeUniquePathNameIn(world: ecs.World, parent: ecs.Entity, base_name: [*:0]const u8, allocator: std.mem.Allocator) !UniquePathName {
     var collision = world.lookupEx(.{ .parent = parent, .path = base_name });
     std.debug.print("check for {s} collision: {d}\n", .{ base_name, collision });
-    if (collision == entity or collision == 0) {
+    if (collision == 0) {
         return .{ .base = std.mem.span(base_name) };
     }
 
@@ -693,15 +740,10 @@ pub fn makeUniquePathName(world: ecs.World, entity: ecs.Entity, base_name: [*:0]
     var i: usize = 1;
     while (collision != 0) : (i += 1) {
         suffixed = try std.fmt.bufPrintZ(buf, "{s} ({d})", .{ base_name, i });
-        collision = world.lookupEx(.{ .parent = entity, .path = suffixed });
+        collision = world.lookupEx(.{ .parent = parent, .path = suffixed });
     }
     return .{ .new = try allocator.dupeZ(u8, suffixed) };
 }
-
-const SetUniquePathName = union(enum) {
-    cancel,
-    accept: ecs.Entity,
-};
 
 const UniquePathName = union(enum) {
     base: [:0]const u8,

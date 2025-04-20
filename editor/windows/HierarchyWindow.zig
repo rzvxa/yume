@@ -29,17 +29,36 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             }
         }
         const avail = noZero(c.ImGui_GetContentRegionAvail());
+        const cursor = c.ImGui_GetCursorPos();
         _ = c.ImGui_InvisibleButton("outside-the-tree", c.ImVec2{ .x = avail.x, .y = avail.y }, 0);
         if (!(drawContextMenu(ctx.scene_root, ctx) catch @panic("failed to draw context menu"))) {
             return;
         }
         if (c.ImGui_BeginDragDropTarget()) {
-            if (c.ImGui_AcceptDragDropPayload("Entity", 0)) |payload| {
+            c.ImGui_SetCursorPos(cursor);
+            const edge_size = (c.ImGui_GetFrameHeight() + c.ImGui_GetStyle().*.FramePadding.y) / 3;
+            _ = c.ImGui_ColorButtonEx(
+                "outside-the-tree-edge-colored",
+                c.ImVec4{ .x = 0.1, .y = 0.5, .z = 0.5, .w = 0.8 },
+                0,
+                c.ImVec2{ .x = avail.x, .y = edge_size },
+            );
+            if (c.ImGui_AcceptDragDropPayload("Entity", 0)) |payload| { // drop in root
                 const payload_obj: ?*ecs.Entity = @ptrCast(@alignCast(payload.*.Data.?));
                 if (payload_obj) |p| {
-                    const parent = c.ecs_get_parent(ctx.world.inner, p.*);
-                    ctx.world.removePair(p.*, ecs.relations.ChildOf, parent);
-                    ctx.world.addPair(p.*, ecs.relations.ChildOf, ctx.scene_root);
+                    Editor.trySetParentKeepUniquePathName(ctx.world, p.*, ctx.scene_root, ctx.allocator) catch |err| switch (err) {
+                        error.CyclicRelation => _ = Editor.messageBox(.{
+                            .title = "Error!",
+                            .message = "Invalid Cyclic Relationship!",
+                            .kind = .err,
+                            .buttons = &[1]c.SDL_MessageBoxButtonData{
+                                .{ .buttonID = 0, .text = "Ok" },
+                            },
+                        }) catch @panic("Failed to set parent of entity to root"),
+                        error.Cancel => {},
+                        else => @panic("Failed to set parent of entity to root"),
+                    };
+                    ctx.world.changeEntityOrder(p.*, std.math.maxInt(u32), ctx.allocator) catch @panic("Failed to set parent of entity to root");
                 }
             }
             c.ImGui_EndDragDropTarget();
@@ -68,31 +87,40 @@ fn drawHierarchyNode(self: *Self, world: ecs.World, entity: ecs.Entity, level: u
     const avail = noZero(c.ImGui_GetContentRegionAvail());
 
     const edge_size = (c.ImGui_GetFrameHeight() + c.ImGui_GetStyle().*.FramePadding.y) / 3;
-    const cursor = c.ImGui_GetCursorPos();
-    _ = c.ImGui_InvisibleButton("over-drop", c.ImVec2{ .x = avail.x, .y = edge_size }, 0);
-    if (c.ImGui_BeginDragDropTarget()) {
-        c.ImGui_SetCursorPos(cursor);
-        _ = c.ImGui_ColorButtonEx(
-            "over-drop-colored",
-            c.ImVec4{ .x = 0.1, .y = 0.5, .z = 0.5, .w = 0.8 },
-            0,
-            c.ImVec2{ .x = avail.x, .y = edge_size },
-        );
-        if (c.ImGui_AcceptDragDropPayload("Entity", 0)) |payload| {
-            const payload_obj: ?*ecs.Entity = @ptrCast(@alignCast(payload.*.Data.?));
-            if (payload_obj) |pl| {
-                if (pl.* != entity) {
-                    const pl_parent = c.ecs_get_parent(ctx.world.inner, pl.*);
-                    const ent_parent = c.ecs_get_parent(ctx.world.inner, entity);
-                    if (pl_parent == ent_parent) {
-                        ctx.world.removePair(pl.*, ecs.relations.ChildOf, pl_parent);
+    {
+        const cursor = c.ImGui_GetCursorPos();
+        _ = c.ImGui_InvisibleButton("over-drop", c.ImVec2{ .x = avail.x, .y = edge_size }, 0);
+        if (c.ImGui_BeginDragDropTarget()) {
+            c.ImGui_SetCursorPos(cursor);
+            _ = c.ImGui_ColorButtonEx(
+                "over-drop-colored",
+                c.ImVec4{ .x = 0.1, .y = 0.5, .z = 0.5, .w = 0.8 },
+                0,
+                c.ImVec2{ .x = avail.x, .y = edge_size },
+            );
+            if (c.ImGui_AcceptDragDropPayload("Entity", 0)) |payload| { // drop above entity
+                const payload_obj: ?*ecs.Entity = @ptrCast(@alignCast(payload.*.Data.?));
+                if (payload_obj) |pl| {
+                    if (pl.* != entity) {
+                        const parent = c.ecs_get_parent(ctx.world.inner, entity);
+                        Editor.trySetParentKeepUniquePathName(ctx.world, pl.*, parent, ctx.allocator) catch |err| switch (err) {
+                            error.CyclicRelation => _ = try Editor.messageBox(.{
+                                .title = "Error!",
+                                .message = "Invalid Cyclic Relationship!",
+                                .kind = .err,
+                                .buttons = &[1]c.SDL_MessageBoxButtonData{
+                                    .{ .buttonID = 0, .text = "Ok" },
+                                },
+                            }),
+                            error.Cancel => {},
+                            else => return err,
+                        };
+                        try ctx.world.changeEntityOrder(pl.*, ctx.world.getHierarchyOrder(entity), ctx.allocator);
                     }
-                    ctx.world.addPair(pl.*, ecs.relations.ChildOf, ent_parent);
-                    try ctx.world.changeEntityOrder(pl.*, ctx.world.getHierarchyOrder(entity), ctx.allocator);
                 }
             }
+            c.ImGui_EndDragDropTarget();
         }
-        c.ImGui_EndDragDropTarget();
     }
     c.ImGui_SetCursorPosY(c.ImGui_GetCursorPosY() - edge_size);
 
@@ -108,12 +136,21 @@ fn drawHierarchyNode(self: *Self, world: ecs.World, entity: ecs.Entity, level: u
     }
 
     if (c.ImGui_BeginDragDropTarget()) {
-        if (c.ImGui_AcceptDragDropPayload("Entity", 0)) |payload| {
+        if (c.ImGui_AcceptDragDropPayload("Entity", 0)) |payload| { // drop on entity
             const payload_obj: ?*ecs.Entity = @ptrCast(@alignCast(payload.*.Data.?));
             if (payload_obj) |p| {
-                const parent = c.ecs_get_parent(ctx.world.inner, p.*);
-                ctx.world.removePair(p.*, ecs.relations.ChildOf, parent);
-                ctx.world.addPair(p.*, ecs.relations.ChildOf, entity);
+                Editor.trySetParentKeepUniquePathName(ctx.world, p.*, entity, ctx.allocator) catch |err| switch (err) {
+                    error.CyclicRelation => _ = try Editor.messageBox(.{
+                        .title = "Error!",
+                        .message = "Invalid Cyclic Relationship!",
+                        .kind = .err,
+                        .buttons = &[1]c.SDL_MessageBoxButtonData{
+                            .{ .buttonID = 0, .text = "Ok" },
+                        },
+                    }),
+                    error.Cancel => {},
+                    else => return err,
+                };
             }
         }
         c.ImGui_EndDragDropTarget();

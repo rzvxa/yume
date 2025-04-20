@@ -75,7 +75,10 @@ pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
                 entity,
                 @ptrCast(self.name_buf.items.ptr),
                 self.allocator,
-            ) catch @panic("Failed to set path name as unqiue");
+            ) catch |err| switch (err) {
+                error.Cancel => {},
+                else => @panic("Failed to set path name as unqiue"),
+            };
         } else {
             _ = ctx.world.setMetaName(entity, @ptrCast(self.name_buf.items.ptr));
         }
@@ -93,7 +96,10 @@ pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
                     entity,
                     @ptrCast(self.name_buf.items.ptr),
                     self.allocator,
-                ) catch @panic("Failed to set path name as unqiue");
+                ) catch |err| switch (err) {
+                    error.Cancel => {},
+                    else => @panic("Failed to set path name as unqiue"),
+                };
             } else {
                 _ = ctx.world.setPathName(entity, null);
                 _ = ctx.world.setMetaName(entity, @ptrCast(self.name_buf.items.ptr));
