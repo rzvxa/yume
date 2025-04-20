@@ -4,7 +4,6 @@ const std = @import("std");
 
 const ecs = @import("yume").ecs;
 const GameApp = @import("yume").GameApp;
-const components = @import("yume").components;
 
 const ComponentEditor = @import("editors.zig").ComponentEditor;
 
@@ -24,12 +23,12 @@ pub fn deinit(ptr: *anyopaque) void {
 }
 
 pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
-    var cam = ctx.world.getMut(entity, components.Camera).?;
+    var cam = ctx.world.getMut(entity, ecs.components.Camera).?;
     if (c.ImGui_BeginCombo("Camera Type", cam.opts.typeName().ptr, 0)) {
-        if (c.ImGui_Selectable(components.camera.CameraKind.perspective_name)) {
+        if (c.ImGui_Selectable(ecs.components.camera.CameraKind.perspective_name)) {
             cam.opts = .{ .kind = .perspective, .data = .{ .perspective = .{} } };
         }
-        if (c.ImGui_Selectable(components.camera.CameraKind.orthographic_name)) {
+        if (c.ImGui_Selectable(ecs.components.camera.CameraKind.orthographic_name)) {
             cam.opts = .{ .kind = .orthographic, .data = .{ .orthographic = .{} } };
         }
         c.ImGui_EndCombo();

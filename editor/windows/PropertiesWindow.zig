@@ -4,7 +4,6 @@ const std = @import("std");
 const Uuid = @import("yume").Uuid;
 const GameApp = @import("yume").GameApp;
 const ecs = @import("yume").ecs;
-const components = @import("yume").components;
 const utils = @import("yume").utils;
 const Assets = @import("yume").assets.Assets;
 
@@ -46,7 +45,7 @@ fn drawProperties(self: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
 
     for (0..2) |_| c.ImGui_Spacing();
 
-    if (ctx.world.has(entity, components.TransformMatrix)) {
+    if (ctx.world.has(entity, ecs.components.TransformMatrix)) {
         Editor.instance().editors.editEntityTransform(entity, ctx);
         c.ImGui_Spacing();
         c.ImGui_Separator();

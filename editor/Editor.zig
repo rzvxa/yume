@@ -32,8 +32,6 @@ const MouseButton = @import("yume").inputs.MouseButton;
 const InputsContext = @import("yume").inputs.InputContext;
 
 const ecs = @import("yume").ecs;
-const components = @import("yume").components;
-const systems = @import("yume").systems;
 const GameApp = @import("yume").GameApp;
 const Vec3 = @import("yume").math3d.Vec3;
 const Vec4 = @import("yume").math3d.Vec4;
@@ -122,7 +120,7 @@ pub fn init(ctx: *GameApp) *Self {
     ctx.world.tag(Playing);
     ctx.world.addSingleton(Playing);
     ctx.world.enable(ecs.typeId(Playing), false);
-    const tmu_entity = ctx.world.systemFn("transform-matrix-update", ecs.systems.PostUpdate, systems.transformMatrices);
+    const tmu_entity = ctx.world.systemFn("transform-matrix-update", ecs.systems.PostUpdate, ecs.systems.transformMatrices);
     ctx.world.add(tmu_entity, RunInEditor);
     // _ = ctx.world.observerFn(&ecs.ObserverDesc{
     //     .query = std.mem.zeroInit(ecs.QueryDesc, .{ .terms = .{
@@ -642,6 +640,53 @@ pub fn newProject(self: *Self) void {
 pub fn openProject(self: *Self) void {
     self.open_project_modal.open();
 }
+
+pub fn setPathNameUnique(world: ecs.World, entity: ecs.Entity, new_name: ?[*:0]const u8, allocator: std.mem.Allocator) !bool {
+    if (new_name) |name| {
+        switch (try makeUniquePathName(world, entity, name, allocator)) {
+            .base => |base| {
+                std.debug.print("base :: {s}\n", .{base});
+                _ = world.setPathName(entity, base);
+                return true;
+            },
+            .new => |new| {
+                std.debug.print("new :: {s}\n", .{new});
+                _ = world.setPathName(entity, new);
+                allocator.free(new);
+                return true;
+            },
+        }
+    } else {
+        _ = world.setPathName(entity, null);
+        return true;
+    }
+}
+
+pub fn makeUniquePathName(world: ecs.World, entity: ecs.Entity, base_name: [*:0]const u8, allocator: std.mem.Allocator) !UniquePathName {
+    const parent = world.getParent(entity) orelse 0;
+    var collision = world.lookupEx(.{ .parent = parent, .path = base_name });
+    std.debug.print("check for {s} collision: {d}\n", .{ base_name, collision });
+    if (collision == entity or collision == 0) {
+        return .{ .base = std.mem.span(base_name) };
+    }
+
+    var sfa = std.heap.stackFallback(512, allocator);
+    const a = sfa.get();
+    const buf: []u8 = try a.alloc(u8, std.mem.span(base_name).len + 9);
+    defer a.free(buf);
+    var suffixed: [:0]u8 = undefined;
+    var i: usize = 1;
+    while (collision != 0) : (i += 1) {
+        suffixed = try std.fmt.bufPrintZ(buf, "{s} ({d})", .{ base_name, i });
+        collision = world.lookupEx(.{ .parent = entity, .path = suffixed });
+    }
+    return .{ .new = try allocator.dupeZ(u8, suffixed) };
+}
+
+const UniquePathName = union(enum) {
+    base: [:0]const u8,
+    new: [:0]u8,
+};
 
 pub fn create_imgui_texture(uri: []const u8, engine: *Engine) !c.VkDescriptorSet {
     const image = try Assets.getOrLoadImage(try AssetsDatabase.getResourceId(uri));

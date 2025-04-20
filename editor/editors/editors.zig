@@ -3,7 +3,6 @@ const c = @import("clibs");
 const std = @import("std");
 
 const ecs = @import("yume").ecs;
-const components = @import("yume").components;
 
 const GameApp = @import("yume").GameApp;
 const Uuid = @import("yume").Uuid;
@@ -133,7 +132,7 @@ pub fn componentEditorOf(self: *Self, type_id: ecs.Entity) ?ComponentEditor {
 }
 
 fn registerBuiltinComponentEditors(self: *Self) void {
-    self.component_editor_types.put(ecs.typeId(components.Camera), CameraEditor.asComponentEditor()) catch @panic("OOM");
-    self.component_editor_types.put(ecs.typeId(components.Mesh), MeshEditor.asComponentEditor()) catch @panic("OOM");
-    self.component_editor_types.put(ecs.typeId(components.Material), MaterialEditor.asComponentEditor()) catch @panic("OOM");
+    self.component_editor_types.put(ecs.typeId(ecs.components.Camera), CameraEditor.asComponentEditor()) catch @panic("OOM");
+    self.component_editor_types.put(ecs.typeId(ecs.components.Mesh), MeshEditor.asComponentEditor()) catch @panic("OOM");
+    self.component_editor_types.put(ecs.typeId(ecs.components.Material), MaterialEditor.asComponentEditor()) catch @panic("OOM");
 }

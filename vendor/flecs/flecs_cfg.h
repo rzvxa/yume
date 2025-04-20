@@ -3,9 +3,9 @@
 #define FLECS_APP            /**< Application addon */
 // #define FLECS_C           /**< C API convenience macros, always enabled */
 // #define FLECS_CPP            /**< C++ API */
-#define FLECS_DOC            /**< Document entities & components */
+// #define FLECS_DOC            /**< Document entities & components */
 // #define FLECS_JOURNAL     /**< Journaling addon */
-#define FLECS_JSON           /**< Parsing JSON to/from component values */
+// #define FLECS_JSON           /**< Parsing JSON to/from component values */
 // #define FLECS_HTTP           /**< Tiny HTTP server for connecting to remote UI */
 #define FLECS_LOG            /**< When enabled ECS provides more detailed logs */
 // #define FLECS_META           /**< Reflection support */

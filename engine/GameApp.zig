@@ -17,7 +17,6 @@ const Assets = @import("assets.zig").Assets;
 const SceneAssetHandle = @import("assets.zig").SceneAssetHandle;
 
 const Scene = @import("scene.zig").Scene;
-const components = @import("components.zig");
 
 const ecs = @import("ecs.zig");
 
@@ -35,7 +34,7 @@ window: *c.SDL_Window = undefined,
 inputs: *inputs.InputContext,
 engine: VulkanEngine,
 
-components: std.StringHashMap(components.ComponentDef),
+components: std.StringHashMap(ecs.ComponentDef),
 
 world: ecs.World,
 scene_root: ecs.Entity,
@@ -64,25 +63,25 @@ pub fn init(a: std.mem.Allocator, loader: assets.ResourceLoader, window_title: [
         .window = window,
         .inputs = inputs.init(window) catch @panic("Failed to initialize input manager"),
         .engine = engine,
-        .components = std.StringHashMap(components.ComponentDef).init(a),
+        .components = std.StringHashMap(ecs.ComponentDef).init(a),
     };
 
     self.scene_root = self.world.create("root");
 
     Assets.init(a, &self.engine, loader);
 
-    self.registerComponent(components.Uuid);
-    self.registerComponent(components.Meta);
-    self.registerComponent(components.HierarchyOrder);
+    self.registerComponent(ecs.components.Uuid);
+    self.registerComponent(ecs.components.Meta);
+    self.registerComponent(ecs.components.HierarchyOrder);
 
-    self.registerComponent(components.Position);
-    self.registerComponent(components.Rotation);
-    self.registerComponent(components.Scale);
-    self.registerComponent(components.TransformMatrix);
+    self.registerComponent(ecs.components.Position);
+    self.registerComponent(ecs.components.Rotation);
+    self.registerComponent(ecs.components.Scale);
+    self.registerComponent(ecs.components.TransformMatrix);
 
-    self.registerComponent(components.Camera);
-    self.registerComponent(components.Mesh);
-    self.registerComponent(components.Material);
+    self.registerComponent(ecs.components.Camera);
+    self.registerComponent(ecs.components.Mesh);
+    self.registerComponent(ecs.components.Material);
 
     return self;
 }
@@ -192,10 +191,11 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
             self.world.addPair(entity, ecs.relations.ChildOf, parent_entity);
         }
 
-        _ = self.world.setName(entity, decl.name);
-        self.world.set(entity, components.Uuid, .{ .value = decl.uuid });
-        // self.world.set(entity, components.Meta, .{ .allocator = @ptrCast(&self.allocator), .title = try self.allocator.dupeZ(u8, decl.name) });
-        self.world.set(entity, components.HierarchyOrder, .{ .value = @intCast(idx) });
+        _ = self.world.setMetaName(entity, decl.name);
+        _ = self.world.setPathName(entity, if (decl.ident) |ident| ident else null);
+        self.world.set(entity, ecs.components.Uuid, .{ .value = decl.uuid });
+        // self.world.set(entity, ecs.components.Meta, .{ .allocator = @ptrCast(&self.allocator), .title = try self.allocator.dupeZ(u8, decl.name) });
+        self.world.set(entity, ecs.components.HierarchyOrder, .{ .value = @intCast(idx) });
 
         var iter = decl.components.iterator();
         while (iter.next()) |it| {

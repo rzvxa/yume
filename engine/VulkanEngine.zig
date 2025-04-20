@@ -15,7 +15,7 @@ const Vec4 = math3d.Vec4;
 const Mat4 = math3d.Mat4;
 
 const context = @import("context.zig");
-const components = @import("components.zig");
+const components = @import("ecs.zig").components;
 const Camera = components.Camera;
 const Mesh = components.Mesh;
 const Vertex = components.mesh.Vertex;

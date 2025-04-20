@@ -106,3 +106,28 @@ pub fn collapsingHeaderWithCheckBox(label: [*c]const u8, checked: [*c]bool, flag
     }
     return c.ImGui_CollapsingHeader(label, flags);
 }
+
+pub fn helpMessage(message: [*:0]const u8) void {
+    c.ImGui_TextDisabled("(?)");
+    if (c.ImGui_BeginItemTooltip()) {
+        c.ImGui_PushTextWrapPos(c.ImGui_GetFontSize() * 35);
+        c.ImGui_TextUnformatted(message);
+        c.ImGui_PopTextWrapPos();
+        c.ImGui_EndTooltip();
+    }
+}
+
+pub fn DelayedInputTextEx(
+    label: [*c]const u8,
+    buf: [*c]u8,
+    buf_size: usize,
+    flags: c.ImGuiInputTextFlags,
+    callback: c.ImGuiInputTextCallback,
+    user_data: ?*anyopaque,
+) bool {
+    const changed = c.ImGui_InputTextEx(label, buf, buf_size, flags, callback, user_data);
+    if (c.ImGui_IsItemDeactivated()) {
+        return changed;
+    }
+    return false;
+}

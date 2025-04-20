@@ -2,7 +2,6 @@ const c = @import("clibs");
 const std = @import("std");
 
 const ecs = @import("yume").ecs;
-const components = @import("yume").components;
 const Assets = @import("yume").Assets;
 const GameApp = @import("yume").GameApp;
 const Vec3 = @import("yume").Vec3;
@@ -50,12 +49,13 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
 }
 
 fn drawHierarchyNode(self: *Self, world: ecs.World, entity: ecs.Entity, level: usize, ctx: *GameApp) !void {
+    const uuid = ctx.world.getUuid(entity);
     const name = world.getName(entity);
     var child_it = world.children(entity);
     defer child_it.deinit();
     var has_next = child_it.next();
 
-    c.ImGui_PushID(name);
+    c.ImGui_PushID(&uuid.?.urnZ());
     defer c.ImGui_PopID();
     var node_flags = c.ImGuiTreeNodeFlags_OpenOnArrow | c.ImGuiTreeNodeFlags_SpanAvailWidth | c.ImGuiTreeNodeFlags_DefaultOpen;
     if (!has_next) {
@@ -149,15 +149,15 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) !bool {
             c.ImGui_Separator();
             if (c.ImGui_MenuItem("Cube")) {
                 const new_entity = ctx.world.entity(.{ .name = "Cube", .parent = entity });
-                ctx.world.set(new_entity, components.Mesh, (try Assets.getOrLoadMesh(try AssetsDatabase.getResourceId("builtin://cube.obj"))).*);
-                ctx.world.set(new_entity, components.Material, (try Assets.getOrLoadMaterial(try AssetsDatabase.getResourceId("builtin://materials/none.mat"))).*);
+                ctx.world.set(new_entity, ecs.components.Mesh, (try Assets.getOrLoadMesh(try AssetsDatabase.getResourceId("builtin://cube.obj"))).*);
+                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try AssetsDatabase.getResourceId("builtin://materials/none.mat"))).*);
             }
             _ = c.ImGui_MenuItem("Sphere*");
             _ = c.ImGui_MenuItem("Plane*");
             c.ImGui_Separator();
             if (c.ImGui_MenuItem("Camera")) {
                 const new_entity = ctx.world.entity(.{ .name = "Camera", .parent = entity });
-                ctx.world.set(new_entity, components.Camera, components.Camera.makePerspectiveCamera(.{
+                ctx.world.set(new_entity, ecs.components.Camera, ecs.components.Camera.makePerspectiveCamera(.{
                     .fovy_rad = std.math.degreesToRadians(75),
                     .near = 0.1,
                     .far = 200,

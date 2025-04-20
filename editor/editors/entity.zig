@@ -13,24 +13,32 @@ const Self = @This();
 
 allocator: std.mem.Allocator,
 
-name: std.ArrayList(u8),
+name_buf: std.ArrayList(u8),
 
 pub fn init(allocator: std.mem.Allocator, entity: ecs.Entity, ctx: *GameApp) Self {
     const name = ctx.world.getName(entity);
     var self = Self{
         .allocator = allocator,
-        .name = std.ArrayList(u8).init(allocator),
+        .name_buf = std.ArrayList(u8).init(allocator),
     };
-    self.name.appendSlice(name) catch @panic("OOM");
-    self.name.append(0) catch @panic("OOM");
+    self.name_buf.appendSlice(name) catch @panic("OOM");
+    self.name_buf.append(0) catch @panic("OOM");
     return self;
 }
 
 pub fn deinit(self: *Self) void {
-    self.name.deinit();
+    self.name_buf.deinit();
 }
 
 pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
+    const metaName = ctx.world.getMetaName(entity);
+    const pathName = ctx.world.getPathName(entity);
+    var has_path_name = pathName != null;
+
+    self.name_buf.clearRetainingCapacity();
+    self.name_buf.appendSlice(pathName orelse metaName) catch @panic("OOM");
+    self.name_buf.append(0) catch @panic("OOM");
+
     const icon = Editor.object_icon_ds;
     const avail = c.ImGui_GetContentRegionAvail();
     const old_pad_y = c.ImGui_GetStyle().*.FramePadding.y;
@@ -50,25 +58,62 @@ pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
     _ = c.ImGui_Checkbox("###enabled", &enabled);
     c.ImGui_SameLine();
 
-    var callback = imutils.ArrayListU8ResizeCallback{ .buf = &self.name };
-    const renamed = c.ImGui_InputTextEx(
+    var callback = imutils.ArrayListU8ResizeCallback{ .buf = &self.name_buf };
+    const renamed = imutils.DelayedInputTextEx(
         "###Name",
-        self.name.items.ptr,
-        self.name.capacity,
+        self.name_buf.items.ptr,
+        self.name_buf.capacity,
         c.ImGuiInputTextFlags_CallbackResize,
         imutils.ArrayListU8ResizeCallback.InputTextCallback,
         &callback,
     );
 
     if (renamed) {
-        // const len = self.name.items.len;
-
-        _ = ctx.world.setName(entity, @ptrCast(self.name.items.ptr));
-        // var new_slice = (ctx.allocator.realloc(utils.absorbSentinel(obj.name), len + 1) catch @panic("OOM"));
-        // @memcpy(new_slice[0..len], self.name.items);
-        // new_slice[len] = 0;
-        // obj.name = new_slice.ptr[0..len :0];
+        if (has_path_name) {
+            std.debug.assert(Editor.setPathNameUnique(ctx.world, entity, @ptrCast(self.name_buf.items.ptr), self.allocator) catch @panic("Failed to set path name as unqiue"));
+            // const new_name = ctx.world.getPathName(entity).?;
+            // if (!std.mem.eql(u8, new_name, self.name_buf.items)) {
+            // c.ImGui_ClearActiveID();
+            // self.name_buf.clearRetainingCapacity();
+            // self.name_buf.appendSlice(new_name) catch @panic("OOM");
+            // self.name_buf.append(0) catch @panic("OOM");
+            // }
+        } else {
+            _ = ctx.world.setMetaName(entity, @ptrCast(self.name_buf.items.ptr));
+        }
     }
 
     c.ImGui_EndChildFrame();
+
+    const identifiers_flags = if (has_path_name) c.ImGuiTreeNodeFlags_DefaultOpen else 0;
+
+    if (c.ImGui_TreeNodeEx("Identifiers", identifiers_flags)) {
+        if (c.ImGui_Checkbox("Use name as unique identifier", &has_path_name)) {
+            if (has_path_name) {
+                _ = ctx.world.setPathName(entity, @ptrCast(self.name_buf.items.ptr));
+            } else {
+                _ = ctx.world.setPathName(entity, null);
+                _ = ctx.world.setMetaName(entity, @ptrCast(self.name_buf.items.ptr));
+            }
+        }
+        c.ImGui_SameLine();
+        imutils.helpMessage(
+            \\Unique identifiers can be used to lookup entities with human readable names, When this option is disabled entity is identifiable only through its entity ID.
+            \\
+            \\These identifiers as the name suggests have to be unique in the scope of their parents.
+            \\This is because the identifier value is directly used for lookups in a hashmap.
+            \\
+            \\Editor handles uniqueness of identifiers similar to a file manager - by suggesting renames with suffixes on pasting/creation,
+            \\However when interacting with the entities programmatically a violation of this rule can cause runtime panics as of now.
+        );
+
+        {
+            c.ImGui_BeginDisabled(true);
+            _ = c.ImGui_InputText("Symbol", @constCast("TODO"), 5, 0);
+            _ = c.ImGui_InputText("Alias", @constCast("TODO"), 5, 0);
+            c.ImGui_EndDisabled();
+        }
+
+        c.ImGui_TreePop();
+    }
 }

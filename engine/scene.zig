@@ -1,7 +1,6 @@
 const std = @import("std");
 
 const ecs = @import("ecs.zig");
-const components = @import("components.zig");
 const Dynamic = @import("serialization/dynamic.zig").Dynamic;
 const GameApp = @import("GameApp.zig");
 const Uuid = @import("uuid.zig").Uuid;
@@ -9,8 +8,6 @@ const Vec3 = @import("math3d.zig").Vec3;
 const Mat4 = @import("math3d.zig").Mat4;
 const Quat = @import("math3d.zig").Quat;
 const utils = @import("utils.zig");
-const Camera = @import("components/camera.zig").Camera;
-const BoundingBox = @import("components/mesh.zig").BoundingBox;
 
 pub const Scene = struct {
     const Self = @This();
@@ -31,7 +28,7 @@ pub const Scene = struct {
             .allocator = a,
             .root = undefined,
         };
-        self.root = Object.create(self.allocator, try a.dupeZ(u8, "root")) catch @panic("OOM");
+        self.root = Object.initRoot(self.allocator) catch @panic("OOM");
 
         return self;
     }
@@ -153,15 +150,17 @@ const Object = struct {
 
     uuid: Uuid,
     name: [:0]u8,
+    ident: ?[:0]u8,
     parent: ?*Object = null,
     children: std.ArrayList(*Object),
     components: std.StringArrayHashMap(Component),
 
-    fn create(allocator: std.mem.Allocator, name: [:0]const u8) !*Object {
+    fn initRoot(allocator: std.mem.Allocator) !*Object {
         const self = try allocator.create(Self);
         self.* = .{
             .uuid = Uuid.new(),
-            .name = try allocator.dupeZ(u8, name),
+            .name = try allocator.dupeZ(u8, "root"),
+            .ident = try allocator.dupeZ(u8, "root"),
             .children = std.ArrayList(*Object).init(allocator),
             .components = std.StringArrayHashMap(Component).init(allocator),
         };
@@ -197,6 +196,9 @@ const Object = struct {
 
         try jws.objectField("name");
         try jws.write(self.name);
+
+        try jws.objectField("ident");
+        try jws.write(self.ident);
 
         try jws.objectField("parent");
         try jws.write(self.parent);
@@ -238,6 +240,7 @@ const Object = struct {
         result.* = .{
             .uuid = .{ .raw = 0 },
             .name = try a.allocSentinel(u8, 0, 0),
+            .ident = null,
             .children = std.ArrayList(*Object).init(a),
             .components = std.StringArrayHashMap(Component).init(a),
         };
@@ -260,6 +263,15 @@ const Object = struct {
             } else if (std.mem.eql(u8, field_name, "name")) {
                 result.name = switch (try jrs.next()) {
                     inline .string => |slice| try a.dupeZ(u8, slice),
+                    else => {
+                        std.debug.print("{}\n", .{tk});
+                        return error.UnexpectedToken;
+                    },
+                };
+            } else if (std.mem.eql(u8, field_name, "ident")) {
+                result.ident = switch (try jrs.next()) {
+                    inline .string => |slice| try a.dupeZ(u8, slice),
+                    inline .null => null,
                     else => {
                         std.debug.print("{}\n", .{tk});
                         return error.UnexpectedToken;
@@ -308,7 +320,8 @@ const Object = struct {
     }
 
     pub fn fromEcs(allocator: std.mem.Allocator, world: ecs.World, entity: ecs.Entity, parent: ?*Self, ctx: *GameApp) !*Self {
-        const name = world.getName(entity);
+        const name = world.getMetaName(entity);
+        const ident = if (world.getPathName(entity)) |ident| try allocator.dupeZ(u8, ident) else null;
         const uuid = blk: {
             if (world.getUuid(entity)) |uuid| {
                 break :blk uuid;
@@ -319,7 +332,7 @@ const Object = struct {
                         " assigning a new UUID {s} to the entity {d} to it.\n",
                     .{ uuid.urn(), entity },
                 );
-                world.set(entity, components.Uuid, .{ .value = uuid });
+                world.set(entity, ecs.components.Uuid, .{ .value = uuid });
                 break :blk uuid;
             }
         };
@@ -327,6 +340,7 @@ const Object = struct {
         self.* = .{
             .uuid = uuid,
             .name = try allocator.dupeZ(u8, name),
+            .ident = ident,
             .parent = parent,
             .children = std.ArrayList(*Object).init(allocator),
             .components = std.StringArrayHashMap(Component).init(allocator),

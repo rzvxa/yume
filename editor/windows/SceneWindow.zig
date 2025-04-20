@@ -8,7 +8,7 @@ const ecs = @import("yume").ecs;
 const Vec3 = @import("yume").Vec3;
 const Engine = @import("yume").VulkanEngine;
 const GameApp = @import("yume").GameApp;
-const components = @import("yume").components;
+const components = @import("yume").ecs.components;
 const AllocatedBuffer = @import("yume").AllocatedBuffer;
 
 const Editor = @import("../Editor.zig");

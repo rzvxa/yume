@@ -4,7 +4,6 @@ const std = @import("std");
 
 const GameApp = @import("yume").GameApp;
 const ecs = @import("yume").ecs;
-const components = @import("yume").components;
 const Vec3 = @import("yume").Vec3;
 const Mat4 = @import("yume").Mat4;
 const Quat = @import("yume").Quat;
@@ -25,30 +24,30 @@ pub fn init(allocator: std.mem.Allocator, _: ecs.Entity) Self {
 pub fn deinit(_: *Self) void {}
 
 pub fn edit(_: *Self, entity: ecs.Entity, ctx: *GameApp) void {
-    const position = ctx.world.getMut(entity, components.Position);
-    const rotation = ctx.world.getMut(entity, components.Rotation);
-    const scale = ctx.world.getMut(entity, components.Scale);
+    const position = ctx.world.getMut(entity, ecs.components.Position);
+    const rotation = ctx.world.getMut(entity, ecs.components.Rotation);
+    const scale = ctx.world.getMut(entity, ecs.components.Scale);
 
     var changed = false;
 
     if (imutils.collapsingHeaderWithCheckBox("Transform", null, c.ImGuiTreeNodeFlags_DefaultOpen)) {
         if (position) |pos| {
             if (inputVec3("Position", &pos.value, 0.01)) {
-                ctx.world.modified(entity, components.Position);
+                ctx.world.modified(entity, ecs.components.Position);
                 changed = true;
             }
         }
 
         if (rotation) |rot| {
             if (inputVec3("Rotation", &rot.value, 1)) {
-                ctx.world.modified(entity, components.Rotation);
+                ctx.world.modified(entity, ecs.components.Rotation);
                 changed = true;
             }
         }
 
         if (scale) |skale| {
             if (inputVec3("Scale", &skale.value, 0.01)) {
-                ctx.world.modified(entity, components.Scale);
+                ctx.world.modified(entity, ecs.components.Scale);
                 changed = true;
             }
         }

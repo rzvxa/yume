@@ -9,7 +9,7 @@ const Vec3 = yume.Vec3;
 const Mat4 = yume.Mat4;
 const Rect = yume.Rect;
 
-const BoundingBox = @import("yume").components.mesh.BoundingBox;
+const BoundingBox = @import("yume").ecs.components.mesh.BoundingBox;
 
 const GizmoContext = struct {
     inframe: bool = false,

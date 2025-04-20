@@ -3,7 +3,6 @@ const c = @import("clibs");
 const std = @import("std");
 
 const ecs = @import("yume").ecs;
-const components = @import("yume").components;
 const GameApp = @import("yume").GameApp;
 const Vec3 = @import("yume").Vec3;
 const Mat4 = @import("yume").Mat4;
@@ -27,7 +26,7 @@ pub fn deinit(ptr: *anyopaque) void {
 }
 
 pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
-    var mesh = ctx.world.getMutAligned(entity, components.Mesh, 8).?;
+    var mesh = ctx.world.getMutAligned(entity, ecs.components.Mesh, 8).?;
     var urn = mesh.uuid.urnZ();
     c.ImGui_PushID("mesh-reference");
     _ = c.ImGui_InputText("##mesh-reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);

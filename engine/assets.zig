@@ -6,7 +6,7 @@ const Uuid = @import("uuid.zig").Uuid;
 const texs = @import("textures.zig");
 const Texture = texs.Texture;
 
-const components = @import("components.zig");
+const components = @import("ecs.zig").components;
 
 const Mesh = components.Mesh;
 const Vertex = components.mesh.Vertex;

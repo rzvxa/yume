@@ -3,7 +3,6 @@ const std = @import("std");
 
 const GameApp = @import("GameApp.zig");
 const Uuid = @import("uuid.zig").Uuid;
-const components = @import("components.zig");
 const Dynamic = @import("serialization/dynamic.zig").Dynamic;
 
 pub const TypeId = c.ecs_id_t;
@@ -269,13 +268,15 @@ pub const World = struct {
 
     pub inline fn entity(self: Self, opts: struct {
         uuid: ?Uuid = null,
-        name: ?[*:0]const u8 = null,
+        name: [*:0]const u8 = "New Entity",
+        ident: ?[*:0]const u8 = null,
         parent: ?Entity = null,
     }) Entity {
-        const ent = self.create(opts.name);
+        const ent = self.create(opts.ident);
         if (opts.parent) |parent| {
             self.addPair(ent, relations.ChildOf, parent);
         }
+        self.set(ent, components.Meta, components.Meta.init(opts.name) catch @panic("Failed to create meta"));
         self.set(ent, components.Uuid, .{ .value = opts.uuid orelse Uuid.new() });
         self.set(ent, components.Position, .{});
         self.set(ent, components.Rotation, .{});
@@ -334,14 +335,13 @@ pub const World = struct {
 
     // set
 
-    pub inline fn setName(self: Self, ent: Entity, new_name: [*:0]const u8) Entity {
-        return c.ecs_set_name(self.inner, ent, new_name);
+    pub inline fn setMetaName(self: Self, ent: Entity, new_name: [*:0]const u8) Entity {
+        self.ensure(ent, components.Meta).?.*.setName(new_name) catch @panic("Failed to set meta name");
+        return ent;
     }
 
-    // works like setName but provides name suffixes when there is already an entity with the given name
-    pub inline fn setNameWithSuffix(self: Self, ent: Entity, new_name: [*:0]const u8) Entity {
-        c.ecs_set_name(self.inner, ent, new_name);
-        @compileError("TODO");
+    pub fn setPathName(self: Self, ent: Entity, new_name: ?[*:0]const u8) Entity {
+        return c.ecs_set_name(self.inner, ent, new_name);
     }
 
     pub inline fn setUuid(self: Self, ent: Entity, uuid: Uuid) void {
@@ -433,7 +433,22 @@ pub const World = struct {
     }
 
     pub inline fn getName(self: Self, ent: Entity) [:0]const u8 {
-        return if (c.ecs_get_name(self.inner, ent)) |name| std.mem.span(name) else "";
+        return if (c.ecs_get_name(self.inner, ent)) |name|
+            std.mem.span(name)
+        else
+            self.getMetaName(ent);
+    }
+
+    pub inline fn ensure(self: Self, ent: Entity, comptime T: type) ?*T {
+        return @ptrCast(@alignCast(c.ecs_ensure_id(self.inner, ent, typeId(T))));
+    }
+
+    pub inline fn getMetaName(self: Self, ent: Entity) [:0]const u8 {
+        return if (self.get(ent, components.Meta)) |meta| std.mem.span(meta.name) else "";
+    }
+
+    pub inline fn getPathName(self: Self, ent: Entity) ?[:0]const u8 {
+        return if (c.ecs_get_name(self.inner, ent)) |name| std.mem.span(name) else null;
     }
 
     pub inline fn getPathAlloc(self: Self, ent: Entity, allocator: std.mem.Allocator) ![:0]u8 {
@@ -476,9 +491,9 @@ pub const World = struct {
     }
 
     pub inline fn lookupEx(self: Self, opts: struct {
-        parent: Entity,
+        parent: Entity = 0,
         path: [*:0]const u8,
-        recursive: bool,
+        recursive: bool = false,
     }) Entity {
         return c.ecs_lookup_path_w_sep(self.inner, opts.parent, opts.path, ".", null, opts.recursive);
     }
@@ -739,7 +754,7 @@ fn staticEsqueInitializer() void {
     traits.Relationship = c.EcsRelationship;
     traits.Target = c.EcsTarget;
 
-    identifier_tags.Name = c.EcsName;
+    identifier_tags.PathName = c.EcsName;
     identifier_tags.Symbol = c.EcsSymbol;
     identifier_tags.Alias = c.EcsAlias;
 
@@ -853,7 +868,7 @@ pub const traits = struct {
 
 // Identifier tags
 pub const identifier_tags = struct {
-    pub var Name: Entity = undefined;
+    pub var PathName: Entity = undefined;
     pub var Symbol: Entity = undefined;
     pub var Alias: Entity = undefined;
 };
@@ -890,24 +905,6 @@ pub const predicates = struct {
     pub var ScopeClose: Entity = undefined;
 };
 
-// Systems
-pub const systems = struct {
-    pub var Monitor: Entity = undefined;
-    pub var Empty: Entity = undefined;
-    pub var OnStart: Entity = undefined;
-    pub var PreFrame: Entity = undefined;
-    pub var OnLoad: Entity = undefined;
-    pub var PostLoad: Entity = undefined;
-    pub var PreUpdate: Entity = undefined;
-    pub var OnUpdate: Entity = undefined;
-    pub var OnValidate: Entity = undefined;
-    pub var PostUpdate: Entity = undefined;
-    pub var PreStore: Entity = undefined;
-    pub var OnStore: Entity = undefined;
-    pub var PostFrame: Entity = undefined;
-    pub var Phase: Entity = undefined;
-};
-
 // Builtin relationships
 pub const relations = struct {
     pub var ChildOf: Entity = undefined;
@@ -930,6 +927,47 @@ pub const masks = struct {
     pub const entity = c.ECS_ENTITY_MASK;
     pub const generation = c.ECS_GENERATION_MASK;
     pub const component = c.ECS_COMPONENT_MASK;
+};
+
+// Components
+pub const components = struct {
+    pub const Meta = @import("components/Meta.zig").Meta;
+    pub const Uuid = @import("components/Uuid.zig").Uuid;
+
+    pub const Position = @import("components/transform.zig").Position;
+    pub const Rotation = @import("components/transform.zig").Rotation;
+    pub const Scale = @import("components/transform.zig").Scale;
+    pub const TransformMatrix = @import("components/transform.zig").TransformMatrix;
+
+    pub const camera = @import("components/camera.zig");
+    pub const mesh = @import("components/mesh.zig");
+    pub const material = @import("components/material.zig");
+
+    pub const Camera = camera.Camera;
+    pub const Mesh = mesh.Mesh;
+    pub const Material = material.Material;
+
+    pub const HierarchyOrder = @import("components/HierarchyOrder.zig").HierarchyOrder;
+};
+
+// Systems
+pub const systems = struct {
+    pub var Monitor: Entity = undefined;
+    pub var Empty: Entity = undefined;
+    pub var OnStart: Entity = undefined;
+    pub var PreFrame: Entity = undefined;
+    pub var OnLoad: Entity = undefined;
+    pub var PostLoad: Entity = undefined;
+    pub var PreUpdate: Entity = undefined;
+    pub var OnUpdate: Entity = undefined;
+    pub var OnValidate: Entity = undefined;
+    pub var PostUpdate: Entity = undefined;
+    pub var PreStore: Entity = undefined;
+    pub var OnStore: Entity = undefined;
+    pub var PostFrame: Entity = undefined;
+    pub var Phase: Entity = undefined;
+
+    pub const transformMatrices = @import("systems/transformMatrix.zig").system;
 };
 
 /// Taken from <https://github.com/zig-gamedev/zflecs/blob/ee2cd434fa2ec2454008988a1cc1201b242f030e/src/zflecs.zig#L2652C1-L2693C2>
@@ -986,6 +1024,25 @@ pub fn SystemImpl(comptime fn_system: anytype) type {
 
 fn hasItParam(comptime params: []const std.builtin.Type.Fn.Param) bool {
     return params[0].type == *c.ecs_iter_t or params[0].type == *Iter;
+}
+
+// ECS OS allocator API
+// TODO: define allocator in zig world and expose it to C instead of doing this
+// It doesn't use arena which is undesired
+pub inline fn malloc(size: usize) std.mem.Allocator.Error!*anyopaque {
+    return c.ecs_os_api.malloc_.?(@intCast(size)) orelse return error.OutOfMemory;
+}
+
+pub inline fn free(ptr: *anyopaque) void {
+    return c.ecs_os_api.free_.?(ptr);
+}
+
+pub inline fn realloc(ptr: *anyopaque, size: usize) std.mem.Allocator.Error!*anyopaque {
+    return c.ecs_os_api.realloc_.?(ptr, @intCast(size)) orelse return error.OutOfMemory;
+}
+
+pub inline fn calloc(size: usize) std.mem.Allocator.Error!*anyopaque {
+    return c.ecs_os_api.calloc_.?(@intCast(size)) orelse return error.OutOfMemory;
 }
 
 // monkey patches for working around zig compiler bugs
