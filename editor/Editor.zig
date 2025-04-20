@@ -94,6 +94,8 @@ const Selection = union(SelectionKind) {
 
 const Self = @This();
 
+ctx: *GameApp,
+
 selection: Selection = .none,
 
 play: bool = false,
@@ -156,6 +158,7 @@ pub fn init(ctx: *GameApp) *Self {
     EditorDatabase.init(ctx.allocator, db_path) catch @panic("Faield to load editor database");
     inputs = InputsContext{ .window = ctx.window };
     singleton = Self{
+        .ctx = ctx,
         .editors = Editors.init(ctx.allocator),
         .hello_modal = HelloModal.init() catch @panic("Failed to initialize `HelloModal`"),
         .new_project_modal = NewProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `NewProjectModal`"),
@@ -197,7 +200,7 @@ pub fn init(ctx: *GameApp) *Self {
     return &singleton;
 }
 
-pub fn deinit(self: *Self, ctx: *GameApp) void {
+pub fn deinit(self: *Self) void {
     self.editors.deinit();
     self.hello_modal.deinit();
     self.new_project_modal.deinit();
@@ -208,17 +211,17 @@ pub fn deinit(self: *Self, ctx: *GameApp) void {
     if (Project.current()) |p| {
         p.unload();
     }
-    check_vk(c.vkDeviceWaitIdle(ctx.engine.device)) catch @panic("Failed to wait for device idle");
+    check_vk(c.vkDeviceWaitIdle(self.ctx.engine.device)) catch @panic("Failed to wait for device idle");
     c.cImGui_ImplVulkan_Shutdown();
     EditorDatabase.flush() catch std.debug.print("Failed to flush the editor database\n", .{});
     EditorDatabase.deinit();
 }
 
-pub fn newFrame(_: *Self, _: *GameApp) void {
+pub fn newFrame(_: *Self) void {
     inputs.clear();
 }
 
-pub fn processEvent(self: *Self, ctx: *GameApp, event: *c.SDL_Event) bool {
+pub fn processEvent(self: *Self, event: *c.SDL_Event) bool {
     _ = c.cImGui_ImplSDL3_ProcessEvent(event);
     switch (event.type) {
         c.SDL_EVENT_KEY_UP => {
@@ -230,7 +233,7 @@ pub fn processEvent(self: *Self, ctx: *GameApp, event: *c.SDL_Event) bool {
         else => {},
     }
     if (self.game_window.is_game_window_focused) {
-        ctx.inputs.push(event);
+        self.ctx.inputs.push(event);
     } else if (self.scene_window.is_scene_window_focused) {
         inputs.push(event);
     }
@@ -248,7 +251,7 @@ fn isInSceneView(self: *Self, pos: c.ImVec2) bool {
         (pos.y > self.scene_window_rect.y and pos.y < self.scene_window_rect.w);
 }
 
-pub fn update(self: *Self, ctx: *GameApp) bool {
+pub fn update(self: *Self) bool {
     var input: Vec3 = Vec3.make(0, 0, 0);
     var input_rot: Vec3 = Vec3.make(0, 0, 0);
 
@@ -302,19 +305,19 @@ pub fn update(self: *Self, ctx: *GameApp) bool {
 
     // Apply camera movements
     if (input.squaredLen() > (0.1 * 0.1)) {
-        const camera_delta = input.mulf(ctx.delta);
+        const camera_delta = input.mulf(self.ctx.delta);
         self.scene_window.camera_pos = Vec3.add(self.scene_window.camera_pos, camera_delta);
     }
     if (input_rot.squaredLen() > (0.1 * 0.1)) {
-        const rot_delta = input_rot.mulf(ctx.delta * 1.0);
+        const rot_delta = input_rot.mulf(self.ctx.delta * 1.0);
         self.scene_window.camera_rot = self.scene_window.camera_rot.add(rot_delta);
     }
 
-    return ctx.world.progress(ctx.delta);
+    return self.ctx.world.progress(self.ctx.delta);
 }
 
-pub fn draw(self: *Self, ctx: *GameApp) void {
-    const cmd = ctx.engine.beginFrame();
+pub fn draw(self: *Self) void {
+    const cmd = self.ctx.engine.beginFrame();
 
     c.cImGui_ImplVulkan_NewFrame();
     c.cImGui_ImplSDL3_NewFrame();
@@ -339,12 +342,12 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             if (c.ImGui_MenuItem("New*")) {}
             if (c.ImGui_MenuItem("Load*")) {}
             if (c.ImGui_MenuItemEx("Save", "CTRL+S", false, true)) {
-                if (ctx.scene_handle) |hndl| {
-                    const scene = ctx.snapshotLiveScene() catch @panic("Faield to serialize scene");
+                if (self.ctx.scene_handle) |hndl| {
+                    const scene = self.ctx.snapshotLiveScene() catch @panic("Faield to serialize scene");
                     defer scene.deinit();
                     const path = AssetsDatabase.getResourcePath(hndl.uuid) catch @panic("Scene not found!");
-                    const json = std.json.stringifyAlloc(ctx.allocator, scene, .{ .whitespace = .indent_4 }) catch @panic("Failed to serialize the scene");
-                    defer ctx.allocator.free(json);
+                    const json = std.json.stringifyAlloc(self.ctx.allocator, scene, .{ .whitespace = .indent_4 }) catch @panic("Failed to serialize the scene");
+                    defer self.ctx.allocator.free(json);
                     std.debug.print("saving scene \"{s}\" to save to \"{s}\"\n", .{ hndl.uuid.urn(), path });
                     var file = std.fs.cwd().createFile(path, .{}) catch @panic("Failed to open scene file to save");
                     defer file.close();
@@ -375,8 +378,8 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         c.ImGui_SetCursorPosX((c.ImGui_GetCursorPosX() - (13 * 3)) + (GameApp.window_extent.width / 2) - c.ImGui_GetCursorPosX());
         if (c.ImGui_ImageButton("Play", @intFromPtr(if (self.play) stop_icon_ds else play_icon_ds), c.ImVec2{ .x = 13, .y = 13 })) {
             self.play = !self.play;
-            ctx.world.enable(ecs.typeId(Playing), self.play);
-            self.bootstrapEditorPipeline(ctx.world);
+            self.ctx.world.enable(ecs.typeId(Playing), self.play);
+            self.bootstrapEditorPipeline(self.ctx.world);
         }
         _ = c.ImGui_ImageButton("Pause", @intFromPtr(pause_icon_ds), c.ImVec2{ .x = 13, .y = 13 });
         _ = c.ImGui_ImageButton("Next", @intFromPtr(fast_forward_icon_ds), c.ImVec2{ .x = 13, .y = 13 });
@@ -443,24 +446,24 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
 
     c.ImGui_End();
 
-    self.hierarchy_window.draw(ctx);
-    self.properties_window.draw(ctx) catch @panic("err");
+    self.hierarchy_window.draw(self.ctx);
+    self.properties_window.draw(self.ctx) catch @panic("err");
     self.project_explorer.draw();
-    self.scene_window.draw(cmd, ctx);
-    self.game_window.draw(cmd, ctx);
+    self.scene_window.draw(cmd, self.ctx);
+    self.game_window.draw(cmd, self.ctx);
 
     self.hello_modal.show();
-    self.new_project_modal.show(ctx);
-    self.open_project_modal.show(ctx);
+    self.new_project_modal.show(self.ctx);
+    self.open_project_modal.show(self.ctx);
 
     c.ImGui_Render();
 
     // UI
     c.cImGui_ImplVulkan_RenderDrawData(c.ImGui_GetDrawData(), cmd);
 
-    ctx.engine.beginPresentRenderPass(cmd);
+    self.ctx.engine.beginPresentRenderPass(cmd);
 
-    ctx.engine.endFrame(cmd);
+    self.ctx.engine.endFrame(cmd);
 }
 
 fn init_descriptors(self: *Self, engine: *Engine) void {
@@ -641,24 +644,36 @@ pub fn openProject(self: *Self) void {
     self.open_project_modal.open();
 }
 
-pub fn setPathNameUnique(world: ecs.World, entity: ecs.Entity, new_name: ?[*:0]const u8, allocator: std.mem.Allocator) !bool {
+pub fn trySetUniquePathName(world: ecs.World, entity: ecs.Entity, new_name: ?[*:0]const u8, allocator: std.mem.Allocator) !SetUniquePathName {
     if (new_name) |name| {
         switch (try makeUniquePathName(world, entity, name, allocator)) {
             .base => |base| {
-                std.debug.print("base :: {s}\n", .{base});
-                _ = world.setPathName(entity, base);
-                return true;
+                const res = world.setPathName(entity, base);
+                return .{ .accept = res };
             },
             .new => |new| {
-                std.debug.print("new :: {s}\n", .{new});
-                _ = world.setPathName(entity, new);
-                allocator.free(new);
-                return true;
+                defer allocator.free(new);
+                const message = try std.fmt.allocPrintZ(allocator,
+                    \\Do you want to rename "{s}" to "{s}"?
+                    \\
+                    \\There is already an entity with the same path name.
+                , .{ name, new });
+                defer allocator.free(message);
+                const selected = try messageBox(.{
+                    .title = "Rename Entity",
+                    .message = message,
+                    .kind = .warn,
+                });
+                if (selected == 1) {
+                    return .cancel;
+                }
+                const res = world.setPathName(entity, new);
+                return .{ .accept = res };
             },
         }
     } else {
-        _ = world.setPathName(entity, null);
-        return true;
+        const res = world.setPathName(entity, null);
+        return .{ .accept = res };
     }
 }
 
@@ -683,10 +698,44 @@ pub fn makeUniquePathName(world: ecs.World, entity: ecs.Entity, base_name: [*:0]
     return .{ .new = try allocator.dupeZ(u8, suffixed) };
 }
 
+const SetUniquePathName = union(enum) {
+    cancel,
+    accept: ecs.Entity,
+};
+
 const UniquePathName = union(enum) {
     base: [:0]const u8,
     new: [:0]u8,
 };
+
+pub fn messageBox(opts: struct {
+    title: [*:0]const u8,
+    message: [*:0]const u8,
+    buttons: []const c.SDL_MessageBoxButtonData = &[2]c.SDL_MessageBoxButtonData{
+        .{ .buttonID = 0, .text = "Ok", .flags = c.SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT },
+        .{ .buttonID = 1, .text = "Cancel", .flags = c.SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT },
+    },
+    kind: enum(u32) {
+        default = 0,
+        err = c.SDL_MESSAGEBOX_ERROR,
+        warn = c.SDL_MESSAGEBOX_WARNING,
+        info = c.SDL_MESSAGEBOX_INFORMATION,
+    } = .default,
+}) !usize {
+    var button: c_int = 0;
+    if (!c.SDL_ShowMessageBox(&.{
+        .flags = @intFromEnum(opts.kind),
+        .window = Self.instance().ctx.window,
+        .title = opts.title,
+        .message = opts.message,
+        .numbuttons = @intCast(opts.buttons.len),
+        .buttons = &opts.buttons[0],
+    }, &button)) {
+        return error.FailedToOpenMessageBox;
+    }
+
+    return @intCast(button);
+}
 
 pub fn create_imgui_texture(uri: []const u8, engine: *Engine) !c.VkDescriptorSet {
     const image = try Assets.getOrLoadImage(try AssetsDatabase.getResourceId(uri));

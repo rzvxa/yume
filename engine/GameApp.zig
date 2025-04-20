@@ -95,7 +95,7 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
     while (!quit) {
         self.newFrame();
         if (comptime std.meta.hasMethod(Dispatcher, "newFrame")) {
-            d.newFrame(self);
+            d.newFrame();
         }
         while (c.SDL_PollEvent(&event)) {
             if (event.type == c.SDL_EVENT_MOUSE_MOTION) {
@@ -103,16 +103,16 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
                 self.mouse.y = event.motion.y;
             }
             if (comptime std.meta.hasMethod(Dispatcher, "processEvent")) {
-                quit = !d.processEvent(self, &event);
+                quit = !d.processEvent(&event);
             }
         }
 
         if (comptime std.meta.hasMethod(Dispatcher, "update")) {
-            const cont: bool = d.update(self);
+            const cont: bool = d.update();
             quit = quit or !cont;
         }
         if (comptime std.meta.hasMethod(Dispatcher, "draw")) {
-            d.draw(self);
+            d.draw();
         }
 
         self.delta = @floatCast(@as(f64, @floatFromInt(timer.lap())) / 1_000_000_000.0);
@@ -134,11 +134,11 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
             _ = c.SDL_SetWindowTitle(self.window, new_title.ptr);
         }
         if (comptime std.meta.hasMethod(Dispatcher, "endFrame")) {
-            d.endFrame(self);
+            d.endFrame();
         }
     }
 
-    d.deinit(self);
+    d.deinit();
 }
 
 pub fn deinit(self: *Self) void {

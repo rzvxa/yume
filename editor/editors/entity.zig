@@ -70,14 +70,12 @@ pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
 
     if (renamed) {
         if (has_path_name) {
-            std.debug.assert(Editor.setPathNameUnique(ctx.world, entity, @ptrCast(self.name_buf.items.ptr), self.allocator) catch @panic("Failed to set path name as unqiue"));
-            // const new_name = ctx.world.getPathName(entity).?;
-            // if (!std.mem.eql(u8, new_name, self.name_buf.items)) {
-            // c.ImGui_ClearActiveID();
-            // self.name_buf.clearRetainingCapacity();
-            // self.name_buf.appendSlice(new_name) catch @panic("OOM");
-            // self.name_buf.append(0) catch @panic("OOM");
-            // }
+            _ = Editor.trySetUniquePathName(
+                ctx.world,
+                entity,
+                @ptrCast(self.name_buf.items.ptr),
+                self.allocator,
+            ) catch @panic("Failed to set path name as unqiue");
         } else {
             _ = ctx.world.setMetaName(entity, @ptrCast(self.name_buf.items.ptr));
         }
@@ -90,7 +88,12 @@ pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
     if (c.ImGui_TreeNodeEx("Identifiers", identifiers_flags)) {
         if (c.ImGui_Checkbox("Use name as unique identifier", &has_path_name)) {
             if (has_path_name) {
-                _ = ctx.world.setPathName(entity, @ptrCast(self.name_buf.items.ptr));
+                _ = Editor.trySetUniquePathName(
+                    ctx.world,
+                    entity,
+                    @ptrCast(self.name_buf.items.ptr),
+                    self.allocator,
+                ) catch @panic("Failed to set path name as unqiue");
             } else {
                 _ = ctx.world.setPathName(entity, null);
                 _ = ctx.world.setMetaName(entity, @ptrCast(self.name_buf.items.ptr));
