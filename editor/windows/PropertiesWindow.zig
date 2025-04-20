@@ -3,9 +3,7 @@ const std = @import("std");
 
 const Uuid = @import("yume").Uuid;
 const GameApp = @import("yume").GameApp;
-const Object = @import("yume").scene_graph.Object;
 const ecs = @import("yume").ecs;
-const components = @import("yume").components;
 const utils = @import("yume").utils;
 const Assets = @import("yume").assets.Assets;
 
@@ -43,17 +41,16 @@ fn drawProperties(self: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
     defer c.ImGui_PopID();
 
     Editor.instance().editors.editEntityMeta(entity, ctx);
-    c.ImGui_Spacing();
-
     c.ImGui_Separator();
 
-    c.ImGui_Spacing();
-    Editor.instance().editors.editEntityTransform(entity, ctx);
-    c.ImGui_Spacing();
+    for (0..2) |_| c.ImGui_Spacing();
 
-    c.ImGui_Separator();
-
-    c.ImGui_Spacing();
+    if (ctx.world.has(entity, ecs.components.TransformMatrix)) {
+        Editor.instance().editors.editEntityTransform(entity, ctx);
+        c.ImGui_Spacing();
+        c.ImGui_Separator();
+        for (0..2) |_| c.ImGui_Spacing();
+    }
 
     const typ = c.ecs_get_type(ctx.world.inner, entity);
     const editor = Editor.instance();

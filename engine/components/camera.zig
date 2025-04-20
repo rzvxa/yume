@@ -1,11 +1,10 @@
 const std = @import("std");
 
 const ecs = @import("../ecs.zig");
-const Object = @import("../scene.zig").Object;
 const GameApp = @import("../GameApp.zig");
 const Component = @import("../scene.zig").Component;
-const ComponentDefinition = @import("../scene.zig").ComponentDefinition;
 const typeId = @import("../utils.zig").typeId;
+const Dynamic = @import("../serialization/dynamic.zig").Dynamic;
 const math3d = @import("../math3d.zig");
 const Vec2 = math3d.Vec2;
 const Vec3 = math3d.Vec3;
@@ -55,7 +54,6 @@ pub const CameraOptions = extern struct {
 pub const Camera = extern struct {
     const Self = @This();
 
-    object: *Object = undefined,
     opts: CameraOptions,
 
     view: Mat4 = Mat4.make(Vec4.ZERO, Vec4.ZERO, Vec4.ZERO, Vec4.ZERO),
@@ -66,22 +64,13 @@ pub const Camera = extern struct {
         return "editor://icons/camera.png";
     }
 
-    pub fn init(object: *Object, opts: CameraOptions) Self {
-        var self = switch (opts.kind) {
-            .perspective => makePerspectiveCamera(opts.data.perspective),
-            .orthographic => makeOrthographicCamera(opts.data.orthographic),
-        };
-        self.object = object;
-        return self;
-    }
-
-    pub fn default(ptr: *Camera, _: ecs.Entity, _: *GameApp) callconv(.C) bool {
-        ptr.* = .{
+    pub fn default(self: *Camera, _: ecs.Entity, _: *GameApp) callconv(.C) bool {
+        self.* = .{
             .opts = .{
                 .kind = .perspective,
                 .data = .{
                     .perspective = .{
-                        .fovy_rad = std.math.degreesToRadians(70.0),
+                        .fovy_rad = std.math.degreesToRadians(75),
                         .far = 200,
                         .near = 0.1,
                     },
@@ -89,6 +78,61 @@ pub const Camera = extern struct {
             },
         };
         return true;
+    }
+
+    pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
+        switch (self.opts.kind) {
+            .perspective => {
+                const fields = try allocator.alloc(Dynamic.Field, 4);
+                fields[0] = .{
+                    .key = try allocator.dupeZ(u8, "type"),
+                    .value = .{ .type = .string, .value = .{ .string = try allocator.dupeZ(u8, "perspective") } },
+                };
+                fields[1] = .{
+                    .key = try allocator.dupeZ(u8, "fovy_rad"),
+                    .value = .{ .type = .number, .value = .{ .number = self.opts.data.perspective.fovy_rad } },
+                };
+                fields[2] = .{
+                    .key = try allocator.dupeZ(u8, "near"),
+                    .value = .{ .type = .number, .value = .{ .number = self.opts.data.perspective.near } },
+                };
+                fields[3] = .{
+                    .key = try allocator.dupeZ(u8, "far"),
+                    .value = .{ .type = .number, .value = .{ .number = self.opts.data.perspective.far } },
+                };
+                return .{ .type = .object, .value = .{ .object = .{ .items = fields.ptr, .len = fields.len } } };
+            },
+            .orthographic => @panic("unimplemented orthographic camera serialization"),
+        }
+    }
+
+    pub fn deserialize(self: *@This(), value: *const Dynamic, _: std.mem.Allocator) !void {
+        const obj = try value.expectObject();
+        const kind: CameraKind = blk: {
+            const s = std.mem.span(try (try obj.expectField("type")).value.expectString());
+            if (std.mem.eql(u8, s, "perspective")) {
+                break :blk .perspective;
+            } else if (std.mem.eql(u8, s, "orthographic")) {
+                break :blk .orthographic;
+            }
+            return error.InvalidCameraType;
+        };
+
+        switch (kind) {
+            .perspective => self.* = .{
+                .opts = .{
+                    .kind = kind,
+                    .data = .{
+                        .perspective = .{
+                            .fovy_rad = try (try obj.expectField("fovy_rad")).value.expectNumber(),
+                            .near = try (try obj.expectField("near")).value.expectNumber(),
+                            .far = try (try obj.expectField("far")).value.expectNumber(),
+                        },
+                    },
+                },
+            },
+            .orthographic => @panic("unimplemented orthographic camera deserialization"),
+        }
     }
 
     pub fn makePerspectiveCamera(opts: PerspectiveOptions) Self {
@@ -261,17 +305,6 @@ pub const Camera = extern struct {
             .type_id = typeId(Self),
             .name = "Camera",
             .ptr = self,
-        };
-    }
-
-    pub fn definition() ComponentDefinition {
-        return .{
-            .type_id = typeId(Self),
-            .name = "Camera",
-            .create_default = @ptrCast(&Self.default),
-            .destroy = @ptrCast(&Self.destroy),
-            .fromJson = @ptrCast(&Self.fromJson),
-            .toJson = @ptrCast(&Self.toJson),
         };
     }
 };

@@ -26,14 +26,12 @@ const Texture = textures.Texture;
 
 const Camera = @import("yume").Camera;
 const Scene = @import("yume").scene_graph.Scene;
-const Object = @import("yume").scene_graph.Object;
 const MeshRenderer = @import("yume").MeshRenderer;
 const ScanCode = @import("yume").inputs.ScanCode;
 const MouseButton = @import("yume").inputs.MouseButton;
 const InputsContext = @import("yume").inputs.InputContext;
 
 const ecs = @import("yume").ecs;
-const systems = @import("yume").systems;
 const GameApp = @import("yume").GameApp;
 const Vec3 = @import("yume").math3d.Vec3;
 const Vec4 = @import("yume").math3d.Vec4;
@@ -96,6 +94,8 @@ const Selection = union(SelectionKind) {
 
 const Self = @This();
 
+ctx: *GameApp,
+
 selection: Selection = .none,
 
 play: bool = false,
@@ -122,8 +122,33 @@ pub fn init(ctx: *GameApp) *Self {
     ctx.world.tag(Playing);
     ctx.world.addSingleton(Playing);
     ctx.world.enable(ecs.typeId(Playing), false);
-    const tmu_entity = ctx.world.systemFn("transform-matrix-update", ecs.systems.PostUpdate, systems.transformMatrices);
+    const tmu_entity = ctx.world.systemFn("transform-matrix-update", ecs.systems.PostUpdate, ecs.systems.transformMatrices);
     ctx.world.add(tmu_entity, RunInEditor);
+    // _ = ctx.world.observerFn(&ecs.ObserverDesc{
+    //     .query = std.mem.zeroInit(ecs.QueryDesc, .{ .terms = .{
+    //         .{ .id = ecs.typeId(components.Position) },
+    //         .{ .id = ecs.typeId(components.Rotation) },
+    //         .{ .id = ecs.typeId(components.Scale) },
+    //         .{ .id = ecs.typeId(components.TransformMatrix) },
+    //     } }),
+    //     .events = [_]ecs.Entity{c.EcsOnSet} ++ [_]ecs.Entity{0} ** 7,
+    //     .callback = &struct {
+    //         fn f(it: *ecs.Iter) callconv(.C) void {
+    //             if (it.event_id == ecs.typeId(components.Position) or
+    //                 it.event_id == ecs.typeId(components.Rotation) or
+    //                 it.event_id == ecs.typeId(components.Scale))
+    //             {
+    //                 const positions = ecs.field(@ptrCast(it), components.Position, @alignOf(components.Position), 0).?;
+    //                 const rotations = ecs.field(@ptrCast(it), components.Rotation, @alignOf(components.Rotation), 1).?;
+    //                 const scales = ecs.field(@ptrCast(it), components.Scale, @alignOf(components.Scale), 2).?;
+    //                 const transformMatrices = ecs.field(@ptrCast(it), components.TransformMatrix, @alignOf(components.TransformMatrix), 3).?;
+    //                 for (positions, rotations, scales, transformMatrices) |p, r, s, *t| {
+    //                     t.value = Mat4.compose(p.value, Quat.fromEuler(r.value), s.value);
+    //                 }
+    //             }
+    //         }
+    //     }.f,
+    // });
 
     const home_dir = std.fs.selfExeDirPathAlloc(ctx.allocator) catch @panic("OOM");
     defer ctx.allocator.free(home_dir);
@@ -133,6 +158,7 @@ pub fn init(ctx: *GameApp) *Self {
     EditorDatabase.init(ctx.allocator, db_path) catch @panic("Faield to load editor database");
     inputs = InputsContext{ .window = ctx.window };
     singleton = Self{
+        .ctx = ctx,
         .editors = Editors.init(ctx.allocator),
         .hello_modal = HelloModal.init() catch @panic("Failed to initialize `HelloModal`"),
         .new_project_modal = NewProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `NewProjectModal`"),
@@ -149,17 +175,17 @@ pub fn init(ctx: *GameApp) *Self {
 
     if (EditorDatabase.storage().last_open_project) |lop| {
         Project.load(ctx.allocator, lop) catch {
-            std.debug.print("Failed to load previously loaded project {s}", .{lop});
+            std.debug.print("Failed to load previously loaded project {s}\n", .{lop});
         };
 
         if (EditorDatabase.storage().last_open_scene) |los| {
-            ctx.loadScene(los) catch {
-                std.debug.print("Failed to load previously loaded project {s}", .{lop});
+            ctx.loadScene(los) catch |e| {
+                std.debug.print("Failed to load previously loaded project {s} {?}\n", .{ lop, e });
             };
         }
     }
 
-    render_system = ctx.world.systemEx(.{
+    render_system = ctx.world.systemEx(&.{
         .entity = ctx.world.create("Render"),
         .query = std.mem.zeroInit(c.ecs_query_desc_t, .{ .terms = .{
             .{ .id = c.EcsAny },
@@ -174,27 +200,28 @@ pub fn init(ctx: *GameApp) *Self {
     return &singleton;
 }
 
-pub fn deinit(self: *Self, ctx: *GameApp) void {
+pub fn deinit(self: *Self) void {
     self.editors.deinit();
     self.hello_modal.deinit();
     self.new_project_modal.deinit();
     self.open_project_modal.deinit();
+    self.game_window.deinit();
     self.hierarchy_window.deinit();
     self.properties_window.deinit();
     if (Project.current()) |p| {
         p.unload();
     }
-    check_vk(c.vkDeviceWaitIdle(ctx.engine.device)) catch @panic("Failed to wait for device idle");
+    check_vk(c.vkDeviceWaitIdle(self.ctx.engine.device)) catch @panic("Failed to wait for device idle");
     c.cImGui_ImplVulkan_Shutdown();
-    EditorDatabase.flush() catch std.debug.print("Failed to flush the editor database", .{});
+    EditorDatabase.flush() catch std.debug.print("Failed to flush the editor database\n", .{});
     EditorDatabase.deinit();
 }
 
-pub fn newFrame(_: *Self, _: *GameApp) void {
+pub fn newFrame(_: *Self) void {
     inputs.clear();
 }
 
-pub fn processEvent(self: *Self, ctx: *GameApp, event: *c.SDL_Event) bool {
+pub fn processEvent(self: *Self, event: *c.SDL_Event) bool {
     _ = c.cImGui_ImplSDL3_ProcessEvent(event);
     switch (event.type) {
         c.SDL_EVENT_KEY_UP => {
@@ -206,7 +233,7 @@ pub fn processEvent(self: *Self, ctx: *GameApp, event: *c.SDL_Event) bool {
         else => {},
     }
     if (self.game_window.is_game_window_focused) {
-        ctx.inputs.push(event);
+        self.ctx.inputs.push(event);
     } else if (self.scene_window.is_scene_window_focused) {
         inputs.push(event);
     }
@@ -224,7 +251,7 @@ fn isInSceneView(self: *Self, pos: c.ImVec2) bool {
         (pos.y > self.scene_window_rect.y and pos.y < self.scene_window_rect.w);
 }
 
-pub fn update(self: *Self, ctx: *GameApp) bool {
+pub fn update(self: *Self) bool {
     var input: Vec3 = Vec3.make(0, 0, 0);
     var input_rot: Vec3 = Vec3.make(0, 0, 0);
 
@@ -278,19 +305,19 @@ pub fn update(self: *Self, ctx: *GameApp) bool {
 
     // Apply camera movements
     if (input.squaredLen() > (0.1 * 0.1)) {
-        const camera_delta = input.mulf(ctx.delta);
+        const camera_delta = input.mulf(self.ctx.delta);
         self.scene_window.camera_pos = Vec3.add(self.scene_window.camera_pos, camera_delta);
     }
     if (input_rot.squaredLen() > (0.1 * 0.1)) {
-        const rot_delta = input_rot.mulf(ctx.delta * 1.0);
+        const rot_delta = input_rot.mulf(self.ctx.delta * 1.0);
         self.scene_window.camera_rot = self.scene_window.camera_rot.add(rot_delta);
     }
 
-    return ctx.world.progress(ctx.delta);
+    return self.ctx.world.progress(self.ctx.delta);
 }
 
-pub fn draw(self: *Self, ctx: *GameApp) void {
-    const cmd = ctx.engine.beginFrame();
+pub fn draw(self: *Self) void {
+    const cmd = self.ctx.engine.beginFrame();
 
     c.cImGui_ImplVulkan_NewFrame();
     c.cImGui_ImplSDL3_NewFrame();
@@ -315,11 +342,14 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
             if (c.ImGui_MenuItem("New*")) {}
             if (c.ImGui_MenuItem("Load*")) {}
             if (c.ImGui_MenuItemEx("Save", "CTRL+S", false, true)) {
-                if (ctx.scene_handle) |hndl| {
+                if (self.ctx.scene_handle) |hndl| {
+                    const scene = self.ctx.snapshotLiveScene() catch @panic("Faield to serialize scene");
+                    defer scene.deinit();
                     const path = AssetsDatabase.getResourcePath(hndl.uuid) catch @panic("Scene not found!");
-                    const json = std.json.stringifyAlloc(ctx.allocator, ctx.scene, .{ .whitespace = .indent_4 }) catch @panic("Failed to serialize the scene");
-                    defer ctx.allocator.free(json);
-                    var file = std.fs.cwd().openFile(path, .{ .mode = .write_only }) catch @panic("Failed to open scene file to save");
+                    const json = std.json.stringifyAlloc(self.ctx.allocator, scene, .{ .whitespace = .indent_4 }) catch @panic("Failed to serialize the scene");
+                    defer self.ctx.allocator.free(json);
+                    std.debug.print("saving scene \"{s}\" to save to \"{s}\"\n", .{ hndl.uuid.urn(), path });
+                    var file = std.fs.cwd().createFile(path, .{}) catch @panic("Failed to open scene file to save");
                     defer file.close();
                     file.setEndPos(0) catch @panic("Failed to truncate the scene file");
                     file.seekTo(0) catch @panic("Failed to seek the start of the scene file");
@@ -348,8 +378,8 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
         c.ImGui_SetCursorPosX((c.ImGui_GetCursorPosX() - (13 * 3)) + (GameApp.window_extent.width / 2) - c.ImGui_GetCursorPosX());
         if (c.ImGui_ImageButton("Play", @intFromPtr(if (self.play) stop_icon_ds else play_icon_ds), c.ImVec2{ .x = 13, .y = 13 })) {
             self.play = !self.play;
-            ctx.world.enable(ecs.typeId(Playing), self.play);
-            self.bootstrapEditorPipeline(ctx.world);
+            self.ctx.world.enable(ecs.typeId(Playing), self.play);
+            self.bootstrapEditorPipeline(self.ctx.world);
         }
         _ = c.ImGui_ImageButton("Pause", @intFromPtr(pause_icon_ds), c.ImVec2{ .x = 13, .y = 13 });
         _ = c.ImGui_ImageButton("Next", @intFromPtr(fast_forward_icon_ds), c.ImVec2{ .x = 13, .y = 13 });
@@ -416,24 +446,24 @@ pub fn draw(self: *Self, ctx: *GameApp) void {
 
     c.ImGui_End();
 
-    self.hierarchy_window.draw(ctx);
-    self.properties_window.draw(ctx) catch @panic("err");
+    self.hierarchy_window.draw(self.ctx);
+    self.properties_window.draw(self.ctx) catch @panic("err");
     self.project_explorer.draw();
-    self.scene_window.draw(cmd, ctx);
-    self.game_window.draw(cmd, ctx);
+    self.scene_window.draw(cmd, self.ctx);
+    self.game_window.draw(cmd, self.ctx);
 
     self.hello_modal.show();
-    self.new_project_modal.show(ctx);
-    self.open_project_modal.show(ctx);
+    self.new_project_modal.show(self.ctx);
+    self.open_project_modal.show(self.ctx);
 
     c.ImGui_Render();
 
     // UI
     c.cImGui_ImplVulkan_RenderDrawData(c.ImGui_GetDrawData(), cmd);
 
-    ctx.engine.beginPresentRenderPass(cmd);
+    self.ctx.engine.beginPresentRenderPass(cmd);
 
-    ctx.engine.endFrame(cmd);
+    self.ctx.engine.endFrame(cmd);
 }
 
 fn init_descriptors(self: *Self, engine: *Engine) void {
@@ -612,6 +642,141 @@ pub fn newProject(self: *Self) void {
 
 pub fn openProject(self: *Self) void {
     self.open_project_modal.open();
+}
+
+pub fn trySetParentKeepUniquePathName(world: ecs.World, entity: ecs.Entity, new_parent: ecs.Entity, allocator: std.mem.Allocator) !void {
+    if (world.getParent(entity)) |parent| {
+        if (parent == new_parent) {
+            return;
+        }
+    }
+    if (world.hasAncestor(new_parent, entity)) {
+        return error.CyclicRelation;
+    }
+
+    const old_name = world.getPathName(entity) orelse {
+        world.removePair(entity, ecs.relations.ChildOf, ecs.core.Wildcard);
+        world.addPair(entity, ecs.relations.ChildOf, new_parent);
+        return;
+    };
+
+    switch (try makeUniquePathNameIn(world, new_parent, old_name, allocator)) {
+        .base => {
+            world.removePair(entity, ecs.relations.ChildOf, ecs.core.Wildcard);
+            world.addPair(entity, ecs.relations.ChildOf, new_parent);
+        },
+        .new => |new| {
+            defer allocator.free(new);
+            const message = try std.fmt.allocPrintZ(allocator,
+                \\Do you want to rename "{s}" to "{s}"?
+                \\
+                \\There is already an entity with the same path name.
+            , .{ old_name, new });
+            defer allocator.free(message);
+            const selected = try messageBox(.{
+                .title = "Rename Entity",
+                .message = message,
+                .kind = .warn,
+            });
+            if (selected == 1) {
+                return error.Cancel;
+            }
+            _ = world.setPathName(entity, null);
+            _ = world.removePair(entity, ecs.relations.ChildOf, ecs.core.Wildcard);
+            _ = world.addPair(entity, ecs.relations.ChildOf, new_parent);
+            _ = world.setPathName(entity, new);
+        },
+    }
+}
+
+pub fn trySetUniquePathName(world: ecs.World, entity: ecs.Entity, new_name: ?[*:0]const u8, allocator: std.mem.Allocator) !ecs.Entity {
+    if (new_name) |name| {
+        const old_name = world.getPathName(entity);
+        if (old_name != null and std.mem.eql(u8, old_name.?, std.mem.span(name))) {
+            return entity;
+        }
+
+        const parent = world.getParent(entity) orelse 0;
+        switch (try makeUniquePathNameIn(world, parent, name, allocator)) {
+            .base => |base| {
+                return world.setPathName(entity, base);
+            },
+            .new => |new| {
+                defer allocator.free(new);
+                const message = try std.fmt.allocPrintZ(allocator,
+                    \\Do you want to rename "{s}" to "{s}"?
+                    \\
+                    \\There is already an entity with the same path name.
+                , .{ name, new });
+                defer allocator.free(message);
+                const selected = try messageBox(.{
+                    .title = "Rename Entity",
+                    .message = message,
+                    .kind = .warn,
+                });
+                if (selected == 1) {
+                    return error.Cancel;
+                }
+                return world.setPathName(entity, new);
+            },
+        }
+    } else {
+        return world.setPathName(entity, null);
+    }
+}
+
+pub fn makeUniquePathNameIn(world: ecs.World, parent: ecs.Entity, base_name: [*:0]const u8, allocator: std.mem.Allocator) !UniquePathName {
+    var collision = world.lookupEx(.{ .parent = parent, .path = base_name });
+    std.debug.print("check for {s} collision: {d}\n", .{ base_name, collision });
+    if (collision == 0) {
+        return .{ .base = std.mem.span(base_name) };
+    }
+
+    var sfa = std.heap.stackFallback(512, allocator);
+    const a = sfa.get();
+    const buf: []u8 = try a.alloc(u8, std.mem.span(base_name).len + 9);
+    defer a.free(buf);
+    var suffixed: [:0]u8 = undefined;
+    var i: usize = 1;
+    while (collision != 0) : (i += 1) {
+        suffixed = try std.fmt.bufPrintZ(buf, "{s} ({d})", .{ base_name, i });
+        collision = world.lookupEx(.{ .parent = parent, .path = suffixed });
+    }
+    return .{ .new = try allocator.dupeZ(u8, suffixed) };
+}
+
+const UniquePathName = union(enum) {
+    base: [:0]const u8,
+    new: [:0]u8,
+};
+
+pub fn messageBox(opts: struct {
+    title: [*:0]const u8,
+    message: [*:0]const u8,
+    buttons: []const c.SDL_MessageBoxButtonData = &[2]c.SDL_MessageBoxButtonData{
+        .{ .buttonID = 0, .text = "Ok", .flags = c.SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT },
+        .{ .buttonID = 1, .text = "Cancel", .flags = c.SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT },
+    },
+    kind: enum(u32) {
+        default = 0,
+        err = c.SDL_MESSAGEBOX_ERROR,
+        warn = c.SDL_MESSAGEBOX_WARNING,
+        info = c.SDL_MESSAGEBOX_INFORMATION,
+    } = .default,
+}) !usize {
+    var button: c_int = 0;
+    if (!c.SDL_ShowMessageBox(&.{
+        .flags = @intFromEnum(opts.kind),
+        .window = Self.instance().ctx.window,
+        .title = opts.title,
+        .message = opts.message,
+        .numbuttons = @intCast(opts.buttons.len),
+        .buttons = &opts.buttons[0],
+    }, &button)) {
+        return error.FailedToOpenMessageBox;
+    }
+
+    return @intCast(button);
 }
 
 pub fn create_imgui_texture(uri: []const u8, engine: *Engine) !c.VkDescriptorSet {

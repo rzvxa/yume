@@ -3,18 +3,17 @@ const c = @import("clibs");
 const std = @import("std");
 
 const ecs = @import("yume").ecs;
-const components = @import("yume").components;
 
 const GameApp = @import("yume").GameApp;
 const Uuid = @import("yume").Uuid;
-const Object = @import("yume").Object;
-const Component = @import("yume").Component;
 const MeshRenderer = @import("yume").MeshRenderer;
 const EntityMetaEditor = @import("entity.zig");
 const ObjectTransformEditor = @import("transform.zig");
 const MeshEditor = @import("MeshEditor.zig");
 const MaterialEditor = @import("MaterialEditor.zig");
 const CameraEditor = @import("CameraEditor.zig");
+
+const imutils = @import("../imutils.zig");
 
 pub const ComponentEditorFlags = packed struct {
     no_disable: bool = false,
@@ -96,9 +95,7 @@ pub fn editEntityTransform(self: *Self, entity: ecs.Entity, ctx: *GameApp) void 
     if (!entry.found_existing) {
         entry.value_ptr.* = ObjectTransformEditor.init(self.component_editors.allocator, entity);
     }
-    if (collapsingHeaderWithCheckBox("Transform", null, c.ImGuiTreeNodeFlags_DefaultOpen)) {
-        entry.value_ptr.edit(entity, ctx);
-    }
+    entry.value_ptr.edit(entity, ctx);
 }
 
 pub fn editComponent(self: *Self, editor: ComponentEditor, entity: ecs.Entity, component: ecs.Entity, ctx: *GameApp) void {
@@ -118,7 +115,7 @@ pub fn editComponent(self: *Self, editor: ComponentEditor, entity: ecs.Entity, c
     if (editor.flags.no_disable) {
         open = c.ImGui_CollapsingHeader(name, c.ImGuiTreeNodeFlags_DefaultOpen);
     } else {
-        open = collapsingHeaderWithCheckBox(name, &enable, c.ImGuiTreeNodeFlags_DefaultOpen);
+        open = imutils.collapsingHeaderWithCheckBox(name, &enable, c.ImGuiTreeNodeFlags_DefaultOpen);
     }
     if (open) {
         editor.edit(instance.value_ptr.*.ptr, entity, component, ctx);
@@ -135,19 +132,7 @@ pub fn componentEditorOf(self: *Self, type_id: ecs.Entity) ?ComponentEditor {
 }
 
 fn registerBuiltinComponentEditors(self: *Self) void {
-    self.component_editor_types.put(ecs.typeId(components.Camera), CameraEditor.asComponentEditor()) catch @panic("OOM");
-    self.component_editor_types.put(ecs.typeId(components.Mesh), MeshEditor.asComponentEditor()) catch @panic("OOM");
-    self.component_editor_types.put(ecs.typeId(components.Material), MaterialEditor.asComponentEditor()) catch @panic("OOM");
-}
-
-fn collapsingHeaderWithCheckBox(label: [*c]const u8, checked: [*c]bool, flags: c.ImGuiTreeNodeFlags) bool {
-    c.ImGui_PushID(label);
-    defer c.ImGui_PopID();
-    if (checked != null) {
-        _ = c.ImGui_Checkbox("###enable", checked);
-        const x = c.ImGui_GetCursorPosX();
-        const style = c.ImGui_GetStyle();
-        c.ImGui_SameLineEx(x + c.ImGui_GetFrameHeight() + style.*.ItemInnerSpacing.x - 1, 0);
-    }
-    return c.ImGui_CollapsingHeader(label, flags);
+    self.component_editor_types.put(ecs.typeId(ecs.components.Camera), CameraEditor.asComponentEditor()) catch @panic("OOM");
+    self.component_editor_types.put(ecs.typeId(ecs.components.Mesh), MeshEditor.asComponentEditor()) catch @panic("OOM");
+    self.component_editor_types.put(ecs.typeId(ecs.components.Material), MaterialEditor.asComponentEditor()) catch @panic("OOM");
 }

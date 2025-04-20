@@ -8,8 +8,7 @@ const ecs = @import("yume").ecs;
 const Vec3 = @import("yume").Vec3;
 const Engine = @import("yume").VulkanEngine;
 const GameApp = @import("yume").GameApp;
-const Object = @import("yume").scene_graph.Object;
-const components = @import("yume").components;
+const components = @import("yume").ecs.components;
 const AllocatedBuffer = @import("yume").AllocatedBuffer;
 
 const Editor = @import("../Editor.zig");
@@ -47,7 +46,7 @@ render_system: ecs.Entity,
 
 pub fn init(ctx: *GameApp) Self {
     return .{
-        .render_system = ctx.world.systemEx(.{
+        .render_system = ctx.world.systemEx(&.{
             .entity = ctx.world.create("Editor Render System"),
             .query = std.mem.zeroInit(c.ecs_query_desc_t, .{ .terms = .{
                 .{ .id = ecs.typeId(components.TransformMatrix) },
@@ -200,7 +199,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
     c.ImGui_End();
 }
 
-fn sys(it: *ecs.Iter, matrices: []components.TransformMatrix, meshes: []align(8) components.Mesh, materials: []align(8) components.Material) void {
+fn sys(it: *ecs.Iter, matrices: []components.TransformMatrix, meshes: []components.Mesh, materials: []components.Material) void {
     const me: *FrameData = @ptrCast(@alignCast(it.param));
     me.app.engine.drawObjects(
         me.cmd,

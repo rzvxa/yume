@@ -15,7 +15,7 @@ const Vec4 = math3d.Vec4;
 const Mat4 = math3d.Mat4;
 
 const context = @import("context.zig");
-const components = @import("components.zig");
+const components = @import("ecs.zig").components;
 const Camera = components.Camera;
 const Mesh = components.Mesh;
 const Vertex = components.mesh.Vertex;
@@ -1279,8 +1279,8 @@ pub fn drawObjects(
     self: *Self,
     cmd: c.VkCommandBuffer,
     matrices: []components.TransformMatrix,
-    meshes: []align(8) components.Mesh,
-    materials: []align(8) components.Material,
+    meshes: []components.Mesh,
+    materials: []components.Material,
     ubo_buf: AllocatedBuffer,
     ubo_set: c.VkDescriptorSet,
     cam: *const Camera,

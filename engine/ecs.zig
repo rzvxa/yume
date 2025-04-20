@@ -3,30 +3,66 @@ const std = @import("std");
 
 const GameApp = @import("GameApp.zig");
 const Uuid = @import("uuid.zig").Uuid;
+const Dynamic = @import("serialization/dynamic.zig").Dynamic;
 
 pub const TypeId = c.ecs_id_t;
 pub const Entity = c.ecs_entity_t;
-pub const System = c.ecs_system_desc_t;
 pub const QueryDesc = c.ecs_query_desc_t;
-pub const Iterator = c.ecs_iter_t;
 
 pub const Query = extern struct {
     const Self = @This();
     inner: c.ecs_query_t,
 
-    pub fn deinit(self: *Self) void {
+    inline fn from(raw: *c.ecs_query_t) *Query {
+        return @ptrCast(raw);
+    }
+
+    pub inline fn deinit(self: *Self) void {
         c.ecs_query_fini(self.castMut());
     }
 
-    pub fn iter(self: *const Self) Iterator {
-        return c.ecs_query_iter(self.inner.world orelse self.inner.real_world.?, self.cast());
+    pub inline fn iter(self: *const Self) Iterator {
+        return Iterator{ .inner = c.ecs_query_iter(self.inner.world orelse self.inner.real_world.?, self.cast()) };
     }
 
-    fn cast(self: *const Self) *const c.ecs_query_t {
+    pub inline fn cast(self: *const Self) *const c.ecs_query_t {
         return @ptrCast(self);
     }
 
-    fn castMut(self: *Self) *c.ecs_query_t {
+    pub inline fn castMut(self: *Self) *c.ecs_query_t {
+        return @ptrCast(self);
+    }
+
+    pub inline fn isTrue(self: *const Self) bool {
+        return c.ecs_query_is_true(self.cast());
+    }
+};
+
+pub const Iterator = extern struct {
+    const Self = @This();
+    inner: c.ecs_iter_t,
+
+    inline fn from(raw: *c.ecs_iter_t) *Iterator {
+        return @ptrCast(raw);
+    }
+
+    pub inline fn deinit(self: *Self) void {
+        c.ecs_iter_fini(self.castMut());
+    }
+
+    pub inline fn next(self: *Self) bool {
+        return c.ecs_iter_next(self.castMut());
+    }
+
+    pub inline fn changed(self: *Self) bool {
+        return c.ecs_iter_changed(self.castMut());
+    }
+
+    pub inline fn cast(self: *const Self) *const c.ecs_iter_t {
+        return @ptrCast(self);
+    }
+
+    pub inline fn castMut(self: *Self) *c.ecs_iter_t {
         return @ptrCast(self);
     }
 };
@@ -65,6 +101,10 @@ pub const World = struct {
             @compileError("For registering zero-sized components use `tag` instead");
         }
 
+        if (@typeInfo(T) != .Struct) {
+            @compileError("ECS componenets must be a struct instead got " ++ @typeName(T));
+        }
+
         const meta = Reflect(T);
         std.debug.assert(meta.id == 0);
 
@@ -80,8 +120,10 @@ pub const World = struct {
                 .hooks = .{
                     .dtor = switch (@typeInfo(T)) {
                         .Struct => if (@hasDecl(T, "deinit")) struct {
-                            pub fn f(ptr: *anyopaque, _: i32, _: *const c.ecs_type_info_t) callconv(.C) void {
-                                T.deinit(@as(*T, @ptrCast(@alignCast(ptr))).*);
+                            pub fn f(ptr: ?*anyopaque, count: i32, _: [*c]const TypeInfo) callconv(.C) void {
+                                var c_ptr = @as([*c]T, @ptrCast(@alignCast(ptr)));
+                                var span = c_ptr[0..@intCast(count)];
+                                for (0..span.len) |i| T.deinit(&span[i]);
                             }
                         }.f else null,
                         else => null,
@@ -99,25 +141,45 @@ pub const World = struct {
             },
             .size = @sizeOf(T),
             .alignment = @alignOf(T),
-            .default = switch (@typeInfo(T)) {
-                .Struct => if (@hasDecl(T, "default")) struct {
-                    pub fn f(ptr: *anyopaque, entity: Entity, ctx: *GameApp, resolver: ResourceResolver) callconv(.C) bool {
-                        const params = @typeInfo(@TypeOf(T.default)).Fn.params;
-                        if (params[params.len - 1].type == ResourceResolver) {
-                            return T.default(@ptrCast(@alignCast(ptr)), entity, ctx, resolver);
-                        } else {
-                            return T.default(@ptrCast(@alignCast(ptr)), entity, ctx);
-                        }
+            .default = if (@hasDecl(T, "default")) struct {
+                pub fn f(ptr: *anyopaque, ent: Entity, ctx: *GameApp, resolver: ResourceResolver) callconv(.C) bool {
+                    const params = @typeInfo(@TypeOf(T.default)).Fn.params;
+                    if (params[params.len - 1].type == ResourceResolver) {
+                        return T.default(@ptrCast(@alignCast(ptr)), ent, ctx, resolver);
+                    } else {
+                        return T.default(@ptrCast(@alignCast(ptr)), ent, ctx);
                     }
-                }.f else null,
-                else => null,
-            },
+                }
+            }.f else null,
+            .serialize = if (@hasDecl(T, "serialize")) struct {
+                pub fn f(ptr: *const anyopaque, allocator: *const std.mem.Allocator) callconv(.C) SerializationResult {
+                    const result = T.serialize(@ptrCast(@alignCast(ptr)), allocator.*) catch return .{ .ok = false };
+                    return .{ .ok = true, .result = result };
+                }
+            }.f else if (@hasDecl(T, "serialize"))
+                @compileError("ECS componenet '" ++ @typeName(T) ++ "' has a `serialize` method doesn't provide a `deserialize` method declaration")
+            else
+                null,
+            .deserialize = if (@hasDecl(T, "deserialize")) blk: {
+                if (!@hasDecl(T, "serialize")) {
+                    std.debug.print("warning: ECS componenet '" ++ @typeName(T) ++ "' has a `deserialize` method but doesn't provide a `serialize` method declaration.\n", .{});
+                }
+                break :blk struct {
+                    pub fn f(ptr: *anyopaque, value: *const Dynamic, allocator: *const std.mem.Allocator) callconv(.C) bool {
+                        T.deserialize(@ptrCast(@alignCast(ptr)), value, allocator.*) catch return false;
+                        return true;
+                    }
+                }.f;
+            } else if (@hasDecl(T, "serialize"))
+                @compileError("ECS componenet '" ++ @typeName(T) ++ "' has a `serialize` method doesn't provide a `deserialize` method declaration")
+            else
+                null,
         };
     }
 
-    pub fn autoSystemFnDesc(comptime fn_system: anytype) c.ecs_system_desc_t {
+    pub fn autoFunctionTerms(comptime func: anytype) [32]c.ecs_term_t {
         var terms = std.mem.zeroes([32]c.ecs_term_t);
-        const fn_type = @typeInfo(@TypeOf(fn_system)).Fn;
+        const fn_type = @typeInfo(@TypeOf(func)).Fn;
         const has_it_param = comptime hasItParam(fn_type.params);
         const start_index = if (has_it_param) 1 else 0;
         inline for (start_index..fn_type.params.len) |i| {
@@ -126,14 +188,18 @@ pub const World = struct {
             const inout = if (param_type_info.is_const) c.EcsIn else c.EcsInOut;
             terms[i - start_index] = .{ .id = typeId(param_type_info.child), .inout = inout };
         }
-        return systemFnDesc(fn_system, terms);
+        return terms;
     }
 
-    pub fn systemFnDesc(comptime fn_system: anytype, terms: [32]c.ecs_term_t) c.ecs_system_desc_t {
+    pub fn autoSystemFnDesc(comptime fn_system: anytype) SystemDesc {
+        return systemFnDesc(fn_system, autoFunctionTerms(fn_system));
+    }
+
+    pub fn systemFnDesc(comptime fn_system: anytype, terms: [32]c.ecs_term_t) SystemDesc {
         const system_struct = SystemImpl(fn_system);
 
-        var system_desc = System{};
-        system_desc.callback = system_struct.exec;
+        var system_desc = SystemDesc{};
+        system_desc.callback = @ptrCast(&system_struct.exec);
         system_desc.query.terms = terms;
 
         return system_desc;
@@ -153,7 +219,7 @@ pub const World = struct {
         self: Self,
         name: [*:0]const u8,
         phase: Entity,
-        system_desc: *c.ecs_system_desc_t,
+        system_desc: *const SystemDesc,
     ) Entity {
         var entity_desc = c.ecs_entity_desc_t{};
         entity_desc.id = c.ecs_new(self.inner);
@@ -162,69 +228,127 @@ pub const World = struct {
         const second = phase;
         entity_desc.add = &[_]c.ecs_id_t{ first, second, 0 };
 
+        var desc = system_desc.*;
+        desc.entity = self.createEx(&entity_desc);
+        return self.systemEx(&desc);
+    }
+
+    pub inline fn systemEx(self: Self, desc: *const SystemDesc) Entity {
+        return mkp_system_init(self.inner, desc);
+    }
+
+    pub fn observerFn(
+        self: Self,
+        name: [*:0]const u8,
+        // events: [8]Event,
+        comptime fn_observer: anytype,
+    ) Entity {
+        var desc = autoSystemFnDesc(fn_observer);
+        return self.system(name, 0, &desc);
+    }
+
+    pub fn observer(
+        self: Self,
+        name: [*:0]const u8,
+        events: [8]Event,
+        system_desc: *c.ecs_system_desc_t,
+    ) Entity {
+        var entity_desc = c.ecs_entity_desc_t{};
+        entity_desc.id = c.ecs_new(self.inner);
+        entity_desc.name = name;
+        _ = events;
+
         system_desc.entity = self.createEx(&entity_desc);
         return c.ecs_system_init(self.inner, system_desc);
     }
 
-    pub fn systemEx(self: Self, desc: SystemDesc) Entity {
-        return mkp_system_init(self.inner, &desc);
+    pub inline fn observerEx(self: Self, o: *const ObserverDesc) Entity {
+        return c.ecs_observer_init(self.inner, @ptrCast(o));
     }
 
-    pub fn create(self: Self, name: [*:0]const u8) Entity {
-        return c.ecs_entity_init(self.inner, &.{ .name = name });
+    pub inline fn entity(self: Self, opts: struct {
+        uuid: ?Uuid = null,
+        name: [*:0]const u8 = "New Entity",
+        ident: ?[*:0]const u8 = null,
+        parent: ?Entity = null,
+    }) Entity {
+        const ent = self.create(opts.ident);
+        if (opts.parent) |parent| {
+            self.addPair(ent, relations.ChildOf, parent);
+        }
+        self.set(ent, components.Meta, components.Meta.init(opts.name) catch @panic("Failed to create meta"));
+        self.set(ent, components.Uuid, .{ .value = opts.uuid orelse Uuid.new() });
+        self.set(ent, components.Position, .{});
+        self.set(ent, components.Rotation, .{});
+        self.set(ent, components.Scale, .{});
+        self.add(ent, components.TransformMatrix);
+        return ent;
     }
 
-    pub fn createEx(self: Self, desc: *const c.ecs_entity_desc_t) Entity {
+    pub inline fn create(self: Self, ident: ?[*:0]const u8) Entity {
+        return c.ecs_entity_init(self.inner, &.{ .name = ident });
+    }
+
+    pub inline fn createEx(self: Self, desc: *const c.ecs_entity_desc_t) Entity {
         return c.ecs_entity_init(self.inner, desc);
     }
 
-    pub fn delete(self: Self, ent: Entity) void {
+    pub inline fn delete(self: Self, ent: Entity) void {
         c.ecs_delete(self.inner, ent);
     }
 
-    pub fn clear(self: Self, ent: Entity) void {
+    pub inline fn clear(self: Self, ent: Entity) void {
         c.ecs_clear(self.inner, ent);
     }
 
     // add
 
-    pub fn add(self: Self, ent: Entity, comptime T: type) void {
+    pub inline fn add(self: Self, ent: Entity, comptime T: type) void {
         c.ecs_add_id(self.inner, ent, typeId(T));
     }
 
-    pub fn addId(self: Self, ent: Entity, id: Entity) void {
+    pub inline fn addId(self: Self, ent: Entity, id: Entity) void {
         c.ecs_add_id(self.inner, ent, id);
     }
 
-    pub fn addPair(self: Self, subject: Entity, first: Entity, second: Entity) void {
+    pub inline fn addPair(self: Self, subject: Entity, first: Entity, second: Entity) void {
         c.ecs_add_id(self.inner, subject, pair(first, second));
     }
 
-    pub fn addSingleton(self: Self, comptime T: type) void {
+    pub inline fn addSingleton(self: Self, comptime T: type) void {
         self.add(typeId(T), T);
     }
 
     // remove
 
-    pub fn remove(self: Self, ent: Entity, comptime T: type) void {
+    pub inline fn remove(self: Self, ent: Entity, comptime T: type) void {
         return c.ecs_remove_id(self.inner, ent, typeId(T));
     }
 
-    pub fn removeId(self: Self, ent: Entity, id: Entity) void {
+    pub inline fn removeId(self: Self, ent: Entity, id: Entity) void {
         return c.ecs_remove_id(self.inner, ent, id);
     }
 
-    pub fn removePair(self: Self, subject: Entity, first: Entity, second: Entity) void {
+    pub inline fn removePair(self: Self, subject: Entity, first: Entity, second: Entity) void {
         return c.ecs_remove_id(self.inner, subject, pair(first, second));
     }
 
     // set
 
-    pub fn setName(self: Self, ent: Entity, new_name: [*:0]const u8) Entity {
+    pub inline fn setMetaName(self: Self, ent: Entity, new_name: [*:0]const u8) Entity {
+        self.ensure(ent, components.Meta).?.*.setName(new_name) catch @panic("Failed to set meta name");
+        return ent;
+    }
+
+    pub fn setPathName(self: Self, ent: Entity, new_name: ?[*:0]const u8) Entity {
         return c.ecs_set_name(self.inner, ent, new_name);
     }
 
-    pub fn set(self: Self, ent: Entity, comptime T: type, value: T) void {
+    pub inline fn setUuid(self: Self, ent: Entity, uuid: Uuid) void {
+        self.set(ent, components.Uuid, .{ .value = uuid });
+    }
+
+    pub inline fn set(self: Self, ent: Entity, comptime T: type, value: T) void {
         self.setId(ent, typeId(T), @sizeOf(T), @ptrCast(&value));
     }
 
@@ -232,7 +356,7 @@ pub const World = struct {
         c.ecs_set_id(self.inner, ent, comp, size, value);
     }
 
-    pub fn setPair(
+    pub inline fn setPair(
         self: Self,
         subject: Entity,
         first: Entity,
@@ -243,55 +367,223 @@ pub const World = struct {
         return c.ecs_set_id(self.inner, subject, pair(first, second), @sizeOf(T), @ptrCast(&value));
     }
 
-    pub fn setSingleton(self: Self, comptime T: type, value: T) void {
+    pub inline fn setSingleton(self: Self, comptime T: type, value: T) void {
         return self.set(typeId(T), T, value);
     }
 
     // get
 
-    pub fn get(self: Self, ent: Entity, comptime T: type) ?*const T {
+    pub inline fn getId(self: Self, ent: Entity, id: Entity) ?*const anyopaque {
+        return c.ecs_get_id(self.inner, ent, id);
+    }
+
+    pub inline fn getMutId(self: Self, ent: Entity, id: Entity) ?*anyopaque {
+        return c.ecs_get_mut_id(self.inner, ent, id);
+    }
+
+    pub inline fn get(self: Self, ent: Entity, comptime T: type) ?*const T {
+        return @ptrCast(@alignCast(self.getId(ent, typeId(T))));
+    }
+
+    pub inline fn getMut(self: Self, ent: Entity, comptime T: type) ?*T {
+        return @ptrCast(@alignCast(self.getMutId(ent, typeId(T))));
+    }
+
+    pub inline fn getPair(self: Self, subject: Entity, first: Entity, second: Entity, comptime T: type) ?*T {
+        const val = c.ecs_get_id(self.inner, subject, pair(first, second));
+        return @ptrCast(@alignCast(val));
+    }
+
+    pub inline fn pairFirst(self: Self, p: Entity) Entity {
+        return c.ecs_get_alive(self.inner, c.ECS_PAIR_FIRST(p));
+    }
+
+    pub inline fn pairSecond(self: Self, p: Entity) Entity {
+        return c.ecs_get_alive(self.inner, c.ECS_PAIR_SECOND(p));
+    }
+
+    pub inline fn getTarget(self: Self, ent: Entity, rel: Entity, index: i32) Entity {
+        return c.ecs_get_target(self.inner, ent, rel, index);
+    }
+
+    pub inline fn getParent(self: Self, ent: Entity) ?Entity {
+        const parent = c.ecs_get_parent(self.inner, ent);
+        if (parent == 0) {
+            return null;
+        } else {
+            return parent;
+        }
+    }
+
+    pub inline fn has(self: Self, ent: Entity, comptime T: type) bool {
+        return c.ecs_has_id(self.inner, ent, typeId(T));
+    }
+
+    pub inline fn getAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) ?*align(alignment) const T {
         return @ptrCast(@alignCast(c.ecs_get_id(self.inner, ent, typeId(T))));
     }
 
-    pub fn getMut(self: Self, ent: Entity, comptime T: type) ?*T {
+    pub inline fn getMutAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) ?*align(alignment) T {
         return @ptrCast(@alignCast(c.ecs_get_mut_id(self.inner, ent, typeId(T))));
     }
 
-    // these two aligned versions of get methods are a hacky workaround for issue with u128 and 16 byte alignemnt in general.
-    // TODO: investigate this issue, perhaps it is an issue with the allocator functions?
-
-    pub fn getAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) ?*align(alignment) const T {
-        return @ptrCast(@alignCast(c.ecs_get_id(self.inner, ent, typeId(T))));
+    pub fn getType(self: Self, ent: Entity) ![]const Entity {
+        const info = c.ecs_get_type(self.inner, ent) orelse return error.EntityNotFound;
+        return info.*.array[0..@intCast(info.*.count)];
     }
 
-    pub fn getMutAligned(self: Self, ent: Entity, comptime T: type, comptime alignment: usize) ?*align(alignment) T {
-        return @ptrCast(@alignCast(c.ecs_get_mut_id(self.inner, ent, typeId(T))));
+    pub inline fn getName(self: Self, ent: Entity) [:0]const u8 {
+        return if (c.ecs_get_name(self.inner, ent)) |name|
+            std.mem.span(name)
+        else
+            self.getMetaName(ent);
     }
 
-    pub fn getName(self: Self, ent: Entity) [:0]const u8 {
-        return if (c.ecs_get_name(self.inner, ent)) |name| std.mem.span(name) else "";
+    pub inline fn ensure(self: Self, ent: Entity, comptime T: type) ?*T {
+        return @ptrCast(@alignCast(c.ecs_ensure_id(self.inner, ent, typeId(T))));
     }
 
-    pub fn progress(self: Self, dt: f32) bool {
+    pub inline fn getMetaName(self: Self, ent: Entity) [:0]const u8 {
+        return if (self.get(ent, components.Meta)) |meta| std.mem.span(meta.name) else "";
+    }
+
+    pub inline fn getPathName(self: Self, ent: Entity) ?[:0]const u8 {
+        return if (c.ecs_get_name(self.inner, ent)) |name| std.mem.span(name) else null;
+    }
+
+    pub inline fn getPathAlloc(self: Self, ent: Entity, allocator: std.mem.Allocator) ![:0]u8 {
+        var buf = c.ECS_STRBUF_INIT;
+        c.ecs_get_path_w_sep_buf(self.inner, 0, ent, ".", null, &buf, false);
+        return try allocator.dupeZ(u8, buf.content[0..@intCast(buf.length)]);
+    }
+
+    pub inline fn getUuid(self: Self, ent: Entity) ?Uuid {
+        const uuid_comp = self.get(ent, components.Uuid);
+        return if (uuid_comp) |it| it.value else null;
+    }
+
+    pub inline fn getHierarchyOrder(self: Self, ent: Entity) u32 {
+        return if (self.get(ent, components.HierarchyOrder)) |it| it.value else std.math.maxInt(u32);
+    }
+
+    pub inline fn progress(self: Self, dt: f32) bool {
         return c.ecs_progress(self.inner, dt);
     }
 
-    pub fn query(self: Self, q: *const QueryDesc) *Query {
-        return @ptrCast(c.ecs_query_init(self.inner, q));
+    pub inline fn query(self: Self, q: *const QueryDesc) *Query {
+        return Query.from(c.ecs_query_init(self.inner, q));
     }
 
-    pub fn enable(self: Self, ent: Entity, enabled: bool) void {
+    pub inline fn modified(self: Self, ent: Entity, comptime T: type) void {
+        c.ecs_modified_id(self.inner, ent, typeId(T));
+    }
+
+    pub inline fn enable(self: Self, ent: Entity, enabled: bool) void {
         c.ecs_enable(self.inner, ent, enabled);
     }
 
-    pub fn enable_component(self: Self, ent: Entity, comptime T: type, enabled: bool) void {
+    pub inline fn enable_component(self: Self, ent: Entity, comptime T: type, enabled: bool) void {
         c.ecs_enable_id(self.inner, ent, typeId(T), enabled);
+    }
+
+    pub inline fn lookup(self: Self, path: [*:0]const u8) Entity {
+        return c.ecs_lookup(self.inner, path);
+    }
+
+    pub inline fn lookupEx(self: Self, opts: struct {
+        parent: Entity = 0,
+        path: [*:0]const u8,
+        recursive: bool = false,
+    }) Entity {
+        return c.ecs_lookup_path_w_sep(self.inner, opts.parent, opts.path, ".", null, opts.recursive);
+    }
+
+    pub inline fn hasAncestor(self: Self, ent: Entity, maybe_ancestor: Entity) bool {
+        var it = ent;
+        while (self.getParent(it)) |parent| : (it = parent) {
+            if (parent == maybe_ancestor) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // iterators
 
-    pub fn children(self: Self, ent: Entity) c.ecs_iter_t {
-        return c.ecs_children(self.inner, ent);
+    pub inline fn children(self: Self, ent: Entity) Iterator {
+        return Iterator{ .inner = c.ecs_children(self.inner, ent) };
+    }
+
+    pub fn childrenSorted(self: Self, ent: Entity, allocator: std.mem.Allocator) ![]Entity {
+        var child_it = self.children(ent);
+        defer child_it.deinit();
+
+        // Create an array to collect entities
+        var sorted_children = try std.ArrayList(Entity).initCapacity(allocator, @intCast(child_it.inner.count));
+        while (child_it.next()) {
+            for (0..@intCast(child_it.inner.count)) |i| {
+                try sorted_children.append(child_it.inner.entities[i]);
+            }
+        }
+
+        // Sort using a custom comparison function
+        std.mem.sort(Entity, sorted_children.items, self, struct {
+            pub fn f(ctx: Self, a: Entity, b: Entity) bool {
+                return ctx.getHierarchyOrder(a) < ctx.getHierarchyOrder(b);
+            }
+        }.f);
+
+        return try sorted_children.toOwnedSlice();
+    }
+
+    pub fn sortedDfs(self: Self, ent: Entity, allocator: std.mem.Allocator) !SortedDfs {
+        return try SortedDfs.init(allocator, self, ent);
+    }
+
+    pub fn changeEntityOrder(self: Self, ent: Entity, new_order: u32, allocator: std.mem.Allocator) !void {
+        // Get the parent of the entity
+        const parent = self.getParent(ent) orelse return;
+
+        // Fetch and sort all children of the parent
+        const sorted_children = try self.childrenSorted(parent, allocator);
+        defer allocator.free(sorted_children);
+
+        // Check if the new order value already exists among the siblings
+        var order_conflict = false;
+        for (sorted_children) |child| {
+            const current_order = if (self.get(child, components.HierarchyOrder)) |it| it.value else null;
+            if (current_order == new_order) {
+                order_conflict = true;
+                break;
+            }
+        }
+
+        // Resolve conflicts by incrementing order values of affected siblings
+        if (order_conflict) {
+            for (sorted_children) |child| {
+                const current_order = self.getHierarchyOrder(child);
+                if (current_order >= new_order) {
+                    self.set(child, components.HierarchyOrder, .{ .value = current_order + 1 });
+                }
+            }
+        }
+
+        // Update the order for the specified entity
+        self.set(ent, components.HierarchyOrder, .{ .value = new_order });
+
+        // Re-sort siblings after resolving order conflicts
+        std.mem.sort(Entity, sorted_children, self, struct {
+            pub fn f(ctx: Self, a: Entity, b: Entity) bool {
+                const ord_a = if (ctx.get(a, components.HierarchyOrder)) |it| it.value else 0;
+                const ord_b = if (ctx.get(b, components.HierarchyOrder)) |it| it.value else 0;
+                return ord_a < ord_b;
+            }
+        }.f);
+
+        // Reassign continuous order values to all children
+        for (sorted_children, 0..) |child, index| {
+            self.set(child, components.HierarchyOrder, .{ .value = @intCast(index) });
+        }
     }
 };
 
@@ -301,12 +593,19 @@ pub const ResourceResolverResult = extern struct {
 };
 pub const ResourceResolver = *const fn (path: [*:0]const u8) callconv(.C) ResourceResolverResult;
 
+pub const SerializationResult = extern struct {
+    ok: bool,
+    result: Dynamic = Dynamic{ .type = .null, .value = .{ .null = {} } },
+};
+
 pub const ComponentDef = extern struct {
     id: Entity,
     icon: ?[*:0]const u8,
     size: usize,
     alignment: usize,
     default: ?*const fn (self: *anyopaque, entity: Entity, ctx: *GameApp, resourceResolver: ResourceResolver) callconv(.C) bool,
+    serialize: ?*const fn (self: *const anyopaque, allocator: *const std.mem.Allocator) callconv(.C) SerializationResult,
+    deserialize: ?*const fn (self: *anyopaque, value: *const Dynamic, allocator: *const std.mem.Allocator) callconv(.C) bool,
 };
 
 fn Reflect(comptime T: type) type {
@@ -321,10 +620,10 @@ pub fn typeId(comptime T: type) c.ecs_id_t {
     return Reflect(T).id;
 }
 
-pub fn field(it: *c.ecs_iter_t, comptime T: type, comptime alignment: usize, index: i8) ?[]align(alignment) T {
-    if (c.ecs_field_w_size(it, @sizeOf(T), index)) |anyptr| {
+pub fn field(it: *Iterator, comptime T: type, comptime alignment: usize, index: i8) ?[]align(alignment) T {
+    if (c.ecs_field_w_size(it.castMut(), @sizeOf(T), index)) |anyptr| {
         const ptr = @as([*]align(alignment) T, @ptrCast(@alignCast(anyptr)));
-        return ptr[0..@intCast(it.count)];
+        return ptr[0..@intCast(it.inner.count)];
     }
     return null;
 }
@@ -348,6 +647,9 @@ pub fn typeName(comptime T: type) @TypeOf(@typeName(T)) {
 }
 
 pub const pair = c.ecs_pair;
+pub fn isPair(id: Entity) bool {
+    return c.ECS_IS_PAIR(id);
+}
 
 pub fn ids(comptime N: usize, args: [N]c.ecs_id_t) [*c]c.ecs_id_t {
     const len = N + 1;
@@ -356,6 +658,63 @@ pub fn ids(comptime N: usize, args: [N]c.ecs_id_t) [*c]c.ecs_id_t {
     result[args.len] = 0;
     return result[0..];
 }
+
+pub const SortedDfs = struct {
+    const Self = @This();
+
+    world: World,
+    stack: std.ArrayList(Entity),
+
+    pub fn init(allocator: std.mem.Allocator, world: World, root: Entity) !Self {
+        var self = Self{
+            .world = world,
+            .stack = try std.ArrayList(Entity).initCapacity(allocator, 1),
+        };
+        self.stack.appendAssumeCapacity(root);
+        return self;
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.stack.deinit();
+    }
+
+    pub fn next(self: *Self) !?Entity {
+        if (self.stack.items.len == 0) return null;
+
+        const ent = self.stack.pop();
+        var child_it = self.world.children(ent);
+        defer child_it.deinit();
+
+        // Create an array to collect entities
+        var sorted_children = try std.ArrayList(Entity).initCapacity(self.stack.allocator, @intCast(child_it.inner.count));
+        while (child_it.next()) {
+            for (0..@intCast(child_it.inner.count)) |i| {
+                try sorted_children.append(child_it.inner.entities[i]);
+            }
+        }
+
+        // Sort using a custom comparison function
+        std.mem.sort(Entity, sorted_children.items, self.world, struct {
+            pub fn f(ctx: World, a: Entity, b: Entity) bool {
+                return ctx.getHierarchyOrder(a) < ctx.getHierarchyOrder(b);
+            }
+        }.f);
+
+        try self.stack.appendSlice(try sorted_children.toOwnedSlice());
+
+        return ent;
+    }
+
+    // drains the iterator and returns all the items, calling deinit on the iterator is safe but unsavory
+    pub fn collect(self: *Self) ![]Entity {
+        var collected = std.ArrayList(Entity).init(self.stack.allocator);
+        while (try self.next()) |nx| {
+            try collected.append(nx);
+        }
+        self.stack.clearAndFree();
+        return collected.items;
+    }
+};
 
 // called on first world initialization, setting all static values
 fn staticEsqueInitializer() void {
@@ -405,17 +764,17 @@ fn staticEsqueInitializer() void {
     traits.Relationship = c.EcsRelationship;
     traits.Target = c.EcsTarget;
 
-    identifier_tags.Name = c.EcsName;
+    identifier_tags.PathName = c.EcsName;
     identifier_tags.Symbol = c.EcsSymbol;
     identifier_tags.Alias = c.EcsAlias;
 
-    events.OnAdd = c.EcsOnAdd;
-    events.OnRemove = c.EcsOnRemove;
-    events.OnSet = c.EcsOnSet;
-    events.OnDelete = c.EcsOnDelete;
-    events.OnDeleteTarget = c.EcsOnDeleteTarget;
-    events.OnTableCreate = c.EcsOnTableCreate;
-    events.OnTableDelete = c.EcsOnTableDelete;
+    std.debug.assert(@intFromEnum(Event.add) == c.EcsOnAdd);
+    std.debug.assert(@intFromEnum(Event.remove) == c.EcsOnRemove);
+    std.debug.assert(@intFromEnum(Event.set) == c.EcsOnSet);
+    std.debug.assert(@intFromEnum(Event.delete) == c.EcsOnDelete);
+    std.debug.assert(@intFromEnum(Event.deleteTarget) == c.EcsOnDeleteTarget);
+    std.debug.assert(@intFromEnum(Event.tableCreate) == c.EcsOnTableCreate);
+    std.debug.assert(@intFromEnum(Event.tableDelete) == c.EcsOnTableDelete);
 
     actions.Remove = c.EcsRemove;
     actions.Delete = c.EcsDelete;
@@ -519,20 +878,19 @@ pub const traits = struct {
 
 // Identifier tags
 pub const identifier_tags = struct {
-    pub var Name: Entity = undefined;
+    pub var PathName: Entity = undefined;
     pub var Symbol: Entity = undefined;
     pub var Alias: Entity = undefined;
 };
 
-// Events
-pub const events = struct {
-    pub var OnAdd: Entity = undefined;
-    pub var OnRemove: Entity = undefined;
-    pub var OnSet: Entity = undefined;
-    pub var OnDelete: Entity = undefined;
-    pub var OnDeleteTarget: Entity = undefined;
-    pub var OnTableCreate: Entity = undefined;
-    pub var OnTableDelete: Entity = undefined;
+pub const Event = enum(Entity) {
+    add = c.FLECS_HI_COMPONENT_ID + 40,
+    remove = c.FLECS_HI_COMPONENT_ID + 41,
+    set = c.FLECS_HI_COMPONENT_ID + 42,
+    delete = c.FLECS_HI_COMPONENT_ID + 43,
+    deleteTarget = c.FLECS_HI_COMPONENT_ID + 44,
+    tableCreate = c.FLECS_HI_COMPONENT_ID + 45,
+    tableDelete = c.FLECS_HI_COMPONENT_ID + 46,
 };
 
 // Actions
@@ -557,6 +915,51 @@ pub const predicates = struct {
     pub var ScopeClose: Entity = undefined;
 };
 
+// Builtin relationships
+pub const relations = struct {
+    pub var ChildOf: Entity = undefined;
+    pub var IsA: Entity = undefined;
+    pub var DependsOn: Entity = undefined;
+};
+
+pub const operators = struct {
+    pub var And: i16 = undefined;
+    pub var Or: i16 = undefined;
+    pub var Not: i16 = undefined;
+    pub var Optional: i16 = undefined;
+    pub var AndFrom: i16 = undefined;
+    pub var OrFrom: i16 = undefined;
+    pub var NotFrom: i16 = undefined;
+};
+
+pub const masks = struct {
+    pub const idFlags = c.ECS_ID_FLAGS_MASK;
+    pub const entity = c.ECS_ENTITY_MASK;
+    pub const generation = c.ECS_GENERATION_MASK;
+    pub const component = c.ECS_COMPONENT_MASK;
+};
+
+// Components
+pub const components = struct {
+    pub const Meta = @import("components/Meta.zig").Meta;
+    pub const Uuid = @import("components/Uuid.zig").Uuid;
+
+    pub const Position = @import("components/transform.zig").Position;
+    pub const Rotation = @import("components/transform.zig").Rotation;
+    pub const Scale = @import("components/transform.zig").Scale;
+    pub const TransformMatrix = @import("components/transform.zig").TransformMatrix;
+
+    pub const camera = @import("components/camera.zig");
+    pub const mesh = @import("components/mesh.zig");
+    pub const material = @import("components/material.zig");
+
+    pub const Camera = camera.Camera;
+    pub const Mesh = mesh.Mesh;
+    pub const Material = material.Material;
+
+    pub const HierarchyOrder = @import("components/HierarchyOrder.zig").HierarchyOrder;
+};
+
 // Systems
 pub const systems = struct {
     pub var Monitor: Entity = undefined;
@@ -573,23 +976,8 @@ pub const systems = struct {
     pub var OnStore: Entity = undefined;
     pub var PostFrame: Entity = undefined;
     pub var Phase: Entity = undefined;
-};
 
-// Builtin relationships
-pub const relations = struct {
-    pub var ChildOf: Entity = undefined;
-    pub var IsA: Entity = undefined;
-    pub var DependsOn: Entity = undefined;
-};
-
-pub const operators = struct {
-    pub var And: i16 = undefined;
-    pub var Or: i16 = undefined;
-    pub var Not: i16 = undefined;
-    pub var Optional: i16 = undefined;
-    pub var AndFrom: i16 = undefined;
-    pub var OrFrom: i16 = undefined;
-    pub var NotFrom: i16 = undefined;
+    pub const transformMatrices = @import("systems/transformMatrix.zig").system;
 };
 
 /// Taken from <https://github.com/zig-gamedev/zflecs/blob/ee2cd434fa2ec2454008988a1cc1201b242f030e/src/zflecs.zig#L2652C1-L2693C2>
@@ -635,7 +1023,7 @@ pub fn SystemImpl(comptime fn_system: anytype) type {
             inline for (start_index..fn_type.Fn.params.len) |i| {
                 const p = fn_type.Fn.params[i];
                 const info = @typeInfo(p.type.?);
-                args_tuple[i] = field(it, info.Pointer.child, info.Pointer.alignment, i - start_index).?;
+                args_tuple[i] = field(Iterator.from(it), info.Pointer.child, info.Pointer.alignment, i - start_index).?;
             }
 
             //NOTE: .always_inline seems ok, but unsure. Replace to .auto if it breaks
@@ -646,6 +1034,25 @@ pub fn SystemImpl(comptime fn_system: anytype) type {
 
 fn hasItParam(comptime params: []const std.builtin.Type.Fn.Param) bool {
     return params[0].type == *c.ecs_iter_t or params[0].type == *Iter;
+}
+
+// ECS OS allocator API
+// TODO: define allocator in zig world and expose it to C instead of doing this
+// It doesn't use arena which is undesired
+pub inline fn malloc(size: usize) std.mem.Allocator.Error!*anyopaque {
+    return c.ecs_os_api.malloc_.?(@intCast(size)) orelse return error.OutOfMemory;
+}
+
+pub inline fn free(ptr: *anyopaque) void {
+    return c.ecs_os_api.free_.?(ptr);
+}
+
+pub inline fn realloc(ptr: *anyopaque, size: usize) std.mem.Allocator.Error!*anyopaque {
+    return c.ecs_os_api.realloc_.?(ptr, @intCast(size)) orelse return error.OutOfMemory;
+}
+
+pub inline fn calloc(size: usize) std.mem.Allocator.Error!*anyopaque {
+    return c.ecs_os_api.calloc_.?(@intCast(size)) orelse return error.OutOfMemory;
 }
 
 // monkey patches for working around zig compiler bugs
@@ -670,6 +1077,26 @@ pub const SystemDesc = extern struct {
     tick_source: c.ecs_entity_t = @import("std").mem.zeroes(c.ecs_entity_t),
     multi_threaded: bool = @import("std").mem.zeroes(bool),
     immediate: bool = @import("std").mem.zeroes(bool),
+};
+
+pub const ObserverDesc = extern struct {
+    _canary: i32 = @import("std").mem.zeroes(i32),
+    entity: c.ecs_entity_t = @import("std").mem.zeroes(c.ecs_entity_t),
+    query: c.ecs_query_desc_t = @import("std").mem.zeroes(c.ecs_query_desc_t),
+    events: [8]c.ecs_entity_t = @import("std").mem.zeroes([8]c.ecs_entity_t),
+    yield_existing: bool = @import("std").mem.zeroes(bool),
+    callback: ?*const fn (it: *Iter) callconv(.C) void = @import("std").mem.zeroes(?*const fn (it: *Iter) callconv(.C) void),
+    run: c.ecs_run_action_t = @import("std").mem.zeroes(c.ecs_run_action_t),
+    ctx: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+    ctx_free: c.ecs_ctx_free_t = @import("std").mem.zeroes(c.ecs_ctx_free_t),
+    callback_ctx: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+    callback_ctx_free: c.ecs_ctx_free_t = @import("std").mem.zeroes(c.ecs_ctx_free_t),
+    run_ctx: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+    run_ctx_free: c.ecs_ctx_free_t = @import("std").mem.zeroes(c.ecs_ctx_free_t),
+    observable: ?*c.ecs_poly_t = @import("std").mem.zeroes(?*c.ecs_poly_t),
+    last_event_id: [*c]i32 = @import("std").mem.zeroes([*c]i32),
+    term_index_: i8 = @import("std").mem.zeroes(i8),
+    flags_: c.ecs_flags32_t = @import("std").mem.zeroes(c.ecs_flags32_t),
 };
 
 pub const Iter = extern struct {

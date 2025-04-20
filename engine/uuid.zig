@@ -6,7 +6,7 @@ pub const Urn = uuid_zig.urn.Urn;
 pub const Uuid = extern struct {
     const Self = @This();
 
-    raw: u128,
+    raw: u128 align(8),
 
     pub inline fn new() Self {
         return .{ .raw = uuid_zig.v4.new() };

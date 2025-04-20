@@ -5,11 +5,11 @@ const std = @import("std");
 const gizmo = @import("../gizmo.zig");
 
 const ecs = @import("yume").ecs;
+const components = ecs.components;
+
 const Vec3 = @import("yume").Vec3;
 const Engine = @import("yume").VulkanEngine;
 const GameApp = @import("yume").GameApp;
-const Object = @import("yume").scene_graph.Object;
-const components = @import("yume").components;
 const AllocatedBuffer = @import("yume").AllocatedBuffer;
 
 const Editor = @import("../Editor.zig");
@@ -41,7 +41,7 @@ pub fn init(ctx: *GameApp) Self {
                 .{ .id = ecs.typeId(components.Rotation) },
             } },
         )),
-        .render_system = ctx.world.systemEx(.{
+        .render_system = ctx.world.systemEx(&.{
             .entity = ctx.world.create("Render System"),
             .query = std.mem.zeroInit(c.ecs_query_desc_t, .{ .terms = .{
                 .{ .id = ecs.typeId(components.TransformMatrix) },
@@ -51,6 +51,10 @@ pub fn init(ctx: *GameApp) Self {
             .callback = @ptrCast(&ecs.SystemImpl(renderSys).exec),
         }),
     };
+}
+
+pub fn deinit(self: *Self) void {
+    self.camera_query.deinit();
 }
 
 pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
@@ -87,7 +91,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
 
                 var iter = me.d.camera_query.iter();
                 const aspect = me.d.game_view_size.x / me.d.game_view_size.y;
-                while (c.ecs_query_next(&iter)) {
+                while (iter.next()) {
                     const cameras = ecs.field(&iter, components.Camera, @alignOf(components.Camera), 0).?;
                     const positions = ecs.field(&iter, components.Position, @alignOf(components.Position), 1).?;
                     const rotations = ecs.field(&iter, components.Rotation, @alignOf(components.Rotation), 2).?;
@@ -95,7 +99,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                         camera.updateMatrices(pos.value, rot.value, aspect);
                         var new_me = me.*;
                         new_me.camera = camera;
-                        _ = c.ecs_run(iter.real_world, me.d.render_system, me.app.delta, &new_me);
+                        _ = c.ecs_run(iter.inner.real_world, me.d.render_system, me.app.delta, &new_me);
                     }
                 }
 
@@ -106,7 +110,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
             }
         }.f, &self.frame_userdata);
         c.ImDrawList_AddCallback(game_image, c.ImDrawCallback_ResetRenderState, null);
-        if (!c.ecs_query_is_true(&self.camera_query.inner)) {
+        if (!self.camera_query.isTrue()) {
             const text = "No Camera";
             const size = c.ImGui_CalcTextSize(text);
             const avail = c.ImGui_GetContentRegionAvail();
@@ -121,7 +125,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
     c.ImGui_End();
 }
 
-fn renderSys(it: *ecs.Iter, matrices: []components.TransformMatrix, meshes: []align(8) components.Mesh, materials: []align(8) components.Material) void {
+fn renderSys(it: *ecs.Iter, matrices: []components.TransformMatrix, meshes: []components.Mesh, materials: []components.Material) void {
     const me: *FrameData = @ptrCast(@alignCast(it.param));
     me.app.engine.drawObjects(
         me.cmd,

@@ -6,7 +6,7 @@ const Uuid = @import("uuid.zig").Uuid;
 const texs = @import("textures.zig");
 const Texture = texs.Texture;
 
-const components = @import("components.zig");
+const components = @import("ecs.zig").components;
 
 const Mesh = components.Mesh;
 const Vertex = components.mesh.Vertex;
@@ -168,6 +168,7 @@ pub const Assets = struct {
 
         const mesh = try instance.allocator.create(Mesh);
         mesh.* = load_from_obj(instance.allocator, bytes);
+        mesh.uuid = id;
         instance.engine.uploadMesh(mesh);
 
         const loaded = LoadedAsset{ .data = .{ .mesh = mesh } };
@@ -341,7 +342,7 @@ pub const Assets = struct {
         const pipeline = pipeline_builder.build(instance.engine.device, instance.engine.render_pass);
 
         material.* = Material{
-            .uuid = Uuid.new(),
+            .uuid = id,
             .pipeline = pipeline,
             .pipeline_layout = pipeline_layout,
         };

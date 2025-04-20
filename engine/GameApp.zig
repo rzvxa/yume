@@ -17,8 +17,6 @@ const Assets = @import("assets.zig").Assets;
 const SceneAssetHandle = @import("assets.zig").SceneAssetHandle;
 
 const Scene = @import("scene.zig").Scene;
-const ComponentDefinition = @import("scene.zig").ComponentDefinition;
-const components = @import("components.zig");
 
 const ecs = @import("ecs.zig");
 
@@ -36,7 +34,7 @@ window: *c.SDL_Window = undefined,
 inputs: *inputs.InputContext,
 engine: VulkanEngine,
 
-components: std.StringHashMap(components.ComponentDef),
+components: std.StringHashMap(ecs.ComponentDef),
 
 world: ecs.World,
 scene_root: ecs.Entity,
@@ -65,24 +63,25 @@ pub fn init(a: std.mem.Allocator, loader: assets.ResourceLoader, window_title: [
         .window = window,
         .inputs = inputs.init(window) catch @panic("Failed to initialize input manager"),
         .engine = engine,
-        .components = std.StringHashMap(components.ComponentDef).init(a),
+        .components = std.StringHashMap(ecs.ComponentDef).init(a),
     };
 
     self.scene_root = self.world.create("root");
 
     Assets.init(a, &self.engine, loader);
 
-    std.debug.print("WH? {s}\n", .{ecs.typeName(components.Mesh)});
-    self.registerComponent(components.Uuid);
+    self.registerComponent(ecs.components.Uuid);
+    self.registerComponent(ecs.components.Meta);
+    self.registerComponent(ecs.components.HierarchyOrder);
 
-    self.registerComponent(components.Position);
-    self.registerComponent(components.Rotation);
-    self.registerComponent(components.Scale);
-    self.registerComponent(components.TransformMatrix);
+    self.registerComponent(ecs.components.Position);
+    self.registerComponent(ecs.components.Rotation);
+    self.registerComponent(ecs.components.Scale);
+    self.registerComponent(ecs.components.TransformMatrix);
 
-    self.registerComponent(components.Camera);
-    self.registerComponent(components.Mesh);
-    self.registerComponent(components.Material);
+    self.registerComponent(ecs.components.Camera);
+    self.registerComponent(ecs.components.Mesh);
+    self.registerComponent(ecs.components.Material);
 
     return self;
 }
@@ -96,7 +95,7 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
     while (!quit) {
         self.newFrame();
         if (comptime std.meta.hasMethod(Dispatcher, "newFrame")) {
-            d.newFrame(self);
+            d.newFrame();
         }
         while (c.SDL_PollEvent(&event)) {
             if (event.type == c.SDL_EVENT_MOUSE_MOTION) {
@@ -104,16 +103,16 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
                 self.mouse.y = event.motion.y;
             }
             if (comptime std.meta.hasMethod(Dispatcher, "processEvent")) {
-                quit = !d.processEvent(self, &event);
+                quit = !d.processEvent(&event);
             }
         }
 
         if (comptime std.meta.hasMethod(Dispatcher, "update")) {
-            const cont: bool = d.update(self);
+            const cont: bool = d.update();
             quit = quit or !cont;
         }
         if (comptime std.meta.hasMethod(Dispatcher, "draw")) {
-            d.draw(self);
+            d.draw();
         }
 
         self.delta = @floatCast(@as(f64, @floatFromInt(timer.lap())) / 1_000_000_000.0);
@@ -135,11 +134,11 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
             _ = c.SDL_SetWindowTitle(self.window, new_title.ptr);
         }
         if (comptime std.meta.hasMethod(Dispatcher, "endFrame")) {
-            d.endFrame(self);
+            d.endFrame();
         }
     }
 
-    d.deinit(self);
+    d.deinit();
 }
 
 pub fn deinit(self: *Self) void {
@@ -174,30 +173,58 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
     self.world.clear(self.scene_root);
     if (try dfs.next()) |root| {
         try entity_map.put(root.uuid, self.scene_root);
-        root.deref();
+        self.world.setUuid(self.scene_root, root.uuid);
     }
 
-    while (try dfs.next()) |obj| {
-        const entity = self.world.create(obj.name);
+    while (try dfs.next()) |decl| {
+        const entity = self.world.create(null);
 
-        try entity_map.put(obj.uuid, entity);
+        try entity_map.put(decl.uuid, entity);
 
-        std.debug.print("entity {s} {d}\n", .{ obj.name, entity });
-        if (obj.parent) |parent| {
+        std.debug.print("entity {s} {d}\n", .{ decl.name, entity });
+
+        var idx: usize = 0;
+        if (decl.parent) |parent| {
+            idx = parent.findChildren(decl).?;
             const parent_entity = entity_map.get(parent.uuid).?;
-            std.debug.print("entity {s} parent {d}\n", .{ obj.name, parent_entity });
+            std.debug.print("entity {s} parent {d}\n", .{ decl.name, parent_entity });
             self.world.addPair(entity, ecs.relations.ChildOf, parent_entity);
         }
 
-        self.world.set(entity, components.Uuid, .{ .value = obj.uuid });
+        _ = self.world.setMetaName(entity, decl.name);
+        _ = self.world.setPathName(entity, if (decl.ident) |ident| ident else null);
+        self.world.set(entity, ecs.components.Uuid, .{ .value = decl.uuid });
+        // self.world.set(entity, ecs.components.Meta, .{ .allocator = @ptrCast(&self.allocator), .title = try self.allocator.dupeZ(u8, decl.name) });
+        self.world.set(entity, ecs.components.HierarchyOrder, .{ .value = @intCast(idx) });
 
-        self.world.set(entity, components.Position, .{ .value = obj.transform.position() });
-        self.world.set(entity, components.Rotation, .{ .value = obj.transform.rotation() });
-        self.world.set(entity, components.Scale, .{ .value = obj.transform.scale() });
-        self.world.set(entity, components.TransformMatrix, .{ .value = obj.transform.getMatrix() });
-
-        obj.deref();
+        var iter = decl.components.iterator();
+        while (iter.next()) |it| {
+            if (self.components.get(it.key_ptr.*)) |def| {
+                if (def.deserialize) |de| {
+                    self.world.addId(entity, def.id);
+                    const ptr = c.ecs_get_mut_id(self.world.inner, entity, def.id).?;
+                    if (!de(ptr, it.value_ptr, &self.allocator)) {
+                        std.debug.print("error: Failed to deserialize {s}.\n", .{it.key_ptr.*});
+                        return error.FailedToLoadScene;
+                    }
+                } else {
+                    std.debug.print("error: Component {s} found but has no deserializer\n", .{it.key_ptr.*});
+                    return error.FailedToLoadScene;
+                }
+            } else {
+                std.debug.print("error: Component {s} not found!\n", .{it.key_ptr.*});
+                return error.FailedToLoadScene;
+            }
+        }
     }
+}
+
+pub fn snapshotLiveScene(self: *Self) !*Scene {
+    if (self.scene_root == 0) {
+        return error.SceneRootZero;
+    }
+
+    return try Scene.fromEcs(self.allocator, self.world, self.scene_root, self);
 }
 
 pub fn registerComponent(self: *Self, comptime T: type) void {
