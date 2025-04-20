@@ -44,7 +44,7 @@ pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
     const old_pad_y = c.ImGui_GetStyle().*.FramePadding.y;
     c.ImGui_GetStyle().*.FramePadding.y = 0;
     _ = c.ImGui_BeginChildFrameEx(c.ImGui_GetID("entity type icon"), c.ImVec2{ .x = 48, .y = 48 }, c.ImGuiWindowFlags_NoBackground);
-    c.ImGui_Image(@intFromPtr(icon), c.ImVec2{ .x = 48, .y = 48 });
+    c.ImGui_Image(icon, c.ImVec2{ .x = 48, .y = 48 });
     c.ImGui_EndChildFrame();
     c.ImGui_GetStyle().*.FramePadding.y = old_pad_y;
 

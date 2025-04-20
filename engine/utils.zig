@@ -2,8 +2,7 @@ const c = @import("clibs");
 
 const builtin = @import("builtin");
 const std = @import("std");
-
-const log = std.log.scoped(.vulkan_engine);
+const log = std.log.scoped(.utils);
 
 // Error checking for vulkan and SDL
 
@@ -41,7 +40,7 @@ pub fn pathExists(path: []const u8) !bool {
         else => return e,
     };
     defer dir.close();
-    std.debug.print("HERE fullpath {s} {}\n", .{ path, try dir.createFile("Hello.txt", .{}) });
+    log.debug("fullpath {s} {}\n", .{ path, try dir.createFile("Hello.txt", .{}) });
     return true;
 }
 

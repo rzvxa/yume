@@ -122,7 +122,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                 if (self.active_tool == .move) active_col else normal_col,
             );
 
-            clicked = c.ImGui_ImageButton("##move-tool", @intFromPtr(Editor.move_tool_icon_ds), icon_sz);
+            clicked = c.ImGui_ImageButton("##move-tool", Editor.move_tool_icon_ds, icon_sz);
             c.ImGui_PopStyleColor();
             if (clicked) {
                 self.active_tool = .move;
@@ -132,7 +132,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                 c.ImGuiCol_Button,
                 if (self.active_tool == .rotate) active_col else normal_col,
             );
-            clicked = c.ImGui_ImageButton("##rotate-tool", @intFromPtr(Editor.rotate_tool_icon_ds), icon_sz);
+            clicked = c.ImGui_ImageButton("##rotate-tool", Editor.rotate_tool_icon_ds, icon_sz);
             c.ImGui_PopStyleColor();
             if (clicked) {
                 self.active_tool = .rotate;
@@ -142,7 +142,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                 c.ImGuiCol_Button,
                 if (self.active_tool == .scale) active_col else normal_col,
             );
-            clicked = c.ImGui_ImageButton("##scale-tool", @intFromPtr(Editor.scale_tool_icon_ds), icon_sz);
+            clicked = c.ImGui_ImageButton("##scale-tool", Editor.scale_tool_icon_ds, icon_sz);
             c.ImGui_PopStyleColor();
             if (clicked) {
                 self.active_tool = .scale;

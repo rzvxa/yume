@@ -54,7 +54,7 @@ pub fn show(self: *Self) void {
 
         c.ImGui_SetCursorPosY(c.ImGui_GetCursorPosY() + box_height / 4);
         imutils.alignHorizontal(700, 0.5);
-        c.ImGui_Image(@intFromPtr(Editor.yume_logo_ds), c.ImVec2{ .x = 246, .y = 326 });
+        c.ImGui_Image(Editor.yume_logo_ds, c.ImVec2{ .x = 246, .y = 326 });
         c.ImGui_PushFont(Editor.roboto32);
         c.ImGui_NewLine();
         imutils.alignHorizontal(730, 0.5);

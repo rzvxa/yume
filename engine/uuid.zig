@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.uuid);
 
 const uuid_zig = @import("uuid");
 
@@ -42,7 +43,7 @@ pub const Uuid = extern struct {
         const s = switch (tk) {
             inline .string, .allocated_string => |slice| slice,
             else => {
-                std.debug.print("{}\n", .{tk});
+                log.err("{}\n", .{tk});
                 return error.UnexpectedToken;
             },
         };

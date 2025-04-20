@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.EditorDatabase);
 
 const Uuid = @import("yume").Uuid;
 
@@ -64,7 +65,6 @@ pub fn setLastOpenProject(value: ?[]const u8) !void {
 fn load() !void {
     const end_pos = try instance.file.getEndPos();
     var new_arena: *std.heap.ArenaAllocator = undefined;
-    std.debug.print("HERE {d}\n", .{end_pos});
     if (end_pos > 0) {
         const buf = try instance.file.readToEndAlloc(instance.allocator, 20_000);
         defer instance.allocator.free(buf);

@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const Uuid = @import("yume").Uuid;
+const log = std.log.scoped(.AssetsDatabase);
 
 pub const Resource = struct {
     id: Uuid,
@@ -66,6 +67,16 @@ pub fn init(allocator: std.mem.Allocator) !void {
         try register(.{ .urn = "1e2e7db3-8b27-45b9-adf1-05e808175043", .path = "icons/mesh.png", .category = "editor" });
         try register(.{ .urn = "849d928a-a459-4df7-97c4-49877fba782c", .path = "icons/material.png", .category = "editor" });
 
+        try register(.{ .urn = "682be1c4-a465-40ed-a4f0-31a07f2b1a20", .path = "icons/error.png", .category = "editor" });
+        try register(.{ .urn = "a330bc08-999b-46df-a49b-f959a3b75b65", .path = "icons/warning.png", .category = "editor" });
+        try register(.{ .urn = "376e63cc-21e1-4d05-bab7-ab5f71cd7ad3", .path = "icons/info.png", .category = "editor" });
+        try register(.{ .urn = "7165bb42-7816-49a4-9b8b-ddb1aa1ee6a9", .path = "icons/debug.png", .category = "editor" });
+
+        try register(.{ .urn = "1884f2b3-2689-4414-b0fe-b854e582c7f4", .path = "icons/error-mono.png", .category = "editor" });
+        try register(.{ .urn = "ede4ab11-60c2-49e9-8792-22d26fc9cb50", .path = "icons/warning-mono.png", .category = "editor" });
+        try register(.{ .urn = "fc2d47e6-9777-4c80-8c52-7d49fbec5d8a", .path = "icons/info-mono.png", .category = "editor" });
+        try register(.{ .urn = "4306862e-7010-4063-8084-1cb6713ac701", .path = "icons/debug-mono.png", .category = "editor" });
+
         try register(.{ .urn = "9660e8f4-6809-4d57-9507-511117128bc3", .path = "icons/yume.png", .category = "editor" });
     }
 }
@@ -107,7 +118,7 @@ pub fn getResourceId(path: []const u8) !Uuid {
             return next.key_ptr.*;
         }
     }
-    std.debug.print("resource not found {s}\n", .{path});
+    log.err("resource not found {s}\n", .{path});
     return error.ResourceNotFound;
 }
 
@@ -126,7 +137,7 @@ pub fn getResourcePath(id: Uuid) ![]const u8 {
 }
 
 pub fn readAssetAlloc(allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) ![]u8 {
-    std.debug.print("readAssetAlloc ({s}) :: {s}\n", .{ id.urn(), try getResourcePath(id) });
+    log.debug("readAssetAlloc ({s}) :: {s}\n", .{ id.urn(), try getResourcePath(id) });
     var file = std.fs.cwd().openFile(try getResourcePath(id), .{}) catch return error.FailedToOpenResource;
     defer file.close();
     return file.readToEndAlloc(allocator, max_bytes) catch return error.FailedToReadResource;
@@ -148,7 +159,6 @@ pub fn register(opts: struct {
         try std.fs.path.join(self.allocator, &[_][]const u8{ gameRoot, "assets", opts.category, opts.path })
     else
         try self.allocator.dupe(u8, opts.path);
-    std.debug.print("\n slice: {s}\n", .{path});
 
     try storage.put(id, Resource{ .id = id, .path = path });
     const uri = try std.fmt.allocPrint(self.allocator, "{s}://{s}", .{ opts.category, opts.path });
