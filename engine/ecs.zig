@@ -1,5 +1,6 @@
 const c = @import("clibs");
 const std = @import("std");
+const log = std.log.scoped(.ecs);
 
 const GameApp = @import("GameApp.zig");
 const Uuid = @import("uuid.zig").Uuid;
@@ -162,7 +163,7 @@ pub const World = struct {
                 null,
             .deserialize = if (@hasDecl(T, "deserialize")) blk: {
                 if (!@hasDecl(T, "serialize")) {
-                    std.debug.print("warning: ECS componenet '" ++ @typeName(T) ++ "' has a `deserialize` method but doesn't provide a `serialize` method declaration.\n", .{});
+                    log.warn("ECS componenet '" ++ @typeName(T) ++ "' has a `deserialize` method but doesn't provide a `serialize` method declaration.\n", .{});
                 }
                 break :blk struct {
                     pub fn f(ptr: *anyopaque, value: *const Dynamic, allocator: *const std.mem.Allocator) callconv(.C) bool {

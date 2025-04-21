@@ -1,5 +1,6 @@
 const c = @import("clibs");
 const std = @import("std");
+const log = std.log.scoped(.mesh);
 
 const AllocatedBuffer = @import("../VulkanEngine.zig").AllocatedBuffer;
 const m3d = @import("../math3d.zig");
@@ -215,15 +216,15 @@ pub fn load_from_obj2(a: std.mem.Allocator, filepath: []const u8) Mesh {
     }
     defer c.ufbx_free_scene(scene);
 
-    std.log.debug("{any}", .{scene});
+    log.debug("{any}", .{scene});
     // var vertices = std.ArrayList(Vertex).init(a);
     for (scene.*.root_node.*.children.data[0..scene.*.root_node.*.children.count]) |*node| {
-        std.debug.print("Object: {s}\n", .{node.*.*.attrib.*.name.data});
+        log.debug("Object: {s}\n", .{node.*.*.attrib.*.name.data});
         const mesh = node.*.*.mesh;
         if (mesh == null) {
             continue;
         }
-        std.debug.print("-> mesh with {} faces\n-> materials {}\n", .{ mesh.*.faces.count, mesh.*.face_groups.count });
+        log.debug("-> mesh with {} faces\n-> materials {}\n", .{ mesh.*.faces.count, mesh.*.face_groups.count });
     }
 
     // for (uint32_t face_index : part->face_indices) {

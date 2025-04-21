@@ -2,6 +2,7 @@ const c = @import("clibs");
 
 const builtin = @import("builtin");
 const std = @import("std");
+const log = std.log.scoped(.OpenProjectModal);
 
 const Uuid = @import("yume").Uuid;
 const Scene = @import("yume").scene_graph.Scene;
@@ -90,7 +91,7 @@ pub fn show(self: *Self, ctx: *GameApp) void {
         const close_btn_size = 32;
         c.ImGui_SetCursorPosX(avail.x - (padding_x + close_btn_size));
         c.ImGui_SetCursorPosY(cursor.y + (padding_y + close_btn_size));
-        if (c.ImGui_ImageButton("##close-btn", @intFromPtr(Editor.close_icon_ds), c.ImVec2{ .x = close_btn_size, .y = close_btn_size })) {
+        if (c.ImGui_ImageButton("##close-btn", Editor.close_icon_ds, c.ImVec2{ .x = close_btn_size, .y = close_btn_size })) {
             self.close();
         }
 
@@ -144,11 +145,11 @@ pub fn show(self: *Self, ctx: *GameApp) void {
 fn onPathSelect(user_data: ?*anyopaque, paths: [*c]const [*c]const u8, _: c_int) callconv(.C) void {
     var me: *Self = @ptrCast(@alignCast(user_data));
     if (paths == null) {
-        std.debug.print("SDL error {s}\n", .{c.SDL_GetError()});
+        log.err("SDL error {s}\n", .{c.SDL_GetError()});
         return;
     }
     if (paths[0] == null) {
-        std.debug.print("empty selection\n", .{});
+        log.err("empty selection\n", .{});
         return;
     }
     me.project_path.clearRetainingCapacity();

@@ -1,12 +1,21 @@
 const std = @import("std");
+const log = std.log.scoped(.EditorDatabase);
 
 const Uuid = @import("yume").Uuid;
 
 const Self = @This();
 
+pub const LogFilters = struct {
+    err: bool = true,
+    warn: bool = true,
+    info: bool = true,
+    debug: bool = true,
+};
+
 const EditorDatabase = struct {
     last_open_project: ?[]u8 = null,
     last_open_scene: ?Uuid = null,
+    log_filters: LogFilters = .{},
 };
 
 var instance: Self = undefined;
@@ -64,7 +73,6 @@ pub fn setLastOpenProject(value: ?[]const u8) !void {
 fn load() !void {
     const end_pos = try instance.file.getEndPos();
     var new_arena: *std.heap.ArenaAllocator = undefined;
-    std.debug.print("HERE {d}\n", .{end_pos});
     if (end_pos > 0) {
         const buf = try instance.file.readToEndAlloc(instance.allocator, 20_000);
         defer instance.allocator.free(buf);

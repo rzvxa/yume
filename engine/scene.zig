@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.scene);
 
 const ecs = @import("ecs.zig");
 const Dynamic = @import("serialization/dynamic.zig").Dynamic;
@@ -91,7 +92,7 @@ pub const Scene = struct {
             const field_name = switch (tk) {
                 inline .string, .allocated_string => |slice| slice,
                 else => {
-                    std.debug.print("{}\n", .{tk});
+                    log.err("{}\n", .{tk});
                     return error.UnexpectedToken;
                 },
             };
@@ -252,7 +253,7 @@ const Object = struct {
             const field_name = switch (tk) {
                 inline .string, .allocated_string => |slice| slice,
                 else => {
-                    std.debug.print("{}\n", .{tk});
+                    log.err("{}\n", .{tk});
                     return error.UnexpectedToken;
                 },
             };
@@ -264,7 +265,7 @@ const Object = struct {
                 result.name = switch (try jrs.next()) {
                     inline .string => |slice| try a.dupeZ(u8, slice),
                     else => {
-                        std.debug.print("{}\n", .{tk});
+                        log.err("{}\n", .{tk});
                         return error.UnexpectedToken;
                     },
                 };
@@ -273,7 +274,7 @@ const Object = struct {
                     inline .string => |slice| try a.dupeZ(u8, slice),
                     inline .null => null,
                     else => {
-                        std.debug.print("{}\n", .{tk});
+                        log.err("{}\n", .{tk});
                         return error.UnexpectedToken;
                     },
                 };
@@ -289,7 +290,7 @@ const Object = struct {
                     result.parent = @as(*Self, @ptrCast(@alignCast(p)));
                     continue;
                 }
-                std.debug.print("Failed to resolve reference {s}", .{parent_id.urn()});
+                log.err("Failed to resolve reference {s}", .{parent_id.urn()});
                 return error.UnexpectedToken;
             } else if (std.mem.eql(u8, field_name, "components")) {
                 const dyn = try Dynamic.jsonParse(a, jrs, o);
@@ -327,7 +328,7 @@ const Object = struct {
                 break :blk uuid;
             } else {
                 const uuid = Uuid.new();
-                std.debug.print(
+                log.warn(
                     "Attempting to serialize an entity without a UUID," ++
                         " assigning a new UUID {s} to the entity {d} to it.\n",
                     .{ uuid.urn(), entity },

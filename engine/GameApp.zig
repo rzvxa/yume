@@ -1,6 +1,7 @@
 const c = @import("clibs");
 
 const std = @import("std");
+const log = std.log.scoped(.GameApp);
 
 const VulkanEngine = @import("VulkanEngine.zig");
 pub const RenderCommand = VulkanEngine.RenderCommand;
@@ -181,13 +182,13 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
 
         try entity_map.put(decl.uuid, entity);
 
-        std.debug.print("entity {s} {d}\n", .{ decl.name, entity });
+        log.debug("entity {s} {d}\n", .{ decl.name, entity });
 
         var idx: usize = 0;
         if (decl.parent) |parent| {
             idx = parent.findChildren(decl).?;
             const parent_entity = entity_map.get(parent.uuid).?;
-            std.debug.print("entity {s} parent {d}\n", .{ decl.name, parent_entity });
+            log.debug("entity {s} parent {d}\n", .{ decl.name, parent_entity });
             self.world.addPair(entity, ecs.relations.ChildOf, parent_entity);
         }
 
@@ -204,15 +205,15 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
                     self.world.addId(entity, def.id);
                     const ptr = c.ecs_get_mut_id(self.world.inner, entity, def.id).?;
                     if (!de(ptr, it.value_ptr, &self.allocator)) {
-                        std.debug.print("error: Failed to deserialize {s}.\n", .{it.key_ptr.*});
+                        log.err("error: Failed to deserialize {s}.\n", .{it.key_ptr.*});
                         return error.FailedToLoadScene;
                     }
                 } else {
-                    std.debug.print("error: Component {s} found but has no deserializer\n", .{it.key_ptr.*});
+                    log.err("error: Component {s} found but has no deserializer\n", .{it.key_ptr.*});
                     return error.FailedToLoadScene;
                 }
             } else {
-                std.debug.print("error: Component {s} not found!\n", .{it.key_ptr.*});
+                log.err("error: Component {s} not found!\n", .{it.key_ptr.*});
                 return error.FailedToLoadScene;
             }
         }

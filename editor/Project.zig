@@ -1,4 +1,6 @@
 const std = @import("std");
+const log = std.log.scoped(.Project);
+
 const Uuid = @import("yume").Uuid;
 
 const AssetLoader = @import("yume").assets.AssetLoader;
@@ -128,7 +130,7 @@ pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, o: anytype) !Self {
         const field_name = switch (tk) {
             inline .string, .allocated_string => |slice| slice,
             else => {
-                std.debug.print("{}\n", .{tk});
+                log.err("{}\n", .{tk});
                 return error.UnexpectedToken;
             },
         };
@@ -173,7 +175,6 @@ fn parseYumeVersion(jrs: *std.json.Scanner) !std.SemanticVersion {
 
 fn parseScenes(a: std.mem.Allocator, jrs: *std.json.Scanner) !std.ArrayList(Uuid) {
     var tk = try jrs.next();
-    std.debug.print("{}\n", .{tk});
     if (tk != .array_begin) return error.UnexpectedToken;
 
     var scenes = std.ArrayList(Uuid).init(a);

@@ -18,7 +18,7 @@ pub fn draw(_: *Self) void {
         if (c.ImGui_BeginChildFrameEx(c.ImGui_GetID("files grid"), grid_size, c.ImGuiWindowFlags_NoBackground)) {
             c.ImGui_ColumnsEx(@intFromFloat(col_count), "dir", false);
             const ItemDrawer = struct {
-                fn draw(icon: c.VkDescriptorSet, name: []const u8) void {
+                fn draw(icon: c.ImTextureID, name: []const u8) void {
                     c.ImGui_Spacing();
                     c.ImGui_Spacing();
                     c.ImGui_Spacing();
@@ -32,7 +32,7 @@ pub fn draw(_: *Self) void {
                     _ = c.ImGui_ButtonEx("##name", btn_size);
                     c.ImGui_SetCursorPos(cursor);
                     c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - item_sz) / 2));
-                    _ = c.ImGui_Image(@intFromPtr(icon), c.ImVec2{ .x = item_sz, .y = item_sz });
+                    _ = c.ImGui_Image(icon, c.ImVec2{ .x = item_sz, .y = item_sz });
                     c.ImGui_SetCursorPosX(cursor.x + ((btn_size.x - text_size.x) / 2));
                     _ = c.ImGui_Text(name.ptr);
                     c.ImGui_PopID();
