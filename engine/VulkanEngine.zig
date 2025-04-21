@@ -28,6 +28,7 @@ const log = std.log.scoped(.vulkan_engine);
 
 const Self = @This();
 
+const MAX_OBJECTS = 10000;
 pub const vk_alloc_cbs: ?*c.VkAllocationCallbacks = null;
 
 pub const RenderCommand = c.VkCommandBuffer;
@@ -90,6 +91,7 @@ pub const FRAME_OVERLAP = 2;
 // Data
 //
 frame_number: i32 = 0,
+object_buffer_offset: usize = 0,
 
 window: *c.SDL_Window = undefined,
 
@@ -953,7 +955,6 @@ fn initDescriptors(self: *Self) void {
         // ======================================================================
 
         // Object buffer
-        const MAX_OBJECTS = 10000;
         self.frames[i].object_buffer = self.createBuffer(
             MAX_OBJECTS * @sizeOf(GPUObjectData),
             c.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -1211,6 +1212,7 @@ pub fn endFrame(self: *Self, cmd: RenderCommand) void {
     check_vk(c.vkQueuePresentKHR(self.present_queue, &present_info)) catch @panic("Failed to present swapchain image");
 
     self.frame_number +%= 1;
+    self.object_buffer_offset = 0;
 }
 
 pub fn beginAdditiveRenderPass(self: *Self, cmd: RenderCommand) void {
@@ -1285,14 +1287,10 @@ pub fn drawObjects(
     ubo_set: c.VkDescriptorSet,
     cam: *const Camera,
 ) void {
-    // Create and bind the camera buffer
+    // ----- Camera & Scene Data Setup -----
     const curr_camera_data = GPUCameraData.fromCamera(cam);
-
     const frame_index: usize = @intCast(@mod(self.frame_number, FRAME_OVERLAP));
 
-    // TODO: meta function that deals with alignment and copying of data with
-    // map/unmap. We now have two versions, one for a single pointer to struct
-    // and one for array/slices (used to copy mesh vertices).
     const padded_camera_data_size = self.padUniformBufferSize(@sizeOf(GPUCameraData));
     const scene_data_base_offset = padded_camera_data_size * FRAME_OVERLAP;
     const padded_scene_data_size = self.padUniformBufferSize(@sizeOf(GPUSceneData));
@@ -1311,28 +1309,35 @@ pub fn drawObjects(
 
     c.vmaUnmapMemory(self.vma_allocator, ubo_buf.allocation);
 
-    // NOTE: In this copy I do conversion. Now, this is generally unsafe as none
-    // of the structures involved are c compatible (marked extern). However, we
-    // so happen to know it is safe to do so for Mat4.
-    // TODO: In the future we should mark all the math structure as extern, so
-    // we can more easily pass them back and forth from C and do those kind of
-    // conversions.
+    // ----- Object Buffer Batch Setup -----
+    var currentFrame = self.getCurrentFrame();
+    const batch_offset = self.object_buffer_offset;
+
+    const num_objects = matrices.len;
+    std.debug.assert(batch_offset + num_objects <= MAX_OBJECTS);
+
+    // Map the object buffer and write GPUObjectData for the objects in this batch.
     var object_data: ?*align(@alignOf(GPUObjectData)) anyopaque = undefined;
-    check_vk(c.vmaMapMemory(self.vma_allocator, self.getCurrentFrame().object_buffer.allocation, &object_data)) catch @panic("Failed to map object buffer");
+    check_vk(c.vmaMapMemory(self.vma_allocator, currentFrame.object_buffer.allocation, &object_data)) catch @panic("Failed to map object buffer");
+
+    // Cast the pointer to an array pointer. We assume that object_buffer is large enough.
     var object_data_arr: [*]GPUObjectData = @ptrCast(object_data orelse unreachable);
     for (matrices, 0..) |*matrix, index| {
-        object_data_arr[index] = GPUObjectData{
+        // Write into the region starting at the batch_offset.
+        object_data_arr[batch_offset + index] = GPUObjectData{
             .model_matrix = matrix.value,
         };
     }
-    c.vmaUnmapMemory(self.vma_allocator, self.getCurrentFrame().object_buffer.allocation);
+    c.vmaUnmapMemory(self.vma_allocator, currentFrame.object_buffer.allocation);
 
+    // Advance the offset for subsequent batches in this frame.
+    self.object_buffer_offset += num_objects;
+
+    // ----- Issue Draw Calls Using the Correct Buffer Region -----
     for (matrices, materials, meshes, 0..) |*matrix, *material, *mesh, index| {
         if (index == 0 or material != &materials[index - 1]) {
             c.vkCmdBindPipeline(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline);
 
-            // Compute the offset for dynamic uniform buffers (for now just the one containing scene data, the
-            // camera data is not dynamic)
             const uniform_offsets = [_]u32{
                 @as(u32, @intCast(camera_data_offset)),
                 @as(u32, @intCast(scene_data_offset)),
@@ -1340,7 +1345,7 @@ pub fn drawObjects(
 
             c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 0, 1, &ubo_set, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
 
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 1, 1, &self.getCurrentFrame().object_descriptor_set, 0, null);
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 1, 1, &currentFrame.object_descriptor_set, 0, null);
         }
 
         if (material.texture_set != null) {
@@ -1359,7 +1364,8 @@ pub fn drawObjects(
             c.vkCmdBindVertexBuffers(cmd, 0, 1, &mesh.vertex_buffer.buffer, &offset);
         }
 
-        c.vkCmdDraw(cmd, @as(u32, @intCast(mesh.vertices_count)), 1, 0, @intCast(index));
+        // we add batch_offset to the instance index.
+        c.vkCmdDraw(cmd, @as(u32, @intCast(mesh.vertices_count)), 1, 0, @intCast(batch_offset + index));
     }
 }
 
