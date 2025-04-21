@@ -1,6 +1,7 @@
 const c = @import("clibs");
 
 const std = @import("std");
+const log = std.log.scoped(.GameWindow);
 
 const gizmo = @import("../gizmo.zig");
 
