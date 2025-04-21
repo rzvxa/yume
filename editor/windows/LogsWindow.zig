@@ -8,6 +8,7 @@ const logs_harness = @import("../logs_harness.zig");
 const Log = logs_harness.Log;
 
 const Editor = @import("../Editor.zig");
+const EditorDatabase = @import("../EditorDatabase.zig");
 const imutils = @import("../imutils.zig");
 
 const Self = @This();
@@ -17,11 +18,6 @@ allocator: std.mem.Allocator,
 logs: std.ArrayList(Log),
 
 filter_buf: std.ArrayList(u8),
-
-err: bool = true,
-warn: bool = true,
-info: bool = true,
-debug: bool = true,
 
 pub fn init(ctx: *GameApp) Self {
     var self = Self{
@@ -78,16 +74,17 @@ pub fn draw(self: *Self) void {
         c.ImGui_PopItemWidth();
 
         c.ImGui_SetCursorPos(cursor);
-        filterToggleButton("error", &self.err, Editor.error_icon_ds, Editor.error_mono_icon_ds);
+
+        filterToggleButton("error", &EditorDatabase.storage().log_filters.err, Editor.error_icon_ds, Editor.error_mono_icon_ds);
         cursor.x = cursor.x + small_button_width;
         c.ImGui_SetCursorPos(cursor);
-        filterToggleButton("warning", &self.warn, Editor.warning_icon_ds, Editor.warning_mono_icon_ds);
+        filterToggleButton("warning", &EditorDatabase.storage().log_filters.warn, Editor.warning_icon_ds, Editor.warning_mono_icon_ds);
         cursor.x = cursor.x + small_button_width;
         c.ImGui_SetCursorPos(cursor);
-        filterToggleButton("info", &self.info, Editor.info_icon_ds, Editor.info_mono_icon_ds);
+        filterToggleButton("info", &EditorDatabase.storage().log_filters.info, Editor.info_icon_ds, Editor.info_mono_icon_ds);
         cursor.x = cursor.x + small_button_width;
         c.ImGui_SetCursorPos(cursor);
-        filterToggleButton("debug", &self.debug, Editor.debug_icon_ds, Editor.debug_mono_icon_ds);
+        filterToggleButton("debug", &EditorDatabase.storage().log_filters.debug, Editor.debug_icon_ds, Editor.debug_mono_icon_ds);
 
         c.ImGui_EndGroup();
 
@@ -113,10 +110,10 @@ pub fn draw(self: *Self) void {
 
 inline fn filter(self: Self, log: Log) bool {
     const level_match = switch (log.level) {
-        .err => self.err,
-        .warn => self.warn,
-        .info => self.info,
-        .debug => self.debug,
+        .err => EditorDatabase.storage().log_filters.err,
+        .warn => EditorDatabase.storage().log_filters.warn,
+        .info => EditorDatabase.storage().log_filters.info,
+        .debug => EditorDatabase.storage().log_filters.debug,
     };
     if (!level_match) {
         return false;

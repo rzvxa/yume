@@ -5,9 +5,17 @@ const Uuid = @import("yume").Uuid;
 
 const Self = @This();
 
+pub const LogFilters = struct {
+    err: bool = true,
+    warn: bool = true,
+    info: bool = true,
+    debug: bool = true,
+};
+
 const EditorDatabase = struct {
     last_open_project: ?[]u8 = null,
     last_open_scene: ?Uuid = null,
+    log_filters: LogFilters = .{},
 };
 
 var instance: Self = undefined;
