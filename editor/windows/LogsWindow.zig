@@ -37,7 +37,7 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn draw(self: *Self) void {
-    if (c.ImGui_Begin("Logs", null, 0)) {
+    if (c.ImGui_Begin("Logs", null, c.ImGuiWindowFlags_NoCollapse)) {
         logs_harness.drainInto(&self.logs) catch @panic("OOM");
 
         c.ImGui_BeginGroup();
@@ -108,8 +108,8 @@ pub fn draw(self: *Self) void {
                 c.ImGui_Text(log.message);
             }
         }
+        c.ImGui_EndChild();
     }
-    c.ImGui_EndChild();
     c.ImGui_End();
 }
 

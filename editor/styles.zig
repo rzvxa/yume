@@ -1,5 +1,6 @@
 const c = @import("clibs");
 
+// Based on Visual Studio theme
 //  Author: "MomoDeve"
 // <https://github.com/Patitotective/ImThemes/blob/18fc88af009f19a954b25ff4c87aaf948a1b3c89/themes.toml#L824C1-L824C22>
 pub fn visualStudioStyles() void {
@@ -11,7 +12,7 @@ pub fn visualStudioStyles() void {
     style.*.WindowBorderSize = 1.0;
     style.*.WindowMinSize = c.ImVec2{ .x = 32.0, .y = 32.0 };
     style.*.WindowTitleAlign = c.ImVec2{ .x = 0.0, .y = 0.5 };
-    style.*.WindowMenuButtonPosition = c.ImGuiDir_Left;
+    style.*.WindowMenuButtonPosition = c.ImGuiDir_Right;
     style.*.ChildRounding = 0.0;
     style.*.ChildBorderSize = 1.0;
     style.*.PopupRounding = 0.0;
