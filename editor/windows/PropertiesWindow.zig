@@ -18,7 +18,7 @@ pub fn init(_: *GameApp) Self {
 pub fn deinit(_: *Self) void {}
 
 pub fn draw(self: *Self, ctx: *GameApp) !void {
-    if (c.ImGui_Begin("Properties", null, 0)) {
+    if (c.ImGui_Begin("Properties", null, c.ImGuiWindowFlags_NoCollapse)) {
         switch (Editor.instance().selection) {
             .entity => |e| try self.drawProperties(e, ctx),
             else => {},

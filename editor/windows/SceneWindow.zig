@@ -60,7 +60,7 @@ pub fn init(ctx: *GameApp) Self {
 
 pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
     self.frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .d = self };
-    if (c.ImGui_Begin("Scene", null, 0)) {
+    if (c.ImGui_Begin("Scene", null, c.ImGuiWindowFlags_NoCollapse | c.ImGuiWindowFlags_NoNav)) {
         self.is_scene_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
         const editor_image = c.ImGui_GetWindowDrawList();
         self.scene_view_size = c.ImGui_GetWindowSize();

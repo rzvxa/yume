@@ -59,7 +59,7 @@ pub fn deinit(self: *Self) void {
 
 pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
     self.frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .d = self };
-    if (c.ImGui_Begin("Game", null, 0)) {
+    if (c.ImGui_Begin("Game", null, c.ImGuiWindowFlags_NoCollapse)) {
         self.is_game_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
         const game_image = c.ImGui_GetWindowDrawList();
         self.game_view_size = c.ImGui_GetWindowSize();

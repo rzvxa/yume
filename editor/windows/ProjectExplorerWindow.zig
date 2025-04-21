@@ -9,7 +9,7 @@ const Self = @This();
 project_explorer_path: []const u8 = "",
 
 pub fn draw(_: *Self) void {
-    if (c.ImGui_Begin("Project", null, 0)) {
+    if (c.ImGui_Begin("Project", null, c.ImGuiWindowFlags_NoCollapse)) {
         const item_sz = 64;
         const bread_crumb_height = c.ImGui_GetFrameHeight() + (2 * c.ImGui_GetStyle().*.FramePadding.y);
         const col_count = @max(1, c.ImGui_GetContentRegionAvail().x / (item_sz + 32));

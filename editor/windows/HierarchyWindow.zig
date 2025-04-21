@@ -20,7 +20,7 @@ pub fn init(_: *GameApp) Self {
 pub fn deinit(_: *Self) void {}
 
 pub fn draw(self: *Self, ctx: *GameApp) void {
-    if (c.ImGui_Begin("Hierarchy", null, 0)) {
+    if (c.ImGui_Begin("Hierarchy", null, c.ImGuiWindowFlags_NoCollapse)) {
         {
             const childs = ctx.world.childrenSorted(ctx.scene_root, ctx.allocator) catch @panic("Failed to retrieve sorted children");
             defer ctx.allocator.free(childs);
