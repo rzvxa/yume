@@ -5,7 +5,10 @@ const std = @import("std");
 const gizmo = @import("../gizmo.zig");
 
 const ecs = @import("yume").ecs;
+const Vec2 = @import("yume").Vec2;
 const Vec3 = @import("yume").Vec3;
+const Vec4 = @import("yume").Vec4;
+const Mat4 = @import("yume").Mat4;
 const Engine = @import("yume").VulkanEngine;
 const GameApp = @import("yume").GameApp;
 const components = @import("yume").ecs.components;
@@ -13,13 +16,10 @@ const AllocatedBuffer = @import("yume").AllocatedBuffer;
 
 const Editor = @import("../Editor.zig");
 
-const ManipulationTool = enum {
-    move,
-    rotate,
-    scale,
-};
-
 const FrameData = struct { app: *GameApp, cmd: GameApp.RenderCommand, d: *Self };
+
+const default_cam_distance = 10;
+const default_cam_angle = Vec2.make(std.math.degreesToRadians(45), 0);
 
 const Self = @This();
 
@@ -29,10 +29,12 @@ camera: components.Camera = components.Camera.makePerspectiveCamera(.{
     .near = 0.1,
 }),
 
-camera_pos: Vec3 = Vec3.make(-5.0, 3.0, -10.0),
-camera_rot: Vec3 = Vec3.make(0, 0, 0),
+target_pos: Vec3 = Vec3.ZERO,
+distance: f32 = default_cam_distance,
 
-active_tool: ManipulationTool = .move,
+active_tool: gizmo.ManipulationTool = .move,
+
+is_perspective: bool = true,
 
 scene_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
 scene_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
@@ -45,17 +47,19 @@ frame_userdata: FrameData = undefined,
 render_system: ecs.Entity,
 
 pub fn init(ctx: *GameApp) Self {
-    return .{
+    var self = Self{
         .render_system = ctx.world.systemEx(&.{
             .entity = ctx.world.create("Editor Render System"),
             .query = std.mem.zeroInit(c.ecs_query_desc_t, .{ .terms = .{
-                .{ .id = ecs.typeId(components.TransformMatrix) },
+                .{ .id = ecs.typeId(components.Transform) },
                 .{ .id = ecs.typeId(components.Mesh) },
                 .{ .id = ecs.typeId(components.Material) },
             } }),
             .callback = @ptrCast(&ecs.SystemImpl(sys).exec),
         }),
     };
+    self.focus(Vec3.ZERO);
+    return self;
 }
 
 pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
@@ -64,6 +68,18 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
         self.is_scene_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
         const editor_image = c.ImGui_GetWindowDrawList();
         self.scene_view_size = c.ImGui_GetWindowSize();
+
+        if (self.is_scene_window_focused) {
+            if (c.ImGui_IsKeyPressed(c.ImGuiKey_Q)) {
+                self.active_tool = .move;
+            } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_W)) {
+                self.active_tool = .rotate;
+            } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_E)) {
+                self.active_tool = .scale;
+            } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_R)) {
+                self.active_tool = .transform;
+            }
+        }
 
         c.ImDrawList_AddCallback(editor_image, extern struct {
             fn f(dl: [*c]const c.ImDrawList, dc: [*c]const c.ImDrawCmd) callconv(.C) void {
@@ -91,15 +107,9 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                 }});
 
                 const aspect = me.d.scene_view_size.x / me.d.scene_view_size.y;
-                me.d.camera.updateMatrices(me.d.camera_pos, me.d.camera_rot, aspect);
+                me.d.camera.updatePerspectiveProjection(aspect);
+                me.d.camera.updateViewProjection();
                 _ = c.ecs_run(me.app.world.inner, me.d.render_system, me.app.delta, me);
-                // me.app.engine.drawObjects(
-                //     me.cmd,
-                //     me.app.scene.renderables.items,
-                //     me.d.editor_camera_and_scene_buffer,
-                //     me.d.editor_camera_and_scene_set,
-                //     &me.d.camera,
-                // );
 
                 c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
                     .offset = .{ .x = 0, .y = 0 },
@@ -114,7 +124,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
         const active_col = c.ImGui_GetStyle().*.Colors[c.ImGuiCol_ButtonHovered];
         if (c.ImGui_BeginChildFrame(c.ImGui_GetID("##toolbox"), c.ImVec2{
             .x = icon_sz.x + (c.ImGui_GetStyle().*.FramePadding.x * 4),
-            .y = (icon_sz.y + c.ImGui_GetStyle().*.FramePadding.y * 4) * 3,
+            .y = (icon_sz.y + c.ImGui_GetStyle().*.FramePadding.y * 4) * 4,
         })) {
             var clicked = false;
             c.ImGui_PushStyleColorImVec4(
@@ -148,10 +158,20 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                 self.active_tool = .scale;
             }
 
+            c.ImGui_PushStyleColorImVec4(
+                c.ImGuiCol_Button,
+                if (self.active_tool == .transform) active_col else normal_col,
+            );
+            clicked = c.ImGui_ImageButton("##transform-tool", Editor.transform_tool_icon_ds, icon_sz);
+            c.ImGui_PopStyleColor();
+            if (clicked) {
+                self.active_tool = .transform;
+            }
+
             c.ImGui_EndChildFrame();
         }
 
-        gizmo.newFrame(editor_image, self.camera.view, self.camera.view_projection, .{
+        gizmo.newFrame(editor_image, &self.camera.view, self.camera.projection, self.distance, .{
             .x = self.scene_window_rect.x,
             .y = self.scene_window_rect.y,
             .width = self.scene_view_size.x,
@@ -167,29 +187,21 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                         break :blk;
                     }
 
-                    const transform = ctx.world.get(selection, components.TransformMatrix);
+                    const transform = ctx.world.getMut(selection, components.Transform);
                     if (transform == null) {
                         break :blk;
                     }
 
-                    const pos = ctx.world.getMut(selection, components.Position);
-                    if (pos == null) {
-                        break :blk;
+                    if (c.ImGui_IsKeyPressed(c.ImGuiKey_F)) {
+                        self.focus(transform.?.position());
                     }
 
-                    const rot = ctx.world.getMut(selection, components.Rotation);
-                    if (rot == null) {
-                        break :blk;
+                    gizmo.drawBoundingBox(mesh.?.bounds, transform.?.value) catch @panic("error");
+                    c.ImGuizmo_PushID_Int(@intCast(selection));
+                    if (gizmo.editTransform(&transform.?.value, self.active_tool) catch @panic("err")) {
+                        ctx.world.modified(selection, components.Transform);
                     }
-
-                    const scale = ctx.world.getMut(selection, components.Scale);
-                    if (scale == null) {
-                        break :blk;
-                    }
-
-                    const bb = mesh.?.bounds.translate(transform.?.value);
-                    gizmo.drawBoundingBox(bb) catch @panic("error");
-                    gizmo.manipulate(&pos.?.value, &rot.?.value, &scale.?.value) catch @panic("error");
+                    c.ImGuizmo_PopID();
                 },
                 else => {},
             }
@@ -199,7 +211,18 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
     c.ImGui_End();
 }
 
-fn sys(it: *ecs.Iter, matrices: []components.TransformMatrix, meshes: []components.Mesh, materials: []components.Material) void {
+fn focus(self: *Self, target: Vec3) void {
+    const eye = target.add(Vec3.make(
+        @cos(default_cam_angle.y) * @cos(default_cam_angle.x) * default_cam_distance,
+        @sin(default_cam_angle.x) * default_cam_distance,
+        @sin(default_cam_angle.y) * @cos(default_cam_angle.x) * default_cam_distance,
+    ));
+    self.camera.view = eye.lookAt(target, Vec3.UP);
+    self.distance = default_cam_distance;
+    self.target_pos = target;
+}
+
+fn sys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mesh, materials: []components.Material) void {
     const me: *FrameData = @ptrCast(@alignCast(it.param));
     me.app.engine.drawObjects(
         me.cmd,

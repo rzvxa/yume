@@ -24,33 +24,31 @@ pub fn init(allocator: std.mem.Allocator, _: ecs.Entity) Self {
 pub fn deinit(_: *Self) void {}
 
 pub fn edit(_: *Self, entity: ecs.Entity, ctx: *GameApp) void {
-    const position = ctx.world.getMut(entity, ecs.components.Position);
-    const rotation = ctx.world.getMut(entity, ecs.components.Rotation);
-    const scale = ctx.world.getMut(entity, ecs.components.Scale);
+    const transform = ctx.world.getMut(entity, ecs.components.Transform);
+
+    var decomposed = transform.?.value.decompose();
 
     var changed = false;
 
     if (imutils.collapsingHeaderWithCheckBox("Transform", null, c.ImGuiTreeNodeFlags_DefaultOpen)) {
-        if (position) |pos| {
-            if (inputVec3("Position", &pos.value, 0.01)) {
-                ctx.world.modified(entity, ecs.components.Position);
-                changed = true;
-            }
+        if (inputVec3("Position", &decomposed.translation, 0.01)) {
+            changed = true;
         }
 
-        if (rotation) |rot| {
-            if (inputVec3("Rotation", &rot.value, 1)) {
-                ctx.world.modified(entity, ecs.components.Rotation);
-                changed = true;
-            }
+        var euler = decomposed.rotation.toEuler();
+        if (inputVec3("Rotation", &euler, 1)) {
+            decomposed.rotation = Quat.fromEuler(euler);
+            changed = true;
         }
 
-        if (scale) |skale| {
-            if (inputVec3("Scale", &skale.value, 0.01)) {
-                ctx.world.modified(entity, ecs.components.Scale);
-                changed = true;
-            }
+        if (inputVec3("Scale", &decomposed.scale, 0.01)) {
+            changed = true;
         }
+    }
+
+    if (changed) {
+        transform.?.value = Mat4.recompose(decomposed);
+        ctx.world.modified(entity, ecs.components.Transform);
     }
 }
 

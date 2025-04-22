@@ -1280,7 +1280,7 @@ pub fn beginPresentRenderPass(self: *Self, cmd: RenderCommand) void {
 pub fn drawObjects(
     self: *Self,
     cmd: c.VkCommandBuffer,
-    matrices: []components.TransformMatrix,
+    matrices: []components.Transform,
     meshes: []components.Mesh,
     materials: []components.Material,
     ubo_buf: AllocatedBuffer,

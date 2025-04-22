@@ -93,7 +93,10 @@ pub fn draw(self: *Self) void {
 
         const avail = c.ImGui_GetContentRegionAvail();
         if (c.ImGui_BeginChild("logs", avail, 0, 0)) {
-            for (self.logs.items) |log| {
+            var i = self.logs.items.len;
+            while (i > 0) {
+                i -= 1;
+                const log = self.logs.items[i];
                 if (!self.filter(log)) {
                     continue;
                 }

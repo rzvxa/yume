@@ -127,7 +127,7 @@ pub fn show(self: *Self, ctx: *GameApp) void {
         c.ImGui_PushFont(Editor.roboto24);
         _ = imutils.inputDirPath(
             "##new_project-project_path",
-            Editor.inputs.window,
+            ctx.window,
             self.project_path.items.ptr,
             self.project_path.capacity,
             c.ImGuiInputTextFlags_CallbackResize,

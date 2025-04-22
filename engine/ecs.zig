@@ -279,10 +279,7 @@ pub const World = struct {
         }
         self.set(ent, components.Meta, components.Meta.init(opts.name) catch @panic("Failed to create meta"));
         self.set(ent, components.Uuid, .{ .value = opts.uuid orelse Uuid.new() });
-        self.set(ent, components.Position, .{});
-        self.set(ent, components.Rotation, .{});
-        self.set(ent, components.Scale, .{});
-        self.add(ent, components.TransformMatrix);
+        self.add(ent, components.Transform);
         return ent;
     }
 
@@ -945,10 +942,10 @@ pub const components = struct {
     pub const Meta = @import("components/Meta.zig").Meta;
     pub const Uuid = @import("components/Uuid.zig").Uuid;
 
-    pub const Position = @import("components/transform.zig").Position;
-    pub const Rotation = @import("components/transform.zig").Rotation;
-    pub const Scale = @import("components/transform.zig").Scale;
-    pub const TransformMatrix = @import("components/transform.zig").TransformMatrix;
+    // pub const Position = @import("components/transform.zig").Position;
+    // pub const Rotation = @import("components/transform.zig").Rotation;
+    // pub const Scale = @import("components/transform.zig").Scale;
+    pub const Transform = @import("components/transform.zig").Transform;
 
     pub const camera = @import("components/camera.zig");
     pub const mesh = @import("components/mesh.zig");

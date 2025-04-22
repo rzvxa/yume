@@ -38,7 +38,7 @@ fn drawProperties(_: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
 
     for (0..2) |_| c.ImGui_Spacing();
 
-    if (ctx.world.has(entity, ecs.components.TransformMatrix)) {
+    if (ctx.world.has(entity, ecs.components.Transform)) {
         Editor.instance().editors.editEntityTransform(entity, ctx);
         c.ImGui_Spacing();
         c.ImGui_Separator();
