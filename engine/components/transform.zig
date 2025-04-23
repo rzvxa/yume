@@ -11,7 +11,7 @@ pub const Transform = extern struct {
     value: Mat4,
 
     pub inline fn decompose(self: *const Self) Mat4.Decomposed {
-        return self.value.decompose();
+        return self.value.decompose() catch Mat4.Decomposed.IDENTITY;
     }
 
     pub inline fn position(self: *const Self) Vec3 {

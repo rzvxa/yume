@@ -461,6 +461,12 @@ pub const Mat4 = extern union {
         translation: Vec3,
         rotation: Quat,
         scale: Vec3,
+
+        pub const IDENTITY: Decomposed = .{
+            .translation = Vec3.ZERO,
+            .rotation = Quat.IDENTITY,
+            .scale = Vec3.scalar(1),
+        };
     };
     named: extern struct {
         i: Vec4,
@@ -749,12 +755,12 @@ pub const Mat4 = extern union {
         return Mat4.compose(decomposed.translation, decomposed.rotation, decomposed.scale);
     }
 
-    pub fn decompose(self: Self) Decomposed {
+    pub fn decompose(self: Self) !Decomposed {
         var m = self;
 
         // Normalize the matrix.
         if (epsilonEqual(m.unnamed[3][3], 0.0)) {
-            @panic("InvalidMatrix");
+            return error.InvalidMatrix;
         }
         for (0..4) |i| {
             for (0..4) |j| {
@@ -771,7 +777,7 @@ pub const Mat4 = extern union {
         perspectiveMatrix.unnamed[3][3] = 1;
 
         if (epsilonEqual(determinant3x3(perspectiveMatrix), 0)) {
-            @panic("InvalidMatrix");
+            return error.InvalidMatrix;
         }
 
         var per: Vec4 = Vec4.make(0, 0, 0, 1);
@@ -808,7 +814,7 @@ pub const Mat4 = extern union {
         // Compute X scale factor and normalize the first row.
         var sc: Vec3 = undefined;
         sc.x = row[0].len();
-        if (sc.x < epsilon) @panic("InvalidMatrix");
+        if (sc.x < epsilon) return error.InvalidMatrix;
         row[0] = row[0].normalized();
 
         // Compute XY shear factor and make 2nd row orthogonal to 1st.
@@ -818,7 +824,7 @@ pub const Mat4 = extern union {
 
         // Compute Y scale and normalize 2nd row.
         sc.y = row[1].len();
-        if (sc.y < epsilon) @panic("InvalidMatrix");
+        if (sc.y < epsilon) return error.InvalidMatrix;
         row[1] = row[1].normalized();
         skew.z /= sc.y;
 
@@ -830,7 +836,7 @@ pub const Mat4 = extern union {
 
         // Compute Z scale and normalize 3rd row.
         sc.z = row[2].len();
-        if (sc.z < epsilon) @panic("InvalidMatrix");
+        if (sc.z < epsilon) return error.InvalidMatrix;
         row[2] = row[2].normalized();
         skew.y /= sc.z;
         skew.x /= sc.z;

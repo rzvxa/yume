@@ -23,7 +23,7 @@ const Editor = @import("../Editor.zig");
 const FrameData = struct { app: *GameApp, cmd: GameApp.RenderCommand, d: *Self };
 
 const default_cam_distance = 10;
-const default_cam_angle = Vec2.make(std.math.degreesToRadians(45), 0);
+const default_cam_angle = Vec2.make(std.math.degreesToRadians(30), std.math.degreesToRadians(90));
 
 const Self = @This();
 
@@ -188,11 +188,6 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
         blk: {
             switch (Editor.instance().selection) {
                 .entity => |selection| {
-                    const mesh = ctx.world.getAligned(selection, components.Mesh, 8);
-                    if (mesh == null) {
-                        break :blk;
-                    }
-
                     const transform = ctx.world.getMut(selection, components.Transform);
                     if (transform == null) {
                         break :blk;
@@ -202,7 +197,9 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                         self.focus(transform.?.position(), default_cam_distance);
                     }
 
-                    gizmo.drawBoundingBox(mesh.?.bounds, transform.?.value) catch @panic("error");
+                    if (ctx.world.get(selection, components.Mesh)) |mesh| {
+                        gizmo.drawBoundingBox(mesh.bounds, transform.?.value) catch @panic("error");
+                    }
                     c.ImGuizmo_PushID_Int(@intCast(selection));
                     if (gizmo.editTransform(&transform.?.value, self.active_tool) catch @panic("err")) {
                         ctx.world.modified(selection, components.Transform);
@@ -222,7 +219,7 @@ pub fn update(self: *Self, ctx: *GameApp) void {
     var input_rot: Vec3 = Vec3.make(0, 0, 0);
 
     const inversed = self.camera.view.inverse() catch Mat4.IDENTITY;
-    var decomposed = inversed.decompose();
+    var decomposed = inversed.decompose() catch Mat4.Decomposed.IDENTITY;
     const basis = decomposed.rotation.toBasisVectors();
 
     const left = basis.right.mulf(-1);
@@ -293,7 +290,7 @@ pub fn update(self: *Self, ctx: *GameApp) void {
                 );
 
                 self.camera.view = Mat4.lookAt(new_eye, self.target_pos, Vec3.UP);
-                decomposed = (self.camera.view.inverse() catch @panic("err")).decompose();
+                decomposed = (self.camera.view.inverse() catch @panic("err")).decompose() catch Mat4.Decomposed.IDENTITY;
                 input = input.add(wasd);
             }
         } else {

@@ -2,6 +2,7 @@ const c = @import("clibs");
 const std = @import("std");
 const log = std.log.scoped(.ecs);
 
+const Mat4 = @import("math3d.zig").Mat4;
 const GameApp = @import("GameApp.zig");
 const Uuid = @import("uuid.zig").Uuid;
 const Dynamic = @import("serialization/dynamic.zig").Dynamic;
@@ -279,7 +280,7 @@ pub const World = struct {
         }
         self.set(ent, components.Meta, components.Meta.init(opts.name) catch @panic("Failed to create meta"));
         self.set(ent, components.Uuid, .{ .value = opts.uuid orelse Uuid.new() });
-        self.add(ent, components.Transform);
+        self.set(ent, components.Transform, components.Transform{ .value = Mat4.IDENTITY });
         return ent;
     }
 

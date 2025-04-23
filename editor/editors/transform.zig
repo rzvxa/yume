@@ -26,7 +26,7 @@ pub fn deinit(_: *Self) void {}
 pub fn edit(_: *Self, entity: ecs.Entity, ctx: *GameApp) void {
     const transform = ctx.world.getMut(entity, ecs.components.Transform);
 
-    var decomposed = transform.?.value.decompose();
+    var decomposed = transform.?.value.decompose() catch Mat4.Decomposed.IDENTITY;
 
     var changed = false;
 
