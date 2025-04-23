@@ -29,8 +29,6 @@ const Texture = textures.Texture;
 const Camera = @import("yume").Camera;
 const Scene = @import("yume").scene_graph.Scene;
 const MeshRenderer = @import("yume").MeshRenderer;
-const ScanCode = @import("yume").inputs.ScanCode;
-const MouseButton = @import("yume").inputs.MouseButton;
 const InputsContext = @import("yume").inputs.InputContext;
 
 const ecs = @import("yume").ecs;
@@ -159,6 +157,7 @@ pub fn init(ctx: *GameApp) *Self {
     defer ctx.allocator.free(db_path);
 
     EditorDatabase.init(ctx.allocator, db_path) catch @panic("Faield to load editor database");
+    inputs = InputsContext{ .window = ctx.window };
     singleton = Self{
         .ctx = ctx,
         .editors = Editors.init(ctx.allocator),
@@ -220,6 +219,10 @@ pub fn deinit(self: *Self) void {
     EditorDatabase.deinit();
 }
 
+pub fn newFrame(_: *Self) void {
+    inputs.clear();
+}
+
 pub fn processEvent(self: *Self, event: *c.SDL_Event) bool {
     _ = c.cImGui_ImplSDL3_ProcessEvent(event);
     switch (event.type) {
@@ -231,21 +234,18 @@ pub fn processEvent(self: *Self, event: *c.SDL_Event) bool {
         c.SDL_EVENT_QUIT => return false,
         else => {},
     }
-    if (self.game_window.is_game_window_focused) {
+    if (self.scene_window.is_scene_window_focused) {
+        inputs.push(event);
+    } else if (self.game_window.is_game_window_focused) {
         self.ctx.inputs.push(event);
     }
 
     return true;
 }
 
-fn isInGameView(self: *Self, pos: c.ImVec2) bool {
-    return (pos.x > self.game_window.game_window_rect.x and pos.x < self.game_window.game_window_rect.z) and
-        (pos.y > self.game_window.game_window_rect.y and pos.y < self.game_window.game_window_rect.w);
-}
-
-fn isInSceneView(self: *Self, pos: c.ImVec2) bool {
-    return (pos.x > self.scene_window_rect.x and pos.x < self.scene_window_rect.z) and
-        (pos.y > self.scene_window_rect.y and pos.y < self.scene_window_rect.w);
+pub fn update(self: *Self) bool {
+    self.scene_window.update(self.ctx);
+    return self.ctx.world.progress(self.ctx.delta);
 }
 
 pub fn draw(self: *Self) void {
@@ -816,6 +816,8 @@ var singleton: Self = undefined;
 
 pub var render_system: ecs.Entity = undefined;
 
+pub var inputs: InputsContext = undefined;
+
 pub var roboto14: *c.ImFont = undefined;
 pub var roboto24: *c.ImFont = undefined;
 pub var roboto32: *c.ImFont = undefined;
@@ -877,4 +879,12 @@ fn perspective(fovyInDegrees: f32, aspectRatio: f32, znear: f32, zfar: f32, m16:
     const ymax = znear * @tan(fovyInDegrees * 3.141592 / 180);
     const xmax = ymax * aspectRatio;
     frustum(-xmax, xmax, -ymax, ymax, znear, zfar, m16);
+}
+
+fn getForwardDirection(transformMatrix: Mat4) Vec3 {
+    // Extract the basis vectors directly from the rotation part of the transform matrix.
+    const forward = Vec3.make(-transformMatrix.unnamed[2][0], // Negative Z in world space
+        -transformMatrix.unnamed[2][1], -transformMatrix.unnamed[2][2]);
+
+    return forward.normalized(); // Normalize the vector to ensure unit length
 }

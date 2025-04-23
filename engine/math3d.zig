@@ -14,6 +14,10 @@ pub const Vec2 = extern struct {
         return .{ .x = x, .y = y };
     }
 
+    pub inline fn mulf(self: Self, other: f32) Self {
+        return make(self.x * other, self.y * other);
+    }
+
     pub inline fn scalar(n: f32) Vec2 {
         return .{ .x = n, .y = n };
     }
@@ -318,6 +322,11 @@ pub const Vec4 = extern struct {
 };
 
 pub const Quat = extern struct {
+    pub const BasisVectors = struct {
+        right: Vec3,
+        up: Vec3,
+        forward: Vec3,
+    };
     const Self = @This();
 
     x: f32,
@@ -447,6 +456,35 @@ pub const Quat = extern struct {
         }
 
         return q;
+    }
+
+    pub fn toBasisVectors(quat: Quat) BasisVectors {
+        const x = quat.x;
+        const y = quat.y;
+        const z = quat.z;
+        const w = quat.w;
+
+        const xx = x * x;
+        const yy = y * y;
+        const zz = z * z;
+        const xy = x * y;
+        const xz = x * z;
+        const yz = y * z;
+        const wx = w * x;
+        const wy = w * y;
+        const wz = w * z;
+
+        const right = Vec3.make(1.0 - 2.0 * (yy + zz), 2.0 * (xy + wz), 2.0 * (xz - wy));
+
+        const up = Vec3.make(2.0 * (xy - wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz + wx));
+
+        const forward = Vec3.make(2.0 * (xz + wy), 2.0 * (yz - wx), 1.0 - 2.0 * (xx + yy));
+
+        return BasisVectors{
+            .right = right.normalized(),
+            .up = up.normalized(),
+            .forward = forward.normalized(),
+        };
     }
 };
 

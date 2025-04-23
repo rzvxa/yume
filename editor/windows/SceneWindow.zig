@@ -8,11 +8,15 @@ const ecs = @import("yume").ecs;
 const Vec2 = @import("yume").Vec2;
 const Vec3 = @import("yume").Vec3;
 const Vec4 = @import("yume").Vec4;
+const Quat = @import("yume").Quat;
 const Mat4 = @import("yume").Mat4;
 const Engine = @import("yume").VulkanEngine;
 const GameApp = @import("yume").GameApp;
 const components = @import("yume").ecs.components;
 const AllocatedBuffer = @import("yume").AllocatedBuffer;
+
+const MouseButton = @import("yume").inputs.MouseButton;
+const ScanCode = @import("yume").inputs.ScanCode;
 
 const Editor = @import("../Editor.zig");
 
@@ -39,6 +43,8 @@ is_perspective: bool = true,
 scene_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
 scene_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
 is_scene_window_focused: bool = false,
+is_hovered: bool = false,
+is_dragging: bool = false,
 
 editor_camera_and_scene_buffer: AllocatedBuffer = undefined,
 editor_camera_and_scene_set: c.VkDescriptorSet = null,
@@ -58,7 +64,7 @@ pub fn init(ctx: *GameApp) Self {
             .callback = @ptrCast(&ecs.SystemImpl(sys).exec),
         }),
     };
-    self.focus(Vec3.ZERO);
+    self.focus(Vec3.ZERO, default_cam_distance);
     return self;
 }
 
@@ -66,10 +72,11 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
     self.frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .d = self };
     if (c.ImGui_Begin("Scene", null, c.ImGuiWindowFlags_NoCollapse | c.ImGuiWindowFlags_NoNav)) {
         self.is_scene_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
+        self.is_hovered = c.ImGui_IsWindowHovered(c.ImGuiFocusedFlags_None);
         const editor_image = c.ImGui_GetWindowDrawList();
         self.scene_view_size = c.ImGui_GetWindowSize();
 
-        if (self.is_scene_window_focused) {
+        if (self.is_scene_window_focused and !self.is_dragging) {
             if (c.ImGui_IsKeyPressed(c.ImGuiKey_Q)) {
                 self.active_tool = .move;
             } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_W)) {
@@ -178,7 +185,6 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
             .height = self.scene_view_size.y,
         });
 
-        // FIXME
         blk: {
             switch (Editor.instance().selection) {
                 .entity => |selection| {
@@ -193,7 +199,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                     }
 
                     if (c.ImGui_IsKeyPressed(c.ImGuiKey_F)) {
-                        self.focus(transform.?.position());
+                        self.focus(transform.?.position(), default_cam_distance);
                     }
 
                     gizmo.drawBoundingBox(mesh.?.bounds, transform.?.value) catch @panic("error");
@@ -211,14 +217,127 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
     c.ImGui_End();
 }
 
-fn focus(self: *Self, target: Vec3) void {
+pub fn update(self: *Self, ctx: *GameApp) void {
+    var input: Vec3 = Vec3.make(0, 0, 0);
+    var input_rot: Vec3 = Vec3.make(0, 0, 0);
+
+    const inversed = self.camera.view.inverse() catch Mat4.IDENTITY;
+    var decomposed = inversed.decompose();
+    const basis = decomposed.rotation.toBasisVectors();
+
+    const left = basis.right.mulf(-1);
+    const up = basis.up;
+    const forward = basis.forward.mulf(-1);
+
+    var in_use: bool = false;
+
+    if (self.is_dragging or self.is_hovered) {
+        if (Editor.inputs.isMouseButtonDown(MouseButton.Right)) { // free cam
+            in_use = true;
+            Editor.inputs.setRelativeMouseMode(true);
+            const mouse_delta = Editor.inputs.mouseRelative().mulf(0.5);
+            input_rot.y -= mouse_delta.x;
+            input_rot.x -= mouse_delta.y;
+
+            // Handle translation inputs (W, A, S, D) relative to view
+            input = input.add(forward.mulf(if (Editor.inputs.isKeyDown(ScanCode.W)) 1 else 0));
+            input = input.sub(forward.mulf(if (Editor.inputs.isKeyDown(ScanCode.S)) 1 else 0));
+            input = input.add(left.mulf(if (Editor.inputs.isKeyDown(ScanCode.A)) 1 else 0));
+            input = input.sub(left.mulf(if (Editor.inputs.isKeyDown(ScanCode.D)) 1 else 0));
+            input = input.add(up.mulf(if (Editor.inputs.isKeyDown(ScanCode.E)) 1 else 0));
+            input = input.sub(up.mulf(if (Editor.inputs.isKeyDown(ScanCode.Q)) 1 else 0));
+            input = input.mulf(5);
+        } else if (Editor.inputs.isMouseButtonDown(MouseButton.Middle)) {
+            if (Editor.inputs.isKeyDown(ScanCode.LeftShift)) { // panning
+                in_use = true;
+                const mouse_delta = Editor.inputs.mouseDelta();
+                input = input.add(left.mulf(mouse_delta.x));
+                input = input.add(up.mulf(mouse_delta.y));
+            } else { // orbit
+                in_use = true;
+                const orbit_delta = Editor.inputs.mouseRelative();
+                const sensitivity: f32 = 0.005;
+
+                const camera_pos = decomposed.translation;
+
+                self.target_pos = camera_pos.add(forward.mulf(self.distance));
+
+                const offset = camera_pos.sub(self.target_pos);
+                const current_distance = offset.len();
+                const current_pitch = std.math.asin(offset.y / current_distance);
+                const current_yaw = std.math.atan2(offset.x, offset.z);
+
+                const new_pitch = current_pitch + orbit_delta.y * sensitivity;
+                const new_yaw = current_yaw - orbit_delta.x * sensitivity;
+
+                const max_pitch = std.math.pi * 0.49;
+                var clamped_pitch = new_pitch;
+                if (clamped_pitch > max_pitch) {
+                    clamped_pitch = max_pitch;
+                } else if (clamped_pitch < -max_pitch) {
+                    clamped_pitch = -max_pitch;
+                }
+
+                const cosPitch = std.math.cos(clamped_pitch);
+                const sinPitch = std.math.sin(clamped_pitch);
+                const cosYaw = std.math.cos(new_yaw);
+                const sinYaw = std.math.sin(new_yaw);
+                const new_eye = Vec3.make(
+                    self.target_pos.x + current_distance * cosPitch * sinYaw,
+                    self.target_pos.y + current_distance * sinPitch,
+                    self.target_pos.z + current_distance * cosPitch * cosYaw,
+                );
+
+                self.camera.view = Vec3.lookAt(new_eye, self.target_pos, Vec3.UP);
+            }
+        } else {
+            // Mouse wheel for zooming in and out relative to view direction
+            const wheel = Editor.inputs.mouseWheel();
+            const scroll_speed: f32 = 20;
+            if (wheel.y > 0) {
+                in_use = true;
+                input = input.add(forward.mulf(scroll_speed));
+            } else if (wheel.y < 0) {
+                in_use = true;
+                input = input.sub(forward.mulf(scroll_speed));
+            }
+        }
+    }
+
+    self.is_dragging = in_use;
+    if (!in_use) {
+        Editor.inputs.setRelativeMouseMode(false);
+    }
+
+    // Apply camera movements
+    var changed: bool = false;
+    if (input.squaredLen() > (0.1 * 0.1)) {
+        const camera_delta = input.mulf(ctx.delta);
+        decomposed.translation = decomposed.translation.add(camera_delta);
+        changed = true;
+    }
+    if (input_rot.squaredLen() > (0.1 * 0.1)) {
+        const rot_delta = input_rot.mulf(ctx.delta);
+        const pitch_quat = Quat.fromAxisAngle(Vec3.make(1, 0, 0), rot_delta.x); // Rotate around X (pitch)
+        const yaw_quat = Quat.fromAxisAngle(Vec3.make(0, 1, 0), rot_delta.y); // Rotate around Y (yaw)
+
+        decomposed.rotation = yaw_quat.mul(decomposed.rotation).mul(pitch_quat); // Apply rotations
+        changed = true;
+    }
+
+    if (changed) {
+        self.camera.view = Mat4.recompose(decomposed).inverse() catch @panic("Failed");
+    }
+}
+
+fn focus(self: *Self, target: Vec3, distance: f32) void {
     const eye = target.add(Vec3.make(
-        @cos(default_cam_angle.y) * @cos(default_cam_angle.x) * default_cam_distance,
-        @sin(default_cam_angle.x) * default_cam_distance,
-        @sin(default_cam_angle.y) * @cos(default_cam_angle.x) * default_cam_distance,
+        @cos(default_cam_angle.y) * @cos(default_cam_angle.x) * distance,
+        @sin(default_cam_angle.x) * distance,
+        @sin(default_cam_angle.y) * @cos(default_cam_angle.x) * distance,
     ));
     self.camera.view = eye.lookAt(target, Vec3.UP);
-    self.distance = default_cam_distance;
+    self.distance = distance;
     self.target_pos = target;
 }
 
@@ -233,4 +352,15 @@ fn sys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mes
         me.d.editor_camera_and_scene_set,
         &me.d.camera,
     );
+}
+
+fn computeOrbitEye(target: Vec3, orbit_angles: Vec2, distance: f32) Vec3 {
+    // Spherical coordinate conversion.
+    const cosPitch = std.math.cos(orbit_angles.x);
+    const sinPitch = std.math.sin(orbit_angles.x);
+    const cosYaw = std.math.cos(orbit_angles.y);
+    const sinYaw = std.math.sin(orbit_angles.y);
+
+    // Note: Adjust the coordinate computation as needed.
+    return Vec3.make(target.x + distance * cosPitch * sinYaw, target.y + distance * sinPitch, target.z + distance * cosPitch * cosYaw);
 }
