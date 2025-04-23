@@ -66,6 +66,7 @@ pub fn unload(self: *Self) void {
         }
     }
     self.resources_builtins.deinit();
+    self.allocator.free(self.project_name);
 }
 
 pub fn current() ?*Self {
@@ -115,7 +116,7 @@ pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, o: anytype) !Self {
     var result = Self{
         .allocator = a,
         .yume_version = undefined,
-        .project_name = undefined,
+        .project_name = "UNNAMED PROJECT",
         .scenes = undefined,
         .default_scene = undefined,
         .resources = undefined,
@@ -138,9 +139,9 @@ pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, o: anytype) !Self {
         if (std.mem.eql(u8, field_name, "yume_version")) {
             result.yume_version = try parseYumeVersion(jrs);
         } else if (std.mem.eql(u8, field_name, "name")) {
-            tk = try jrs.nextAlloc(a, .alloc_if_needed);
+            tk = try jrs.nextAlloc(a, .alloc_always);
             result.project_name = switch (tk) {
-                inline .string, .allocated_string => |slice| slice,
+                inline .allocated_string => |slice| slice,
                 else => {
                     return error.UnexpectedToken;
                 },

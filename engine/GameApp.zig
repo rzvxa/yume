@@ -126,13 +126,22 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) !void {
         if (TitleDelay.accumulator > 0.1) {
             TitleDelay.accumulator = 0.0;
             const fps = 1.0 / self.delta;
+            const title: ?[]u8 = if (comptime @hasDecl(Dispatcher, "windowTitle")) try d.windowTitle() else null;
+
             const new_title = try std.fmt.allocPrintZ(
                 self.allocator,
                 "{s} - FPS: {d:6.3}, ms: {d:6.3}",
-                .{ self.window_title, fps, self.delta * 1000.0 },
+                .{
+                    title orelse self.window_title,
+                    fps,
+                    self.delta * 1000.0,
+                },
             );
             defer self.allocator.free(new_title);
             _ = c.SDL_SetWindowTitle(self.window, new_title.ptr);
+            if (title) |t| {
+                self.allocator.free(t);
+            }
         }
         if (comptime std.meta.hasMethod(Dispatcher, "endFrame")) {
             d.endFrame();

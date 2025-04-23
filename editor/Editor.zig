@@ -219,6 +219,26 @@ pub fn deinit(self: *Self) void {
     EditorDatabase.deinit();
 }
 
+pub fn windowTitle(self: *Self) ![]u8 {
+    const title = "Yume Editor";
+    if (Project.current()) |proj| {
+        if (self.ctx.scene_handle) |scene| {
+            return try std.fmt.allocPrint(self.ctx.allocator, "{s} - {s} - {s}", .{
+                proj.project_name,
+                try AssetsDatabase.getResourcePath(scene.uuid),
+                title,
+            });
+        } else {
+            return try std.fmt.allocPrint(self.ctx.allocator, "{s} - {s}", .{
+                proj.project_name,
+                title,
+            });
+        }
+    } else {
+        return try self.ctx.allocator.dupe(u8, title);
+    }
+}
+
 pub fn newFrame(_: *Self) void {
     inputs.clear();
 }
