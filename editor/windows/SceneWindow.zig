@@ -232,21 +232,25 @@ pub fn update(self: *Self, ctx: *GameApp) void {
     var in_use: bool = false;
 
     if (self.is_dragging or self.is_hovered) {
+        const wasd = blk: {
+            var wasd = Vec3.ZERO;
+            // Handle translation inputs (W, A, S, D) relative to view
+            wasd = wasd.add(forward.mulf(if (Editor.inputs.isKeyDown(ScanCode.W)) 1 else 0));
+            wasd = wasd.sub(forward.mulf(if (Editor.inputs.isKeyDown(ScanCode.S)) 1 else 0));
+            wasd = wasd.add(left.mulf(if (Editor.inputs.isKeyDown(ScanCode.A)) 1 else 0));
+            wasd = wasd.sub(left.mulf(if (Editor.inputs.isKeyDown(ScanCode.D)) 1 else 0));
+            wasd = wasd.add(up.mulf(if (Editor.inputs.isKeyDown(ScanCode.E)) 1 else 0));
+            wasd = wasd.sub(up.mulf(if (Editor.inputs.isKeyDown(ScanCode.Q)) 1 else 0));
+            wasd = wasd.mulf(5);
+            break :blk wasd;
+        };
         if (Editor.inputs.isMouseButtonDown(MouseButton.Right)) { // free cam
             in_use = true;
             Editor.inputs.setRelativeMouseMode(true);
             const mouse_delta = Editor.inputs.mouseRelative().mulf(0.5);
             input_rot.y -= mouse_delta.x;
             input_rot.x -= mouse_delta.y;
-
-            // Handle translation inputs (W, A, S, D) relative to view
-            input = input.add(forward.mulf(if (Editor.inputs.isKeyDown(ScanCode.W)) 1 else 0));
-            input = input.sub(forward.mulf(if (Editor.inputs.isKeyDown(ScanCode.S)) 1 else 0));
-            input = input.add(left.mulf(if (Editor.inputs.isKeyDown(ScanCode.A)) 1 else 0));
-            input = input.sub(left.mulf(if (Editor.inputs.isKeyDown(ScanCode.D)) 1 else 0));
-            input = input.add(up.mulf(if (Editor.inputs.isKeyDown(ScanCode.E)) 1 else 0));
-            input = input.sub(up.mulf(if (Editor.inputs.isKeyDown(ScanCode.Q)) 1 else 0));
-            input = input.mulf(5);
+            input = input.add(wasd);
         } else if (Editor.inputs.isMouseButtonDown(MouseButton.Middle)) {
             if (Editor.inputs.isKeyDown(ScanCode.LeftShift)) { // panning
                 in_use = true;
@@ -288,7 +292,9 @@ pub fn update(self: *Self, ctx: *GameApp) void {
                     self.target_pos.z + current_distance * cosPitch * cosYaw,
                 );
 
-                self.camera.view = Vec3.lookAt(new_eye, self.target_pos, Vec3.UP);
+                self.camera.view = Mat4.lookAt(new_eye, self.target_pos, Vec3.UP);
+                decomposed = (self.camera.view.inverse() catch @panic("err")).decompose();
+                input = input.add(wasd);
             }
         } else {
             // Mouse wheel for zooming in and out relative to view direction
@@ -336,7 +342,7 @@ fn focus(self: *Self, target: Vec3, distance: f32) void {
         @sin(default_cam_angle.x) * distance,
         @sin(default_cam_angle.y) * @cos(default_cam_angle.x) * distance,
     ));
-    self.camera.view = eye.lookAt(target, Vec3.UP);
+    self.camera.view = Mat4.lookAt(eye, target, Vec3.UP);
     self.distance = distance;
     self.target_pos = target;
 }

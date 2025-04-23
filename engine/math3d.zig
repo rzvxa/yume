@@ -143,38 +143,6 @@ pub const Vec3 = extern struct {
         return Vec3.make(v.x * scaleV + other.x * scaleOther, v.y * scaleV + other.y * scaleOther, v.z * scaleV + other.z * scaleOther);
     }
 
-    pub fn lookAt(eye: Vec3, at: Vec3, up: Vec3) Mat4 {
-        var x: Vec3 = undefined;
-        var y: Vec3 = undefined;
-        var z: Vec3 = undefined;
-        var tmp: Vec3 = undefined;
-
-        // Compute the direction vector `Z` (from eye to at) and normalize it
-        tmp = Vec3.make(eye.x - at.x, eye.y - at.y, eye.z - at.z);
-        z = tmp.normalized();
-
-        // Normalize the up vector `Y`
-        y = up.normalized();
-
-        // Compute the right vector `X` as the cross product of `Y` and `Z`
-        tmp = y.cross(z);
-        x = tmp.normalized();
-
-        // Recalculate the true up vector `Y` as the cross product of `Z` and `X`
-        tmp = z.cross(x);
-        y = tmp.normalized();
-
-        // Create the LookAt matrix
-        const m16: Mat4 = Mat4.make(
-            Vec4.make(x.x, y.x, z.x, 0.0),
-            Vec4.make(x.y, y.y, z.y, 0.0),
-            Vec4.make(x.z, y.z, z.z, 0.0),
-            Vec4.make(-x.dot(eye), -y.dot(eye), -z.dot(eye), 1.0),
-        );
-
-        return m16;
-    }
-
     pub fn jsonStringify(self: Self, jws: anytype) !void {
         try jws.beginArray();
 
@@ -938,10 +906,43 @@ pub const Mat4 = extern union {
     }
 
     // compute the determinant of the upper 3x3 part of a Mat4.
-    fn determinant3x3(m: Mat4) f32 {
+    pub fn determinant3x3(m: Mat4) f32 {
         return m.unnamed[0][0] * (m.unnamed[1][1] * m.unnamed[2][2] - m.unnamed[1][2] * m.unnamed[2][1]) -
             m.unnamed[0][1] * (m.unnamed[1][0] * m.unnamed[2][2] - m.unnamed[1][2] * m.unnamed[2][0]) +
             m.unnamed[0][2] * (m.unnamed[1][0] * m.unnamed[2][1] - m.unnamed[1][1] * m.unnamed[2][0]);
+    }
+
+    // create a look at view
+    pub fn lookAt(eye: Vec3, at: Vec3, up: Vec3) Mat4 {
+        var x: Vec3 = undefined;
+        var y: Vec3 = undefined;
+        var z: Vec3 = undefined;
+        var tmp: Vec3 = undefined;
+
+        // Compute the direction vector `Z` (from eye to at) and normalize it
+        tmp = Vec3.make(eye.x - at.x, eye.y - at.y, eye.z - at.z);
+        z = tmp.normalized();
+
+        // Normalize the up vector `Y`
+        y = up.normalized();
+
+        // Compute the right vector `X` as the cross product of `Y` and `Z`
+        tmp = y.cross(z);
+        x = tmp.normalized();
+
+        // Recalculate the true up vector `Y` as the cross product of `Z` and `X`
+        tmp = z.cross(x);
+        y = tmp.normalized();
+
+        // Create the LookAt matrix
+        const m16: Mat4 = Mat4.make(
+            Vec4.make(x.x, y.x, z.x, 0.0),
+            Vec4.make(x.y, y.y, z.y, 0.0),
+            Vec4.make(x.z, y.z, z.z, 0.0),
+            Vec4.make(-x.dot(eye), -y.dot(eye), -z.dot(eye), 1.0),
+        );
+
+        return m16;
     }
 
     pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
