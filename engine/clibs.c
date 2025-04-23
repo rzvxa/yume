@@ -4,6 +4,10 @@
 #include "cimgui_impl_sdl3.h"
 #include "cimgui_impl_vulkan.h"
 #include "cimgui_internal.h"
+
+#define CIMGUI_DEFINE_ENUMS_AND_STRUCTS
+#include "cimguizmo.h"
+
 #include "stb_image.h"
 #include "vk_mem_alloc.h"
 #include "vulkan/vulkan.h"

@@ -60,6 +60,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
         try register(.{ .urn = "ef77f971-4c34-4000-b0c4-9eab7ebafc8e", .path = "icons/move-tool.png", .category = "editor" });
         try register(.{ .urn = "e8480d10-cb60-4831-9796-f0823761d489", .path = "icons/rotate-tool.png", .category = "editor" });
         try register(.{ .urn = "b2c4cc39-1272-42b5-a40d-3e62d4cfbb12", .path = "icons/scale-tool.png", .category = "editor" });
+        try register(.{ .urn = "4bf6d06c-2d96-4b12-8c20-f9a03a5152e1", .path = "icons/transform-tool.png", .category = "editor" });
         try register(.{ .urn = "eab7824b-f71c-4b90-a468-a5d91f4a3f7b", .path = "icons/close.png", .category = "editor" });
         try register(.{ .urn = "715b644d-f9a5-4aad-9cf9-6328cc849006", .path = "icons/browse.png", .category = "editor" });
 

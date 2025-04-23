@@ -29,8 +29,6 @@ const Texture = textures.Texture;
 const Camera = @import("yume").Camera;
 const Scene = @import("yume").scene_graph.Scene;
 const MeshRenderer = @import("yume").MeshRenderer;
-const ScanCode = @import("yume").inputs.ScanCode;
-const MouseButton = @import("yume").inputs.MouseButton;
 const InputsContext = @import("yume").inputs.InputContext;
 
 const ecs = @import("yume").ecs;
@@ -125,8 +123,8 @@ pub fn init(ctx: *GameApp) *Self {
     ctx.world.tag(Playing);
     ctx.world.addSingleton(Playing);
     ctx.world.enable(ecs.typeId(Playing), false);
-    const tmu_entity = ctx.world.systemFn("transform-matrix-update", ecs.systems.PostUpdate, ecs.systems.transformMatrices);
-    ctx.world.add(tmu_entity, RunInEditor);
+    // const tmu_entity = ctx.world.systemFn("transform-matrix-update", ecs.systems.PostUpdate, ecs.systems.transformMatrices);
+    // ctx.world.add(tmu_entity, RunInEditor);
     // _ = ctx.world.observerFn(&ecs.ObserverDesc{
     //     .query = std.mem.zeroInit(ecs.QueryDesc, .{ .terms = .{
     //         .{ .id = ecs.typeId(components.Position) },
@@ -236,96 +234,32 @@ pub fn processEvent(self: *Self, event: *c.SDL_Event) bool {
         c.SDL_EVENT_QUIT => return false,
         else => {},
     }
-    if (self.game_window.is_game_window_focused) {
-        self.ctx.inputs.push(event);
-    } else if (self.scene_window.is_scene_window_focused) {
+    if (self.scene_window.is_scene_window_focused) {
         inputs.push(event);
+    } else if (self.game_window.is_game_window_focused) {
+        self.ctx.inputs.push(event);
     }
 
     return true;
 }
 
-fn isInGameView(self: *Self, pos: c.ImVec2) bool {
-    return (pos.x > self.game_window.game_window_rect.x and pos.x < self.game_window.game_window_rect.z) and
-        (pos.y > self.game_window.game_window_rect.y and pos.y < self.game_window.game_window_rect.w);
-}
-
-fn isInSceneView(self: *Self, pos: c.ImVec2) bool {
-    return (pos.x > self.scene_window_rect.x and pos.x < self.scene_window_rect.z) and
-        (pos.y > self.scene_window_rect.y and pos.y < self.scene_window_rect.w);
-}
-
-pub fn update(self: *Self) bool {
-    var input: Vec3 = Vec3.make(0, 0, 0);
-    var input_rot: Vec3 = Vec3.make(0, 0, 0);
-
-    // Create rotation quaternion
-    const rot_x = Quat.fromAxisAngle(Vec3.make(1.0, 0.0, 0.0), self.scene_window.camera_rot.x);
-    const rot_y = Quat.fromAxisAngle(Vec3.make(0.0, 1.0, 0.0), self.scene_window.camera_rot.y);
-    const rot_z = Quat.fromAxisAngle(Vec3.make(0.0, 0.0, 1.0), self.scene_window.camera_rot.z);
-    const rot_quat = rot_z.mul(rot_y).mul(rot_x);
-
-    // Calculate direction vectors
-    const forward = rot_quat.mulVec3(Vec3.make(0, 0, 1)).normalized();
-    const left = rot_quat.mulVec3(Vec3.make(-1, 0, 0)).normalized();
-    const up = Vec3.cross(left, forward).normalized();
-
-    if (inputs.isMouseButtonDown(MouseButton.Middle)) {
-        inputs.setRelativeMouseMode(true);
-        // Shift + MMB for panning
-        if (inputs.isKeyDown(ScanCode.LeftShift)) {
-            const mouse_delta = inputs.mouseDelta();
-            input = input.add(left.mulf(mouse_delta.x));
-            input = input.add(up.mulf(mouse_delta.y));
-        } else { // Camera rotation handling (MMB for orbiting)
-            const mouse_delta = inputs.mouseRelative();
-            input_rot.y += mouse_delta.x;
-            input_rot.x += mouse_delta.y;
-        }
-        // Handle translation inputs (W, A, S, D for panning) relative to view
-        input = input.add(forward.mulf(if (inputs.isKeyDown(ScanCode.W)) 1 else 0));
-        input = input.sub(forward.mulf(if (inputs.isKeyDown(ScanCode.S)) 1 else 0));
-        input = input.add(left.mulf(if (inputs.isKeyDown(ScanCode.A)) 1 else 0));
-        input = input.sub(left.mulf(if (inputs.isKeyDown(ScanCode.D)) 1 else 0));
-        input = input.add(up.mulf(if (inputs.isKeyDown(ScanCode.E)) 1 else 0));
-        input = input.sub(up.mulf(if (inputs.isKeyDown(ScanCode.Q)) 1 else 0));
-    } else {
-        inputs.setRelativeMouseMode(false);
-    }
-
-    // Normalize movement speed
-    input = input.normalized().mulf(5);
-
-    if (inputs.isKeyDown(ScanCode.LeftCtrl)) {
-        // Mouse wheel for zooming in and out relative to view direction
-        const wheel = inputs.mouseWheel();
-        const scroll_speed: f32 = if (inputs.isKeyDown(ScanCode.LeftShift)) 5 else 20;
-        if (wheel.y > 0) {
-            input = input.add(forward.mulf(scroll_speed));
-        } else if (wheel.y < 0) {
-            input = input.sub(forward.mulf(scroll_speed));
-        }
-    }
-
-    // Apply camera movements
-    if (input.squaredLen() > (0.1 * 0.1)) {
-        const camera_delta = input.mulf(self.ctx.delta);
-        self.scene_window.camera_pos = Vec3.add(self.scene_window.camera_pos, camera_delta);
-    }
-    if (input_rot.squaredLen() > (0.1 * 0.1)) {
-        const rot_delta = input_rot.mulf(self.ctx.delta * 1.0);
-        self.scene_window.camera_rot = self.scene_window.camera_rot.add(rot_delta);
-    }
-
+pub fn update(self: *Self) !bool {
+    try self.scene_window.update(self.ctx);
     return self.ctx.world.progress(self.ctx.delta);
 }
 
-pub fn draw(self: *Self) void {
+pub fn draw(self: *Self) !void {
     const cmd = self.ctx.engine.beginFrame();
 
     c.cImGui_ImplVulkan_NewFrame();
     c.cImGui_ImplSDL3_NewFrame();
     c.ImGui_NewFrame();
+
+    const io = c.ImGui_GetIO();
+
+    c.ImGuizmo_SetOrthographic(!self.scene_window.is_perspective);
+    c.ImGuizmo_BeginFrame();
+
     if (self.imgui_demo_open) {
         c.ImGui_ShowDemoWindow(&self.imgui_demo_open);
     }
@@ -419,7 +353,6 @@ pub fn draw(self: *Self) void {
     c.ImGui_PopStyleVarEx(2);
 
     // DockSpace
-    const io = c.ImGui_GetIO();
     if ((io.*.ConfigFlags & c.ImGuiConfigFlags_DockingEnable) > 0) {
         var dockspace_id = c.ImGui_GetID("MyDockSpace");
         _ = c.ImGui_DockSpaceEx(dockspace_id, c.ImVec2{ .x = 0, .y = 0 }, self.dockspace_flags, null);
@@ -454,7 +387,7 @@ pub fn draw(self: *Self) void {
     self.hierarchy_window.draw(self.ctx);
     self.properties_window.draw(self.ctx) catch @panic("err");
     self.project_explorer.draw();
-    self.scene_window.draw(cmd, self.ctx);
+    try self.scene_window.draw(cmd, self.ctx);
     self.game_window.draw(cmd, self.ctx);
     self.logs_windows.draw();
 
@@ -627,6 +560,7 @@ fn init_imgui(engine: *Engine) !void {
     move_tool_icon_ds = try getImGuiTexture("editor://icons/move-tool.png", engine);
     rotate_tool_icon_ds = try getImGuiTexture("editor://icons/rotate-tool.png", engine);
     scale_tool_icon_ds = try getImGuiTexture("editor://icons/scale-tool.png", engine);
+    transform_tool_icon_ds = try getImGuiTexture("editor://icons/transform-tool.png", engine);
     close_icon_ds = try getImGuiTexture("editor://icons/close.png", engine);
     browse_icon_ds = try getImGuiTexture("editor://icons/browse.png", engine);
 
@@ -902,6 +836,7 @@ pub var object_icon_ds: c.ImTextureID = undefined;
 pub var move_tool_icon_ds: c.ImTextureID = undefined;
 pub var rotate_tool_icon_ds: c.ImTextureID = undefined;
 pub var scale_tool_icon_ds: c.ImTextureID = undefined;
+pub var transform_tool_icon_ds: c.ImTextureID = undefined;
 pub var close_icon_ds: c.ImTextureID = undefined;
 pub var browse_icon_ds: c.ImTextureID = undefined;
 
@@ -916,3 +851,40 @@ pub var info_mono_icon_ds: c.ImTextureID = undefined;
 pub var debug_mono_icon_ds: c.ImTextureID = undefined;
 
 pub var yume_logo_ds: c.ImTextureID = undefined;
+
+fn frustum(left: f32, right: f32, bottom: f32, top: f32, znear: f32, zfar: f32, m16: *[16]f32) void {
+    const temp = 2 * znear;
+    const temp2 = right - left;
+    const temp3 = top - bottom;
+    const temp4 = zfar - znear;
+    m16.*[0] = temp / temp2;
+    m16.*[1] = 0.0;
+    m16.*[2] = 0.0;
+    m16.*[3] = 0.0;
+    m16.*[4] = 0.0;
+    m16.*[5] = temp / temp3;
+    m16.*[6] = 0.0;
+    m16.*[7] = 0.0;
+    m16.*[8] = (right + left) / temp2;
+    m16.*[9] = (top + bottom) / temp3;
+    m16.*[10] = (-zfar - znear) / temp4;
+    m16.*[11] = -1;
+    m16.*[12] = 0.0;
+    m16.*[13] = 0.0;
+    m16.*[14] = (-temp * zfar) / temp4;
+    m16.*[15] = 0.0;
+}
+
+fn perspective(fovyInDegrees: f32, aspectRatio: f32, znear: f32, zfar: f32, m16: *[16]f32) void {
+    const ymax = znear * @tan(fovyInDegrees * 3.141592 / 180);
+    const xmax = ymax * aspectRatio;
+    frustum(-xmax, xmax, -ymax, ymax, znear, zfar, m16);
+}
+
+fn getForwardDirection(transformMatrix: Mat4) Vec3 {
+    // Extract the basis vectors directly from the rotation part of the transform matrix.
+    const forward = Vec3.make(-transformMatrix.unnamed[2][0], // Negative Z in world space
+        -transformMatrix.unnamed[2][1], -transformMatrix.unnamed[2][2]);
+
+    return forward.normalized(); // Normalize the vector to ensure unit length
+}

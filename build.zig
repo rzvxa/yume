@@ -100,6 +100,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     engine_c_libs.addIncludeDir("vendor/imgui/");
+    engine_c_libs.addIncludeDir("vendor/imguizmo/");
     editor.root_module.addImport("clibs", engine_c_mod);
 
     if (env_map.get("VK_SDK_PATH")) |path| {
@@ -109,6 +110,7 @@ pub fn build(b: *std.Build) !void {
     editor.addIncludePath(b.path("vendor/vma/"));
     editor.addIncludePath(b.path("vendor/stb/"));
     editor.addIncludePath(b.path("vendor/imgui/"));
+    editor.addIncludePath(b.path("vendor/imguizmo/"));
 
     editor.linkLibCpp();
     editor.root_module.addImport("yume", yume);
@@ -151,6 +153,29 @@ pub fn build(b: *std.Build) !void {
     });
 
     editor.linkLibrary(imgui_lib);
+
+    const imguizmo_lib = b.addStaticLibrary(.{
+        .name = "cimguizmo",
+        .target = target,
+        .optimize = optimize,
+    });
+    imguizmo_lib.addIncludePath(b.path("vendor/imgui/"));
+    imguizmo_lib.addIncludePath(b.path("vendor/imguizmo/"));
+    // imguizmo_lib.root_module.addCMacro("CIMGUI_DEFINE_ENUMS_AND_STRUCTS", "1");
+    imguizmo_lib.linkLibCpp();
+    imguizmo_lib.addCSourceFiles(.{
+        .files = &.{
+            "vendor/imguizmo/ImGuizmo.cpp",
+            // "vendor/imguizmo/GraphEditor.cpp",
+            // "vendor/imguizmo/ImCurveEdit.cpp",
+            // "vendor/imguizmo/ImGradient.cpp",
+            // "vendor/imguizmo/ImSequencer.cpp",
+            "vendor/imguizmo/cimguizmo.cpp",
+        },
+    });
+    // imguizmo_lib.linkLibrary(imgui_lib);
+
+    editor.linkLibrary(imguizmo_lib);
 
     const run_cmd = b.addRunArtifact(editor);
 

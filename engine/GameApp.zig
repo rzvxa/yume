@@ -75,10 +75,10 @@ pub fn init(a: std.mem.Allocator, loader: assets.ResourceLoader, window_title: [
     self.registerComponent(ecs.components.Meta);
     self.registerComponent(ecs.components.HierarchyOrder);
 
-    self.registerComponent(ecs.components.Position);
-    self.registerComponent(ecs.components.Rotation);
-    self.registerComponent(ecs.components.Scale);
-    self.registerComponent(ecs.components.TransformMatrix);
+    // self.registerComponent(ecs.components.Position);
+    // self.registerComponent(ecs.components.Rotation);
+    // self.registerComponent(ecs.components.Scale);
+    self.registerComponent(ecs.components.Transform);
 
     self.registerComponent(ecs.components.Camera);
     self.registerComponent(ecs.components.Mesh);
@@ -87,8 +87,8 @@ pub fn init(a: std.mem.Allocator, loader: assets.ResourceLoader, window_title: [
     return self;
 }
 
-pub fn run(self: *Self, comptime Dispatcher: anytype) void {
-    var timer = std.time.Timer.start() catch @panic("Failed to start timer");
+pub fn run(self: *Self, comptime Dispatcher: anytype) !void {
+    var timer = try std.time.Timer.start();
 
     var quit = false;
     var event: c.SDL_Event = undefined;
@@ -109,11 +109,11 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
         }
 
         if (comptime std.meta.hasMethod(Dispatcher, "update")) {
-            const cont: bool = d.update();
+            const cont: bool = try d.update();
             quit = quit or !cont;
         }
         if (comptime std.meta.hasMethod(Dispatcher, "draw")) {
-            d.draw();
+            try d.draw();
         }
 
         self.delta = @floatCast(@as(f64, @floatFromInt(timer.lap())) / 1_000_000_000.0);
@@ -126,11 +126,11 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) void {
         if (TitleDelay.accumulator > 0.1) {
             TitleDelay.accumulator = 0.0;
             const fps = 1.0 / self.delta;
-            const new_title = std.fmt.allocPrintZ(
+            const new_title = try std.fmt.allocPrintZ(
                 self.allocator,
                 "{s} - FPS: {d:6.3}, ms: {d:6.3}",
                 .{ self.window_title, fps, self.delta * 1000.0 },
-            ) catch @panic("Out of memory");
+            );
             defer self.allocator.free(new_title);
             _ = c.SDL_SetWindowTitle(self.window, new_title.ptr);
         }

@@ -1,6 +1,8 @@
 const std = @import("std");
 const Dynamic = @import("serialization/dynamic.zig").Dynamic;
 
+pub const epsilon = std.math.floatEps(f32);
+
 pub const Vec2 = extern struct {
     const Self = @This();
     x: f32,
@@ -10,6 +12,10 @@ pub const Vec2 = extern struct {
 
     pub inline fn make(x: f32, y: f32) Vec2 {
         return .{ .x = x, .y = y };
+    }
+
+    pub inline fn mulf(self: Self, other: f32) Self {
+        return make(self.x * other, self.y * other);
     }
 
     pub inline fn scalar(n: f32) Vec2 {
@@ -45,6 +51,7 @@ pub const Vec3 = extern struct {
     const Self = @This();
 
     pub const ZERO = make(0.0, 0.0, 0.0);
+    pub const UP = make(0.0, 1.0, 0.0);
 
     pub inline fn make(x: f32, y: f32, z: f32) Self {
         return .{ .x = x, .y = y, .z = z };
@@ -121,6 +128,19 @@ pub const Vec3 = extern struct {
 
     pub inline fn toArray(self: Self) [3]f32 {
         return @as(*const [3]f32, @ptrCast(&self)).*;
+    }
+
+    pub fn getComponent(v: Vec3, index: usize) f32 {
+        return switch (index) {
+            0 => v.x,
+            1 => v.y,
+            2 => v.z,
+            else => unreachable,
+        };
+    }
+
+    pub fn combine(v: Vec3, other: Vec3, scaleV: f32, scaleOther: f32) Vec3 {
+        return Vec3.make(v.x * scaleV + other.x * scaleOther, v.y * scaleV + other.y * scaleOther, v.z * scaleV + other.z * scaleOther);
     }
 
     pub fn jsonStringify(self: Self, jws: anytype) !void {
@@ -270,6 +290,11 @@ pub const Vec4 = extern struct {
 };
 
 pub const Quat = extern struct {
+    pub const BasisVectors = struct {
+        right: Vec3,
+        up: Vec3,
+        forward: Vec3,
+    };
     const Self = @This();
 
     x: f32,
@@ -400,13 +425,48 @@ pub const Quat = extern struct {
 
         return q;
     }
+
+    pub fn toBasisVectors(quat: Quat) BasisVectors {
+        const x = quat.x;
+        const y = quat.y;
+        const z = quat.z;
+        const w = quat.w;
+
+        const xx = x * x;
+        const yy = y * y;
+        const zz = z * z;
+        const xy = x * y;
+        const xz = x * z;
+        const yz = y * z;
+        const wx = w * x;
+        const wy = w * y;
+        const wz = w * z;
+
+        const right = Vec3.make(1.0 - 2.0 * (yy + zz), 2.0 * (xy + wz), 2.0 * (xz - wy));
+
+        const up = Vec3.make(2.0 * (xy - wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz + wx));
+
+        const forward = Vec3.make(2.0 * (xz + wy), 2.0 * (yz - wx), 1.0 - 2.0 * (xx + yy));
+
+        return BasisVectors{
+            .right = right.normalized(),
+            .up = up.normalized(),
+            .forward = forward.normalized(),
+        };
+    }
 };
 
 pub const Mat4 = extern union {
-    pub const Mat4Components = struct {
+    pub const Decomposed = struct {
         translation: Vec3,
         rotation: Quat,
         scale: Vec3,
+
+        pub const IDENTITY: Decomposed = .{
+            .translation = Vec3.ZERO,
+            .rotation = Quat.IDENTITY,
+            .scale = Vec3.scalar(1),
+        };
     };
     named: extern struct {
         i: Vec4,
@@ -443,10 +503,10 @@ pub const Mat4 = extern union {
     /// Returns the transpose of the input matrix
     pub fn transposed(self: Self) Self {
         return make(
-            Vec4.make(self.i.x, self.j.x, self.k.x, self.t.x),
-            Vec4.make(self.i.y, self.j.y, self.k.y, self.t.y),
-            Vec4.make(self.i.z, self.j.z, self.k.z, self.t.z),
-            Vec4.make(self.i.w, self.j.w, self.k.w, self.t.w),
+            Vec4.make(self.named.i.x, self.named.j.x, self.named.k.x, self.named.t.x),
+            Vec4.make(self.named.i.y, self.named.j.y, self.named.k.y, self.named.t.y),
+            Vec4.make(self.named.i.z, self.named.j.z, self.named.k.z, self.named.t.z),
+            Vec4.make(self.named.i.w, self.named.j.w, self.named.k.w, self.named.t.w),
         );
     }
 
@@ -691,45 +751,204 @@ pub const Mat4 = extern union {
         return translation_mat.mul(rotation_mat).mul(scale_mat);
     }
 
-    pub fn decompose(self: Self) Mat4Components {
-        const t = Vec3.make(
-            self.unnamed[3][0],
-            self.unnamed[3][1],
-            self.unnamed[3][2],
+    pub inline fn recompose(decomposed: Decomposed) Mat4 {
+        return Mat4.compose(decomposed.translation, decomposed.rotation, decomposed.scale);
+    }
+
+    pub fn decompose(self: Self) !Decomposed {
+        var m = self;
+
+        // Normalize the matrix.
+        if (epsilonEqual(m.unnamed[3][3], 0.0)) {
+            return error.InvalidMatrix;
+        }
+        for (0..4) |i| {
+            for (0..4) |j| {
+                m.unnamed[i][j] /= m.unnamed[3][3];
+            }
+        }
+
+        // perspectiveMatrix is used for solving perspective and for
+        // testing the singularity of the upper 3x3 component.
+        var perspectiveMatrix = m;
+        for (0..3) |i| {
+            perspectiveMatrix.unnamed[i][3] = 0;
+        }
+        perspectiveMatrix.unnamed[3][3] = 1;
+
+        if (epsilonEqual(determinant3x3(perspectiveMatrix), 0)) {
+            return error.InvalidMatrix;
+        }
+
+        var per: Vec4 = Vec4.make(0, 0, 0, 1);
+        if (epsilonNotEqual(m.unnamed[0][3], 0) or
+            epsilonNotEqual(m.unnamed[1][3], 0) or
+            epsilonNotEqual(m.unnamed[2][3], 0))
+        {
+            // Build the right-hand side vector.
+            const rhs = Vec4.make(m.unnamed[0][3], m.unnamed[1][3], m.unnamed[2][3], m.unnamed[3][3]);
+            // Solve the equation by inverting perspectiveMatrix.
+            const inversePerspective: Mat4 = inverse(perspectiveMatrix) catch @panic("inverse err");
+            var transposedInverse: Mat4 = transposed(inversePerspective);
+            per = transposedInverse.mulVec4(rhs);
+
+            // Clear the perspective partition.
+            m.unnamed[0][3] = 0.0;
+            m.unnamed[1][3] = 0.0;
+            m.unnamed[2][3] = 0.0;
+            m.unnamed[3][3] = 1.0;
+        } else {
+            per = Vec4.make(0.0, 0.0, 0.0, 1.0);
+        }
+
+        // Extract translation (assumed stored in the 4th row).
+        const tran: Vec3 = m.vec4[3].toVec3();
+        m.vec4[3] = Vec4.make(0.0, 0.0, 0.0, m.vec4[3].w);
+
+        // Extract rows as 3-vectors (upper 3x3).
+        var row: [3]Vec3 = undefined;
+        for (0..3) |i| {
+            row[i] = Vec3.make(m.unnamed[i][0], m.unnamed[i][1], m.unnamed[i][2]);
+        }
+
+        // Compute X scale factor and normalize the first row.
+        var sc: Vec3 = undefined;
+        sc.x = row[0].len();
+        if (sc.x < epsilon) return error.InvalidMatrix;
+        row[0] = row[0].normalized();
+
+        // Compute XY shear factor and make 2nd row orthogonal to 1st.
+        var skew: Vec3 = undefined;
+        skew.z = row[0].dot(row[1]);
+        row[1] = Vec3.combine(row[1], row[0], 1.0, -skew.z);
+
+        // Compute Y scale and normalize 2nd row.
+        sc.y = row[1].len();
+        if (sc.y < epsilon) return error.InvalidMatrix;
+        row[1] = row[1].normalized();
+        skew.z /= sc.y;
+
+        // Compute XZ and YZ shears; orthogonalize 3rd row.
+        skew.y = row[0].dot(row[2]);
+        row[2] = Vec3.combine(row[2], row[0], 1.0, -skew.y);
+        skew.x = row[1].dot(row[2]);
+        row[2] = Vec3.combine(row[2], row[1], 1.0, -skew.x);
+
+        // Compute Z scale and normalize 3rd row.
+        sc.z = row[2].len();
+        if (sc.z < epsilon) return error.InvalidMatrix;
+        row[2] = row[2].normalized();
+        skew.y /= sc.z;
+        skew.x /= sc.z;
+
+        // If the determinant is negative, we must invert one row.
+        const pdum3: Vec3 = row[1].cross(row[2]);
+        if (row[0].dot(pdum3) < 0.0) {
+            sc.x *= -1.0;
+            sc.y *= -1.0;
+            sc.z *= -1.0;
+            row[0] = row[0].mulf(-1);
+            row[1] = row[1].mulf(-1);
+            row[2] = row[2].mulf(-1);
+        }
+
+        // Extract the rotation as a quaternion.
+        var orientation: Quat = undefined;
+        const trace: f32 = row[0].x + row[1].y + row[2].z;
+        if (trace > 0.0) {
+            var root = std.math.sqrt(trace + 1.0);
+            orientation.w = 0.5 * root;
+            root = 0.5 / root;
+            orientation.x = root * (row[1].z - row[2].y);
+            orientation.y = root * (row[2].x - row[0].z);
+            orientation.z = root * (row[0].y - row[1].x);
+        } else {
+            // Find the major diagonal element to determine the quaternion.
+            const Next: [3]usize = .{ 1, 2, 0 };
+            var i: usize = 0;
+            if (row[1].y > row[0].x) {
+                i = 1;
+            }
+            if (row[2].getComponent(2) > row[i].getComponent(i)) {
+                i = 2;
+            }
+            const j = Next[i];
+            const k = Next[j];
+
+            var root = std.math.sqrt(row[i].getComponent(i) - row[j].getComponent(j) - row[k].getComponent(k) + 1.0);
+            switch (i) {
+                0 => orientation.x = 0.5 * root,
+                1 => orientation.y = 0.5 * root,
+                2 => orientation.z = 0.5 * root,
+                else => {},
+            }
+            root = 0.5 / root;
+            if (i == 0) {
+                orientation.y = root * (row[0].getComponent(1) + row[1].getComponent(0));
+                orientation.z = root * (row[0].getComponent(2) + row[2].getComponent(0));
+            } else if (i == 1) {
+                orientation.x = root * (row[0].getComponent(1) + row[1].getComponent(0));
+                orientation.z = root * (row[1].getComponent(2) + row[2].getComponent(1));
+            } else {
+                orientation.x = root * (row[0].getComponent(2) + row[2].getComponent(0));
+                orientation.y = root * (row[1].getComponent(2) + row[2].getComponent(1));
+            }
+            if (i == 0) {
+                orientation.w = root * (row[1].getComponent(2) - row[2].getComponent(1));
+            } else if (i == 1) {
+                orientation.w = root * (row[2].getComponent(0) - row[0].getComponent(2));
+            } else {
+                orientation.w = root * (row[0].getComponent(1) - row[1].getComponent(0));
+            }
+        }
+
+        return Decomposed{
+            .translation = tran,
+            .rotation = orientation,
+            .scale = sc,
+            // .skew = skew,
+            // .perspective = perspective,
+        };
+    }
+
+    // compute the determinant of the upper 3x3 part of a Mat4.
+    pub fn determinant3x3(m: Mat4) f32 {
+        return m.unnamed[0][0] * (m.unnamed[1][1] * m.unnamed[2][2] - m.unnamed[1][2] * m.unnamed[2][1]) -
+            m.unnamed[0][1] * (m.unnamed[1][0] * m.unnamed[2][2] - m.unnamed[1][2] * m.unnamed[2][0]) +
+            m.unnamed[0][2] * (m.unnamed[1][0] * m.unnamed[2][1] - m.unnamed[1][1] * m.unnamed[2][0]);
+    }
+
+    // create a look at view
+    pub fn lookAt(eye: Vec3, at: Vec3, up: Vec3) Mat4 {
+        var x: Vec3 = undefined;
+        var y: Vec3 = undefined;
+        var z: Vec3 = undefined;
+        var tmp: Vec3 = undefined;
+
+        // Compute the direction vector `Z` (from eye to at) and normalize it
+        tmp = Vec3.make(eye.x - at.x, eye.y - at.y, eye.z - at.z);
+        z = tmp.normalized();
+
+        // Normalize the up vector `Y`
+        y = up.normalized();
+
+        // Compute the right vector `X` as the cross product of `Y` and `Z`
+        tmp = y.cross(z);
+        x = tmp.normalized();
+
+        // Recalculate the true up vector `Y` as the cross product of `Z` and `X`
+        tmp = z.cross(x);
+        y = tmp.normalized();
+
+        // Create the LookAt matrix
+        const m16: Mat4 = Mat4.make(
+            Vec4.make(x.x, y.x, z.x, 0.0),
+            Vec4.make(x.y, y.y, z.y, 0.0),
+            Vec4.make(x.z, y.z, z.z, 0.0),
+            Vec4.make(-x.dot(eye), -y.dot(eye), -z.dot(eye), 1.0),
         );
 
-        const sx = Vec3.make(
-            self.unnamed[0][0],
-            self.unnamed[1][0],
-            self.unnamed[2][0],
-        ).len();
-        const sy = Vec3.make(
-            self.unnamed[0][1],
-            self.unnamed[1][1],
-            self.unnamed[2][1],
-        ).len();
-        const sz = Vec3.make(
-            self.unnamed[0][2],
-            self.unnamed[1][2],
-            self.unnamed[2][2],
-        ).len();
-        const s = Vec3.make(sx, sy, sz);
-
-        // Remove scale from the matrix
-        var m = self;
-        m.unnamed[0][0] /= sx;
-        m.unnamed[0][1] /= sy;
-        m.unnamed[0][2] /= sz;
-        m.unnamed[1][0] /= sx;
-        m.unnamed[1][1] /= sy;
-        m.unnamed[1][2] /= sz;
-        m.unnamed[2][0] /= sx;
-        m.unnamed[2][1] /= sy;
-        m.unnamed[2][2] /= sz;
-
-        // Extract rotation quaternion
-        const rot = Quat.fromMat4(m);
-        return .{ .translation = t, .rotation = rot, .scale = s };
+        return m16;
     }
 
     pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
@@ -763,3 +982,11 @@ pub const Rect = struct {
     width: f32,
     height: f32,
 };
+
+pub fn epsilonEqual(a: f32, b: f32) bool {
+    return @abs(a - b) <= epsilon;
+}
+
+pub fn epsilonNotEqual(a: f32, b: f32) bool {
+    return @abs(a - b) > epsilon;
+}
