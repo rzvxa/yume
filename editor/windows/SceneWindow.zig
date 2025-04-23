@@ -68,7 +68,7 @@ pub fn init(ctx: *GameApp) Self {
     return self;
 }
 
-pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
+pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
     self.frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .d = self };
     if (c.ImGui_Begin("Scene", null, c.ImGuiWindowFlags_NoCollapse | c.ImGuiWindowFlags_NoNav)) {
         self.is_scene_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
@@ -198,10 +198,10 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                     }
 
                     if (ctx.world.get(selection, components.Mesh)) |mesh| {
-                        gizmo.drawBoundingBox(mesh.bounds, transform.?.value) catch @panic("error");
+                        try gizmo.drawBoundingBox(mesh.bounds, transform.?.value);
                     }
                     c.ImGuizmo_PushID_Int(@intCast(selection));
-                    if (gizmo.editTransform(&transform.?.value, self.active_tool) catch @panic("err")) {
+                    if (try gizmo.editTransform(&transform.?.value, self.active_tool)) {
                         ctx.world.modified(selection, components.Transform);
                     }
                     c.ImGuizmo_PopID();
@@ -214,7 +214,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
     c.ImGui_End();
 }
 
-pub fn update(self: *Self, ctx: *GameApp) void {
+pub fn update(self: *Self, ctx: *GameApp) !void {
     var input: Vec3 = Vec3.make(0, 0, 0);
     var input_rot: Vec3 = Vec3.make(0, 0, 0);
 
@@ -290,7 +290,7 @@ pub fn update(self: *Self, ctx: *GameApp) void {
                 );
 
                 self.camera.view = Mat4.lookAt(new_eye, self.target_pos, Vec3.UP);
-                decomposed = (self.camera.view.inverse() catch @panic("err")).decompose() catch Mat4.Decomposed.IDENTITY;
+                decomposed = (try self.camera.view.inverse()).decompose() catch Mat4.Decomposed.IDENTITY;
                 input = input.add(wasd);
             }
         } else {
@@ -329,7 +329,7 @@ pub fn update(self: *Self, ctx: *GameApp) void {
     }
 
     if (changed) {
-        self.camera.view = Mat4.recompose(decomposed).inverse() catch @panic("Failed");
+        self.camera.view = try Mat4.recompose(decomposed).inverse();
     }
 }
 

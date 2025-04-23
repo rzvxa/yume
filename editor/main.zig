@@ -27,7 +27,7 @@ pub fn main() !void {
     var app = GameApp.init(allocator, AssetsDatabase.readAssetAlloc, "Yume Editor");
     defer app.deinit();
 
-    app.run(Editor);
+    try app.run(Editor);
 }
 
 pub const std_options = std.Options{

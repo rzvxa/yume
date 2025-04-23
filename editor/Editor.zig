@@ -243,12 +243,12 @@ pub fn processEvent(self: *Self, event: *c.SDL_Event) bool {
     return true;
 }
 
-pub fn update(self: *Self) bool {
-    self.scene_window.update(self.ctx);
+pub fn update(self: *Self) !bool {
+    try self.scene_window.update(self.ctx);
     return self.ctx.world.progress(self.ctx.delta);
 }
 
-pub fn draw(self: *Self) void {
+pub fn draw(self: *Self) !void {
     const cmd = self.ctx.engine.beginFrame();
 
     c.cImGui_ImplVulkan_NewFrame();
@@ -387,7 +387,7 @@ pub fn draw(self: *Self) void {
     self.hierarchy_window.draw(self.ctx);
     self.properties_window.draw(self.ctx) catch @panic("err");
     self.project_explorer.draw();
-    self.scene_window.draw(cmd, self.ctx);
+    try self.scene_window.draw(cmd, self.ctx);
     self.game_window.draw(cmd, self.ctx);
     self.logs_windows.draw();
 
