@@ -572,7 +572,7 @@ pub const World = struct {
 
         // Re-sort siblings after resolving order conflicts
         std.mem.sort(Entity, sorted_children, self, struct {
-            pub fn f(ctx: Self, a: Entity, b: Entity) bool {
+            fn f(ctx: Self, a: Entity, b: Entity) bool {
                 const ord_a = if (ctx.get(a, components.HierarchyOrder)) |it| it.value else 0;
                 const ord_b = if (ctx.get(b, components.HierarchyOrder)) |it| it.value else 0;
                 return ord_a < ord_b;

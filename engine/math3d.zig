@@ -143,6 +143,11 @@ pub const Vec3 = extern struct {
         return Vec3.make(v.x * scaleV + other.x * scaleOther, v.y * scaleV + other.y * scaleOther, v.z * scaleV + other.z * scaleOther);
     }
 
+    /// Computes the Euclidean distance between two points.
+    pub fn distanceTo(self: Vec3, other: Vec3) f32 {
+        return self.sub(other).len();
+    }
+
     pub fn jsonStringify(self: Self, jws: anytype) !void {
         try jws.beginArray();
 
