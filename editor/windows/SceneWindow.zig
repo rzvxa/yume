@@ -10,6 +10,7 @@ const Vec3 = @import("yume").Vec3;
 const Vec4 = @import("yume").Vec4;
 const Quat = @import("yume").Quat;
 const Mat4 = @import("yume").Mat4;
+const Rect = @import("yume").Rect;
 const Engine = @import("yume").VulkanEngine;
 const GameApp = @import("yume").GameApp;
 const components = @import("yume").ecs.components;
@@ -42,7 +43,7 @@ is_perspective: bool = true,
 
 scene_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
 scene_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
-is_scene_window_focused: bool = false,
+is_focused: bool = false,
 is_hovered: bool = false,
 is_dragging: bool = false,
 
@@ -50,10 +51,18 @@ editor_camera_and_scene_buffer: AllocatedBuffer = undefined,
 editor_camera_and_scene_set: c.VkDescriptorSet = null,
 
 frame_userdata: FrameData = undefined,
+cast_query: *ecs.Query,
 render_system: ecs.Entity,
 
 pub fn init(ctx: *GameApp) Self {
     var self = Self{
+        .cast_query = ctx.world.query(&std.mem.zeroInit(
+            c.ecs_query_desc_t,
+            .{ .terms = .{
+                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.Mesh) },
+            } },
+        )),
         .render_system = ctx.world.systemEx(&.{
             .entity = ctx.world.create("Editor Render System"),
             .query = std.mem.zeroInit(c.ecs_query_desc_t, .{ .terms = .{
@@ -68,15 +77,19 @@ pub fn init(ctx: *GameApp) Self {
     return self;
 }
 
+pub fn deinit(self: *Self) void {
+    self.cast_query.deinit();
+}
+
 pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
     self.frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .d = self };
     if (c.ImGui_Begin("Scene", null, c.ImGuiWindowFlags_NoCollapse | c.ImGuiWindowFlags_NoNav)) {
-        self.is_scene_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
+        self.is_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
         self.is_hovered = c.ImGui_IsWindowHovered(c.ImGuiFocusedFlags_None);
         const editor_image = c.ImGui_GetWindowDrawList();
         self.scene_view_size = c.ImGui_GetWindowSize();
 
-        if (self.is_scene_window_focused and !self.is_dragging) {
+        if (self.is_focused and !self.is_dragging) {
             if (c.ImGui_IsKeyPressed(c.ImGuiKey_Q)) {
                 self.active_tool = .move;
             } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_W)) {
@@ -279,14 +292,14 @@ pub fn update(self: *Self, ctx: *GameApp) !void {
                     clamped_pitch = -max_pitch;
                 }
 
-                const cosPitch = std.math.cos(clamped_pitch);
-                const sinPitch = std.math.sin(clamped_pitch);
-                const cosYaw = std.math.cos(new_yaw);
-                const sinYaw = std.math.sin(new_yaw);
+                const cos_pitch = std.math.cos(clamped_pitch);
+                const sin_pitch = std.math.sin(clamped_pitch);
+                const cos_yaw = std.math.cos(new_yaw);
+                const sin_yaw = std.math.sin(new_yaw);
                 const new_eye = Vec3.make(
-                    self.target_pos.x + current_distance * cosPitch * sinYaw,
-                    self.target_pos.y + current_distance * sinPitch,
-                    self.target_pos.z + current_distance * cosPitch * cosYaw,
+                    self.target_pos.x + current_distance * cos_pitch * sin_yaw,
+                    self.target_pos.y + current_distance * sin_pitch,
+                    self.target_pos.z + current_distance * cos_pitch * cos_yaw,
                 );
 
                 self.camera.view = Mat4.lookAt(new_eye, self.target_pos, Vec3.UP);
@@ -309,6 +322,24 @@ pub fn update(self: *Self, ctx: *GameApp) !void {
 
     self.is_dragging = in_use;
     if (!in_use) {
+        if (self.is_hovered and !c.ImGuizmo_IsUsingAny()) {
+            if (Editor.inputs.isMouseButtonDown(.Left)) {
+                const mouse_pos = Editor.inputs.mousePos();
+                const ray = screenPosToRay(mouse_pos, self.camera, .{
+                    .x = self.scene_window_rect.x,
+                    .y = self.scene_window_rect.y,
+                    .width = self.scene_view_size.x,
+                    .height = self.scene_view_size.y,
+                });
+                const hits = try self.raycast(ray, 200, ctx.allocator);
+                defer ctx.allocator.free(hits);
+                if (hits.len > 0) {
+                    Editor.instance().selection = .{ .entity = hits[0].entity };
+                } else {
+                    Editor.instance().selection = .{ .none = {} };
+                }
+            }
+        }
         Editor.inputs.setRelativeMouseMode(false);
     }
 
@@ -357,13 +388,145 @@ fn sys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mes
     );
 }
 
+const Raycast = struct {
+    pub const Hit = struct {
+        entity: ecs.Entity,
+        position: Vec3,
+    };
+
+    origin: Vec3,
+    dir: Vec3,
+};
+
+fn raycast(self: *Self, ray: Raycast, distance: f32, allocator: std.mem.Allocator) ![]Raycast.Hit {
+    var intersections = std.ArrayList(Raycast.Hit).init(allocator);
+
+    var iter = self.cast_query.iter();
+    while (iter.next()) {
+        const transforms_ptr = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
+        const meshes_ptr = ecs.field(&iter, components.Mesh, @alignOf(components.Mesh), 1).?;
+        for (iter.inner.entities, meshes_ptr, transforms_ptr) |entity, *mesh, transform| {
+            const bb = mesh.bounds;
+
+            // Transform the ray into the mesh's local space.
+            const inv = transform.value.inverse() catch Mat4.IDENTITY;
+            const local_origin = inv.mulVec3(ray.origin);
+
+            const world_target = ray.origin.add(ray.dir);
+            const local_target = inv.mulVec3(world_target);
+            const local_dir = local_target.sub(local_origin).normalized();
+
+            // Perform ray vs. AABB test in local space.
+            const maybeT = rayAABB(local_origin, local_dir, bb.mins, bb.maxs);
+            if (maybeT) |t_local| {
+                if (t_local >= 0) {
+                    const localHit = local_origin.add(local_dir.mulf(t_local));
+                    const worldHit = transform.value.mulVec3(localHit);
+                    if (ray.origin.distanceTo(worldHit) <= distance) {
+                        try intersections.append(.{ .entity = entity, .position = worldHit });
+                    }
+                }
+            }
+        }
+    }
+
+    const slice = try intersections.toOwnedSlice();
+    std.mem.sort(Raycast.Hit, slice, ray.origin, struct {
+        fn f(org: Vec3, a: Raycast.Hit, b: Raycast.Hit) bool {
+            return std.sort.desc(f32)({}, a.position.distanceTo(org), b.position.distanceTo(org));
+        }
+    }.f);
+    return slice;
+}
+
+/// Ray vs. AABB intersection in local space.
+/// Returns the entry parameter t along the ray (in local space) if the ray intersects the box; otherwise, returns null.
+fn rayAABB(origin: Vec3, dir: Vec3, bb_mins: Vec3, bb_maxs: Vec3) ?f32 {
+    var tmin: f32 = -std.math.inf(f32);
+    var tmax: f32 = std.math.inf(f32);
+
+    // X-axis:
+    if (@abs(dir.x) < 0.00001) {
+        if (origin.x < bb_mins.x or origin.x > bb_maxs.x)
+            return null;
+    } else {
+        const inv = 1.0 / dir.x;
+        const t1 = (bb_mins.x - origin.x) * inv;
+        const t2 = (bb_maxs.x - origin.x) * inv;
+        const t_near = @min(t1, t2);
+        const t_far = @max(t1, t2);
+        if (t_near > tmin) tmin = t_near;
+        if (t_far < tmax) tmax = t_far;
+        if (tmin > tmax)
+            return null;
+    }
+
+    // Y-axis:
+    if (@abs(dir.y) < 0.00001) {
+        if (origin.y < bb_mins.y or origin.y > bb_maxs.y)
+            return null;
+    } else {
+        const inv = 1.0 / dir.y;
+        const t1 = (bb_mins.y - origin.y) * inv;
+        const t2 = (bb_maxs.y - origin.y) * inv;
+        const t_near = @min(t1, t2);
+        const t_far = @max(t1, t2);
+        if (t_near > tmin) tmin = t_near;
+        if (t_far < tmax) tmax = t_far;
+        if (tmin > tmax)
+            return null;
+    }
+
+    // Z-axis:
+    if (@abs(dir.z) < 0.00001) {
+        if (origin.z < bb_mins.z or origin.z > bb_maxs.z)
+            return null;
+    } else {
+        const inv = 1.0 / dir.z;
+        const t1 = (bb_mins.z - origin.z) * inv;
+        const t2 = (bb_maxs.z - origin.z) * inv;
+        const t_near = @min(t1, t2);
+        const t_far = @max(t1, t2);
+        if (t_near > tmin) tmin = t_near;
+        if (t_far < tmax) tmax = t_far;
+        if (tmin > tmax)
+            return null;
+    }
+
+    return tmin;
+}
+
+fn screenPosToRay(mousePos: Vec2, camera: components.Camera, viewport: Rect) Raycast {
+    const ndc_x = ((mousePos.x - viewport.x) / viewport.width) * 2.0 - 1.0;
+    const ndc_y = ((mousePos.y - viewport.y) / viewport.height) * 2.0 - 1.0;
+
+    const ndc_near = Vec4.make(ndc_x, ndc_y, 0.0, 1.0);
+    const ndc_far = Vec4.make(ndc_x, ndc_y, 1.0, 1.0);
+
+    const invVP = camera.view_projection.inverse() catch Mat4.IDENTITY;
+
+    const world_near4 = invVP.mulVec4(ndc_near);
+    const world_far4 = invVP.mulVec4(ndc_far);
+
+    // Perspective divide to get 3D coordinates.
+    const world_near = Vec3.make(world_near4.x / world_near4.w, world_near4.y / world_near4.w, world_near4.z / world_near4.w);
+    const world_far = Vec3.make(world_far4.x / world_far4.w, world_far4.y / world_far4.w, world_far4.z / world_far4.w);
+
+    // The ray origin is the near point; ray direction is from near to far.
+    const dir = world_far.sub(world_near).normalized();
+    return .{ .origin = world_near, .dir = dir };
+}
+
 fn computeOrbitEye(target: Vec3, orbit_angles: Vec2, distance: f32) Vec3 {
     // Spherical coordinate conversion.
-    const cosPitch = std.math.cos(orbit_angles.x);
-    const sinPitch = std.math.sin(orbit_angles.x);
-    const cosYaw = std.math.cos(orbit_angles.y);
-    const sinYaw = std.math.sin(orbit_angles.y);
+    const cos_pitch = std.math.cos(orbit_angles.x);
+    const sin_pitch = std.math.sin(orbit_angles.x);
+    const cos_yaw = std.math.cos(orbit_angles.y);
+    const sin_yaw = std.math.sin(orbit_angles.y);
 
-    // Note: Adjust the coordinate computation as needed.
-    return Vec3.make(target.x + distance * cosPitch * sinYaw, target.y + distance * sinPitch, target.z + distance * cosPitch * cosYaw);
+    return Vec3.make(
+        target.x + distance * cos_pitch * sin_yaw,
+        target.y + distance * sin_pitch,
+        target.z + distance * cos_pitch * cos_yaw,
+    );
 }
