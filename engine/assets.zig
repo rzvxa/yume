@@ -306,30 +306,28 @@ pub const Assets = struct {
             .size = @sizeOf(Engine.MeshPushConstants),
         });
 
-        const builtin_uniforms_len = 2;
-        const set_layouts = try instance.allocator.alloc(
-            c.VkDescriptorSetLayout,
-            matparsed.value.resources.len + builtin_uniforms_len,
-        );
-        defer instance.allocator.free(set_layouts);
+        var set_layouts = [3]c.VkDescriptorSetLayout{
+            instance.engine.global_set_layout,
+            instance.engine.object_set_layout,
+            instance.engine.getDescriptorSetLayout(matparsed.value.shader.layouts) catch @panic("Failed to create shader resouces descriptor set layout"),
+        };
         const resources_uuids = try instance.allocator.alloc(Uuid, matparsed.value.resources.len);
-        const resources_sets = try instance.allocator.alloc(c.VkDescriptorSet, matparsed.value.resources.len);
-        set_layouts[0] = instance.engine.global_set_layout;
-        set_layouts[1] = instance.engine.object_set_layout;
+
+        // Allocate descriptor set for shader resources
+        const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
+            .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = instance.engine.descriptor_pool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &set_layouts[2],
+        });
+
+        var resource_set: c.VkDescriptorSet = undefined;
+        check_vk(c.vkAllocateDescriptorSets(instance.engine.device, &descriptor_set_alloc_info, &resource_set)) catch @panic("Failed to allocate descriptor set");
+
         for (matparsed.value.shader.layouts, matparsed.value.resources, 0..) |layout, resource, i| {
             switch (layout) {
                 .texture => {
-                    set_layouts[i + builtin_uniforms_len] = instance.engine.texture_set_layout;
                     resources_uuids[i] = resource.?;
-                    // Allocate descriptor set for signle-texture to use on the material
-                    const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
-                        .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                        .descriptorPool = instance.engine.descriptor_pool,
-                        .descriptorSetCount = 1,
-                        .pSetLayouts = &instance.engine.texture_set_layout,
-                    });
-
-                    check_vk(c.vkAllocateDescriptorSets(instance.engine.device, &descriptor_set_alloc_info, &resources_sets[i])) catch @panic("Failed to allocate descriptor set");
                     const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
                         .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
                         .magFilter = c.VK_FILTER_NEAREST,
@@ -351,8 +349,8 @@ pub const Assets = struct {
 
                     const write_descriptor_set = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
                         .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                        .dstSet = resources_sets[i],
-                        .dstBinding = 0,
+                        .dstSet = resource_set,
+                        .dstBinding = @as(u32, @intCast(i)),
                         .descriptorCount = 1,
                         .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                         .pImageInfo = &descriptor_image_info,
@@ -394,9 +392,9 @@ pub const Assets = struct {
             .pipeline = pipeline,
             .pipeline_layout = pipeline_layout,
 
+            .rsc_count = @intCast(resources_uuids.len),
             .rsc_uuids = resources_uuids.ptr,
-            .rsc_descriptor_sets = resources_sets.ptr,
-            .rsc_count = @intCast(resources_sets.len),
+            .rsc_descriptor_set = resource_set,
         };
 
         const loaded = LoadedAsset{ .data = .{ .material = material } };
@@ -578,7 +576,6 @@ const LoadedAsset = struct {
                 layout_del.delete(Assets.instance.engine);
                 var pipeline_del = Engine.VulkanDeleter.make(it.pipeline, c.vkDestroyPipeline);
                 pipeline_del.delete(Assets.instance.engine);
-                Assets.instance.allocator.free(it.rsc_descriptor_sets[0..@intCast(it.rsc_count)]);
                 Assets.instance.allocator.free(it.rsc_uuids[0..@intCast(it.rsc_count)]);
                 Assets.instance.allocator.destroy(it);
             },
@@ -595,12 +592,8 @@ const ShaderDef = struct {
         vertex: Uuid,
         fragment: Uuid,
     };
-    const SetLayout = enum {
-        texture,
-        cube,
-    };
     passes: Passes,
-    layouts: []SetLayout,
+    layouts: []Engine.UniformBindingKind,
 };
 
 const MaterialDef = struct {

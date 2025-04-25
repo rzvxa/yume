@@ -36,7 +36,9 @@ pub fn init(allocator: std.mem.Allocator) !void {
     {
         try register(.{ .urn = "3e21192b-6c22-4a4f-98ca-a4a43f675986", .path = "materials/default.mat", .category = "builtin" });
         try register(.{ .urn = "e732bb0c-19bb-492b-a79d-24fde85964d2", .path = "materials/none.mat", .category = "builtin" });
+        try register(.{ .urn = "61de2700-0eac-4fd5-9c56-0bd5b6b9ba10", .path = "materials/pbr.mat", .category = "builtin" });
         try register(.{ .urn = "ad4bc22b-3765-4a9d-bab7-7984e101428a", .path = "lost_empire-RGBA.png", .category = "builtin" });
+        try register(.{ .urn = "00923d64-c2ca-4d36-abbd-90b1fbde7a48", .path = "1x1.png", .category = "builtin" });
         try register(.{ .urn = "ac6b9d14-0a56-458a-a7cc-fd36ede79468", .path = "lost_empire.obj", .category = "builtin" });
         try register(.{ .urn = "acc02aef-7ac0-46e7-b006-378c36ac1b27", .path = "u.obj", .category = "builtin" });
         try register(.{ .urn = "17c0ee4b-8fa0-43a7-a3d8-8bf7b5e73bb9", .path = "u.mtl", .category = "builtin" });

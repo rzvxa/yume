@@ -135,6 +135,7 @@ camera_and_scene_buffer: AllocatedBuffer = undefined,
 global_set_layout: c.VkDescriptorSetLayout = null,
 object_set_layout: c.VkDescriptorSetLayout = null,
 texture_set_layout: c.VkDescriptorSetLayout = null,
+shaders_set_layouts: std.AutoHashMap(u32, c.VkDescriptorSetLayout) = undefined,
 descriptor_pool: c.VkDescriptorPool = null,
 
 vma_allocator: c.VmaAllocator = undefined,
@@ -201,6 +202,7 @@ pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
     var engine = Self{
         .window = window,
         .allocator = a,
+        .shaders_set_layouts = std.AutoHashMap(u32, c.VkDescriptorSetLayout).init(a),
         .deletion_queue = std.ArrayList(VulkanDeleter).init(a),
         .buffer_deletion_queue = std.ArrayList(VmaBufferDeleter).init(a),
         .image_deletion_queue = std.ArrayList(VmaImageDeleter).init(a),
@@ -802,7 +804,7 @@ fn initDescriptors(self: *Self) void {
         .binding = 0,
         .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
         .descriptorCount = 1,
-        .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT,
+        .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT,
     });
 
     // Scene param binding
@@ -1014,6 +1016,8 @@ pub fn createShaderModule(self: *Self, code: []const u8) ?c.VkShaderModule {
 
 pub fn deinit(self: *Self) void {
     check_vk(c.vkDeviceWaitIdle(self.device)) catch @panic("Failed to wait for device idle");
+
+    self.shaders_set_layouts.deinit();
 
     for (self.buffer_deletion_queue.items) |*entry| {
         entry.delete(self);
@@ -1303,6 +1307,8 @@ pub fn drawObjects(
     camera_data.* = curr_camera_data;
     const framed = @as(f32, @floatFromInt(self.frame_number)) / 120.0;
     scene_data.ambient_color = Vec3.make(@sin(framed), 0.0, @cos(framed)).toVec4(1);
+    scene_data.exposure = 4.5;
+    scene_data.gamma = 2.2;
 
     c.vmaUnmapMemory(self.vma_allocator, ubo_buf.allocation);
 
@@ -1345,8 +1351,8 @@ pub fn drawObjects(
             c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 1, 1, &currentFrame.object_descriptor_set, 0, null);
         }
 
-        if (material.rsc_count > 0) {
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 2, @intCast(material.rsc_count), material.rsc_descriptor_sets, 0, null);
+        if (material.rsc_descriptor_set != null) {
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 2, 1, &material.rsc_descriptor_set, 0, null);
         }
 
         const push_constants = MeshPushConstants{
@@ -1363,18 +1369,6 @@ pub fn drawObjects(
         // we add batch_offset to the instance index.
         c.vkCmdDraw(cmd, @as(u32, @intCast(mesh.vertices_count)), 1, 0, @intCast(batch_offset + index));
     }
-}
-
-fn createMaterial(self: *Self, pipeline: c.VkPipeline, pipeline_layout: c.VkPipelineLayout, name: []const u8) *Material {
-    self.materials.put(name, Material{
-        .pipeline = pipeline,
-        .pipeline_layout = pipeline_layout,
-    }) catch @panic("Out of memory");
-    return self.materials.getPtr(name) orelse unreachable;
-}
-
-fn getMaterial(self: *Self, name: []const u8) ?*Material {
-    return self.material.getPtr(name);
 }
 
 pub fn createBuffer(self: *Self, alloc_size: usize, usage: c.VkBufferUsageFlags, memory_usage: c.VmaMemoryUsage) AllocatedBuffer {
@@ -1467,4 +1461,54 @@ pub fn immediateSubmit(self: *Self, submit_ctx: anytype) void {
     check_vk(c.vkResetFences(self.device, 1, &self.upload_context.upload_fence)) catch @panic("Failed to reset upload fence");
 
     check_vk(c.vkResetCommandPool(self.device, self.upload_context.command_pool, 0)) catch @panic("Failed to reset command pool");
+}
+
+pub fn getDescriptorSetLayout(self: *Self, layout: []const UniformBindingKind) !c.VkDescriptorSetLayout {
+    const pattern = uniformBindingLayoutHash(layout);
+    const entry = try self.shaders_set_layouts.getOrPut(pattern);
+    if (entry.found_existing) {
+        return entry.value_ptr.*;
+    }
+
+    const bindings = try self.allocator.alloc(c.VkDescriptorSetLayoutBinding, layout.len);
+    defer self.allocator.free(bindings);
+
+    for (layout, 0..) |binding, i| {
+        bindings[i] = switch (binding) {
+            .texture => std.mem.zeroInit(c.VkDescriptorSetLayoutBinding, .{
+                .binding = @as(u32, @intCast(i)),
+                .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .descriptorCount = 1,
+                .stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT,
+            }),
+            .cube => @panic("TODO"),
+        };
+    }
+
+    const set_ci = std.mem.zeroInit(c.VkDescriptorSetLayoutCreateInfo, .{
+        .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = @as(u32, @intCast(bindings.len)),
+        .pBindings = bindings.ptr,
+    });
+
+    check_vk(c.vkCreateDescriptorSetLayout(self.device, &set_ci, vk_alloc_cbs, entry.value_ptr)) catch @panic("Failed to create texture descriptor set layout");
+
+    self.deletion_queue.append(VulkanDeleter.make(entry.value_ptr.*, c.vkDestroyDescriptorSetLayout)) catch @panic("Out of memory");
+    return entry.value_ptr.*;
+}
+
+pub const UniformBindingKind = enum {
+    texture,
+    cube,
+};
+
+pub fn uniformBindingLayoutHash(layout: []const UniformBindingKind) u32 {
+    var hash: u32 = 0;
+    const prime: u32 = 31;
+
+    for (layout) |binding| {
+        hash = hash * prime + @intFromEnum(binding);
+    }
+
+    return hash;
 }

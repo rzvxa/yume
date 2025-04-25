@@ -13,9 +13,9 @@ pub const Material = extern struct {
     pipeline: c.VkPipeline,
     pipeline_layout: c.VkPipelineLayout,
 
-    rsc_uuids: [*c]Uuid,
-    rsc_descriptor_sets: [*c]c.VkDescriptorSet,
     rsc_count: u8,
+    rsc_uuids: [*c]Uuid,
+    rsc_descriptor_set: c.VkDescriptorSet,
 
     pub fn editorIcon() [*:0]const u8 {
         return "editor://icons/material.png";

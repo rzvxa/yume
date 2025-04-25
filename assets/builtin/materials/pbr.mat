@@ -1,31 +1,23 @@
 {
-  "name": "Default Material",
+  "name": "PBR Material",
   "shader": {
     "passes": {
       "vertex": "cf64bfc9-703c-43b0-9d01-c8032706872c",
-      "fragment": "9939ab1b-d72c-4463-b039-58211f2d6531"
+      "fragment": "79d1e1cc-607d-491c-b2e8-d1d3a44bd6a4"
     },
     "layouts": [
-      "cube",
-      "texture",
-      "cube",
-
       "texture",
       "texture",
       "texture",
       "texture",
       "texture"
     ]
-  }
+  },
   "resources": [
-    null,
-    null,
-    null,
-
-    null,
-    null,
-    null,
-    null,
-    null
+    "00923d64-c2ca-4d36-abbd-90b1fbde7a48",
+    "00923d64-c2ca-4d36-abbd-90b1fbde7a48",
+    "00923d64-c2ca-4d36-abbd-90b1fbde7a48",
+    "00923d64-c2ca-4d36-abbd-90b1fbde7a48",
+    "00923d64-c2ca-4d36-abbd-90b1fbde7a48"
   ]
 }

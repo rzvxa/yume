@@ -20,15 +20,11 @@ layout(set = 0, binding = 1) uniform UniformBufferSceneObject {
 	float gamma;
 } scene_data;
 
-layout (binding = 2) uniform samplerCube samplerIrradiance;
-layout (binding = 3) uniform sampler2D samplerBRDFLUT;
-layout (binding = 4) uniform samplerCube prefilteredMap;
-
-layout (binding = 5) uniform sampler2D albedoMap;
-layout (binding = 6) uniform sampler2D normalMap;
-layout (binding = 7) uniform sampler2D aoMap;
-layout (binding = 8) uniform sampler2D metallicMap;
-layout (binding = 9) uniform sampler2D roughnessMap;
+layout (set = 2, binding = 0) uniform sampler2D albedoMap;
+layout (set = 2, binding = 1) uniform sampler2D normalMap;
+layout (set = 2, binding = 2) uniform sampler2D aoMap;
+layout (set = 2, binding = 3) uniform sampler2D metallicMap;
+layout (set = 2, binding = 4) uniform sampler2D roughnessMap;
 
 
 layout (location = 0) out vec4 frag_color;
@@ -70,16 +66,6 @@ vec3 F_Schlick(float cosTheta, vec3 F0) {
 }
 vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness) {
 	return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
-}
-
-vec3 prefilteredReflection(vec3 R, float roughness) {
-	const float MAX_REFLECTION_LOD = 9.0; // todo: param/const
-	float lod = roughness * MAX_REFLECTION_LOD;
-	float lodf = floor(lod);
-	float lodc = ceil(lod);
-	vec3 a = textureLod(prefilteredMap, R, lodf).rgb;
-	vec3 b = textureLod(prefilteredMap, R, lodc).rgb;
-	return mix(a, b, lod - lodf);
 }
 
 vec3 specularContribution(vec3 L, vec3 V, vec3 N, vec3 F0, float metallic, float roughness) {
@@ -126,7 +112,8 @@ void main() {
 	vec3 R = reflect(-V, N);
 
 	float metallic = texture(metallicMap, in_uv).r;
-	float roughness = texture(roughnessMap, in_uv).r;
+	// float roughness = texture(roughnessMap, in_uv).r;
+	float roughness = 0;
 
 	vec3 F0 = vec3(0.04);
 	F0 = mix(F0, ALBEDO, metallic);
@@ -137,17 +124,12 @@ void main() {
 		Lo += specularContribution(L, V, N, F0, metallic, roughness);
 	}
 
-	vec2 brdf = texture(samplerBRDFLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
-	vec3 reflection = prefilteredReflection(R, roughness).rgb;
-	vec3 irradiance = texture(samplerIrradiance, N).rgb;
 
-	// Diffuse based on irradiance
-	vec3 diffuse = irradiance * ALBEDO;
+	vec3 diffuse = ALBEDO;
 
 	vec3 F = F_SchlickR(max(dot(N, V), 0.0), F0, roughness);
 
-	// Specular reflectance
-	vec3 specular = reflection * (F * brdf.x + brdf.y);
+	vec3 specular = 1 * F;
 
 	// Ambient part
 	vec3 kD = 1.0 - F;
