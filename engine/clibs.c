@@ -14,4 +14,6 @@
 
 #include "flecs.h"
 
+
+#define UFBX_CONFIG_HEADER "ufbx_cfg.h"
 #include "ufbx.h"

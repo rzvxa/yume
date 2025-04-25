@@ -20,6 +20,7 @@ const FrameData = struct {
     cmd: GameApp.RenderCommand,
     d: *Self,
     camera: ?*const components.Camera = null,
+    camera_pos: Vec3 = Vec3.ZERO,
 };
 
 const Self = @This();
@@ -99,6 +100,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                         camera.updateMatrices(decomposed.translation, decomposed.rotation.toEuler(), aspect);
                         var new_me = me.*;
                         new_me.camera = camera;
+                        new_me.camera_pos = transform.position();
                         _ = c.ecs_run(iter.inner.real_world, me.d.render_system, me.app.delta, &new_me);
                     }
                 }
@@ -135,5 +137,6 @@ fn renderSys(it: *ecs.Iter, matrices: []components.Transform, meshes: []componen
         me.app.engine.camera_and_scene_buffer,
         me.app.engine.camera_and_scene_set,
         me.camera.?,
+        me.camera_pos,
     );
 }

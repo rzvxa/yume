@@ -10,16 +10,19 @@ const Uuid = @import("../uuid.zig").Uuid;
 
 pub const Material = extern struct {
     uuid: Uuid,
-    texture_set: c.VkDescriptorSet = null,
     pipeline: c.VkPipeline,
     pipeline_layout: c.VkPipelineLayout,
+
+    rsc_uuids: [*c]Uuid,
+    rsc_descriptor_sets: [*c]c.VkDescriptorSet,
+    rsc_count: u8,
 
     pub fn editorIcon() [*:0]const u8 {
         return "editor://icons/material.png";
     }
 
     pub fn default(ptr: *Material, _: ecs.Entity, _: *GameApp, rr: ecs.ResourceResolver) callconv(.C) bool {
-        const mat = rr("builtin://materials/none.mat");
+        const mat = rr("builtin://materials/default.mat");
         if (!mat.found) {
             return false;
         }

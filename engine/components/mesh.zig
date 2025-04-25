@@ -15,6 +15,7 @@ const obj_loader = @import("../obj_loader.zig");
 
 const Vec2 = m3d.Vec2;
 const Vec3 = m3d.Vec3;
+const Vec4 = m3d.Vec4;
 const Mat4 = m3d.Mat4;
 
 pub const VertexInputDescription = struct {
@@ -27,7 +28,8 @@ pub const VertexInputDescription = struct {
 pub const Vertex = extern struct {
     position: Vec3,
     normal: Vec3,
-    color: Vec3,
+    tangent: Vec4,
+    color: Vec4,
     uv: Vec2,
 
     pub const vertex_input_description = VertexInputDescription{
@@ -54,11 +56,17 @@ pub const Vertex = extern struct {
             std.mem.zeroInit(c.VkVertexInputAttributeDescription, .{
                 .location = 2,
                 .binding = 0,
-                .format = c.VK_FORMAT_R32G32B32_SFLOAT,
-                .offset = @offsetOf(Vertex, "color"),
+                .format = c.VK_FORMAT_R32G32B32A32_SFLOAT,
+                .offset = @offsetOf(Vertex, "tangent"),
             }),
             std.mem.zeroInit(c.VkVertexInputAttributeDescription, .{
                 .location = 3,
+                .binding = 0,
+                .format = c.VK_FORMAT_R32G32B32A32_SFLOAT,
+                .offset = @offsetOf(Vertex, "color"),
+            }),
+            std.mem.zeroInit(c.VkVertexInputAttributeDescription, .{
+                .location = 4,
                 .binding = 0,
                 .format = c.VK_FORMAT_R32G32_SFLOAT,
                 .offset = @offsetOf(Vertex, "uv"),
@@ -207,92 +215,94 @@ pub fn load_from_obj(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
     };
 }
 
-pub fn load_from_obj2(a: std.mem.Allocator, filepath: []const u8) Mesh {
+pub fn load_from_obj2(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
     var err: c.ufbx_error = std.mem.zeroes(c.ufbx_error);
-    const scene = c.ufbx_load_file(filepath.ptr, &.{}, &err);
+    const scene = c.ufbx_load_memory(buffer.ptr, buffer.len, &.{}, &err);
     if (scene == null) {
-        std.log.err("Failed to load obj file: {s}", .{err.description.data});
+        std.log.err("Failed to load obj: {s}", .{err.description.data});
         unreachable;
     }
     defer c.ufbx_free_scene(scene);
 
+    var vb = struct {
+        vertices: std.ArrayList(Vertex),
+        bounds: BoundingBox,
+
+        fn builder(a: std.mem.Allocator) @This() {
+            return .{
+                .vertices = std.ArrayList(Vertex).init(a),
+                .bounds = .{
+                    .mins = Vec3.scalar(std.math.floatMax(f32)),
+                    .maxs = Vec3.scalar(std.math.floatMin(f32)),
+                },
+            };
+        }
+
+        fn append(self: *@This(), vert: Vertex) void {
+            self.bounds.accumulate(vert.position);
+            self.vertices.append(vert) catch @panic("OOM");
+        }
+    }.builder(allocator);
+
     log.debug("{any}", .{scene});
-    // var vertices = std.ArrayList(Vertex).init(a);
+    std.debug.assert(scene.*.root_node.*.children.count == 1);
     for (scene.*.root_node.*.children.data[0..scene.*.root_node.*.children.count]) |*node| {
         log.debug("Object: {s}\n", .{node.*.*.attrib.*.name.data});
         const mesh = node.*.*.mesh;
-        if (mesh == null) {
-            continue;
-        }
+
+        const num_tri_indices = mesh.*.max_face_triangles * 3;
+        const tri_indices = allocator.alloc(u32, num_tri_indices) catch @panic("OOM");
+        defer allocator.free(tri_indices);
+        std.debug.assert(mesh != null);
         log.debug("-> mesh with {} faces\n-> materials {}\n", .{ mesh.*.faces.count, mesh.*.face_groups.count });
+        for (mesh.*.faces.data[0..mesh.*.faces.count]) |face| {
+            if (face.num_indices < 3) {
+                @panic("Face has fewer than 3 vertices. Not a valid polygon.");
+            }
+            const num_tries = c.ufbx_triangulate_face(tri_indices.ptr, num_tri_indices, mesh, face);
+
+            for (0..num_tries * 3) |vi| {
+                const index = tri_indices[vi];
+                std.debug.assert(mesh.*.vertex_position.exists);
+                const position = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_position, index).unnamed_0.v);
+                std.debug.assert(mesh.*.vertex_normal.exists);
+                const normal = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_normal, index).unnamed_0.v);
+                const tangent = blk: {
+                    if (mesh.*.vertex_tangent.exists) {
+                        std.debug.assert(mesh.*.vertex_bitangent.exists);
+                        const bitangent = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_bitangent, index).unnamed_0.v);
+                        const tangent = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_tangent, index).unnamed_0.v);
+                        const handedness: f32 = if (normal.cross(tangent).dot(bitangent) < 0.0) -1.0 else 1.0;
+                        break :blk tangent.toVec4(handedness);
+                    } else {
+                        break :blk Vec4.ZERO;
+                    }
+                };
+
+                const color = if (mesh.*.vertex_color.exists)
+                    Vec4.fromArray(c.ufbx_get_vertex_vec4(&mesh.*.vertex_color, index).unnamed_0.v)
+                else
+                    Vec4.scalar(1);
+                const uv = if (mesh.*.vertex_uv.exists)
+                    Vec2.fromArray(c.ufbx_get_vertex_vec2(&mesh.*.vertex_uv, index).unnamed_0.v)
+                else
+                    Vec2.ZERO;
+
+                vb.append(.{
+                    .position = position,
+                    .normal = normal,
+                    .tangent = tangent,
+                    .color = color,
+                    .uv = uv,
+                });
+            }
+        }
     }
 
-    // for (uint32_t face_index : part->face_indices) {
-    //     ufbx_face face = mesh->faces[face_index];
-    //
-    //     // Triangulate the face into `tri_indices[]`.
-    //     uint32_t num_tris = ufbx_triangulate_face(
-    //         tri_indices.data(), tri_indices.size(), mesh, face);
-    //
-    //     // Iterate over each triangle corner contiguously.
-    //     for (size_t i = 0; i < num_tris * 3; i++) {
-    //         uint32_t index = tri_indices[i];
-    //
-    //         Vertex v;
-    //         v.position = mesh->vertex_position[index];
-    //         v.normal = mesh->vertex_normal[index];
-    //         v.uv = mesh->vertex_uv[index];
-    //         vertices.push_back(v);
-    //     }
-    // }
-    //     for (mesh.*.faces.data[0..mesh.*.faces.count]) |face| {
-    //         vertices
-    //         vertices.append(.{
-    //             .position = vert.unnamed_0.v,
-    //             .normal = ,
-    //         });
-    //     }
-    // }
-    // var vertices = std.ArrayList(Vertex).init(a);
-    //
-    // for (obj_mesh.objects) |object| {
-    //     var index_count: usize = 0;
-    //     for (object.face_vertices) |face_vx_count| {
-    //         if (face_vx_count < 3) {
-    //             @panic("Face has fewer than 3 vertices. Not a valid polygon.");
-    //         }
-    //
-    //         for (0..face_vx_count) |vx_index| {
-    //             const obj_index = object.indices[index_count];
-    //             const pos = obj_mesh.vertices[obj_index.vertex];
-    //             const nml = obj_mesh.normals[obj_index.normal];
-    //             const uvs = obj_mesh.uvs[obj_index.uv];
-    //
-    //             const vx = Vertex{
-    //                 .position = Vec3.make(pos[0], pos[1], pos[2]),
-    //                 .normal = Vec3.make(nml[0], nml[1], nml[2]),
-    //                 .color = Vec3.make(nml[0], nml[1], nml[2]),
-    //                 .uv = Vec2.make(uvs[0], 1.0 - uvs[1]),
-    //             };
-    //
-    //             // Triangulate the polygon
-    //             if (vx_index > 2) {
-    //                 const v0 = vertices.items[vertices.items.len - 3];
-    //                 const v1 = vertices.items[vertices.items.len - 1];
-    //                 vertices.append(v0) catch @panic("OOM");
-    //                 vertices.append(v1) catch @panic("OOM");
-    //             }
-    //
-    //             vertices.append(vx) catch @panic("OOM");
-    //
-    //             index_count += 1;
-    //         }
-    //     }
-    // }
-
-    return load_from_obj(a, filepath);
-
-    // return Mesh{
-    //     .vertices = vertices.toOwnedSlice() catch @panic("Failed to make owned slice"),
-    // };
+    return Mesh{
+        .uuid = Uuid.new(),
+        .vertices_count = vb.vertices.items.len,
+        .vertices = (vb.vertices.toOwnedSlice() catch @panic("Failed to make owned slice")).ptr,
+        .bounds = vb.bounds,
+    };
 }

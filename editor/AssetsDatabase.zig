@@ -45,6 +45,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
     {
         try registerBuiltinShader("cf64bfc9-703c-43b0-9d01-c8032706872c", "tri_mesh.vert.glsl");
+        try registerBuiltinShader("79d1e1cc-607d-491c-b2e8-d1d3a44bd6a4", "pbr.frag.glsl");
         try registerBuiltinShader("8b4db7d0-33a6-4f42-96cc-7b1d88566f27", "default_lit.frag.glsl");
         try registerBuiltinShader("9939ab1b-d72c-4463-b039-58211f2d6531", "textured_lit.frag.glsl");
     }

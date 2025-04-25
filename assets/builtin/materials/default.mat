@@ -1,8 +1,11 @@
 {
   "name": "Default Material",
-  "passes": {
-    "vertex": "cf64bfc9-703c-43b0-9d01-c8032706872c",
-    "fragment": "9939ab1b-d72c-4463-b039-58211f2d6531"
+  "shader": {
+    "passes": {
+      "vertex": "cf64bfc9-703c-43b0-9d01-c8032706872c",
+      "fragment": "9939ab1b-d72c-4463-b039-58211f2d6531"
+    },
+    "layouts": ["texture"]
   },
-  "set_layouts": ["global", "object", "single_texture"]
+  "resources": ["ad4bc22b-3765-4a9d-bab7-7984e101428a"]
 }

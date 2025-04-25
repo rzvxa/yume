@@ -34,6 +34,7 @@ pub fn build(b: *std.Build) !void {
     });
     ufbx_lib.addIncludePath(b.path("vendor/ufbx/"));
     ufbx_lib.linkLibC();
+    ufbx_lib.root_module.addCMacro("UFBX_CONFIG_HEADER", "\"ufbx_cfg.h\"");
     ufbx_lib.addCSourceFiles(.{
         .files = &.{
             "vendor/ufbx/ufbx.c",
@@ -161,7 +162,6 @@ pub fn build(b: *std.Build) !void {
     });
     imguizmo_lib.addIncludePath(b.path("vendor/imgui/"));
     imguizmo_lib.addIncludePath(b.path("vendor/imguizmo/"));
-    // imguizmo_lib.root_module.addCMacro("CIMGUI_DEFINE_ENUMS_AND_STRUCTS", "1");
     imguizmo_lib.linkLibCpp();
     imguizmo_lib.addCSourceFiles(.{
         .files = &.{
@@ -173,7 +173,6 @@ pub fn build(b: *std.Build) !void {
             "vendor/imguizmo/cimguizmo.cpp",
         },
     });
-    // imguizmo_lib.linkLibrary(imgui_lib);
 
     editor.linkLibrary(imguizmo_lib);
 
@@ -248,6 +247,7 @@ fn build_shader(b: *std.Build, installdir: std.Build.InstallDir, src: []const u8
     const shader_compilation = b.addSystemCommand(&.{"glslangValidator"});
     shader_compilation.addArg("-V");
     shader_compilation.addArg("-o");
+    shader_compilation.stdio = .inherit;
     const output = shader_compilation.addOutputFileArg(out);
     shader_compilation.addFileArg(b.path(src));
 

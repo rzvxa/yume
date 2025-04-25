@@ -34,6 +34,7 @@ camera: components.Camera = components.Camera.makePerspectiveCamera(.{
     .near = 0.1,
 }),
 
+camera_pos: Vec3 = Vec3.ZERO,
 target_pos: Vec3 = Vec3.ZERO,
 distance: f32 = default_cam_distance,
 
@@ -233,6 +234,7 @@ pub fn update(self: *Self, ctx: *GameApp) !void {
 
     const inversed = self.camera.view.inverse() catch Mat4.IDENTITY;
     var decomposed = inversed.decompose() catch Mat4.Decomposed.IDENTITY;
+    self.camera_pos = decomposed.translation;
     const basis = decomposed.rotation.toBasisVectors();
 
     const left = basis.right.mulf(-1);
@@ -272,11 +274,9 @@ pub fn update(self: *Self, ctx: *GameApp) !void {
                 const orbit_delta = Editor.inputs.mouseRelative();
                 const sensitivity: f32 = 0.005;
 
-                const camera_pos = decomposed.translation;
+                self.target_pos = self.camera_pos.add(forward.mulf(self.distance));
 
-                self.target_pos = camera_pos.add(forward.mulf(self.distance));
-
-                const offset = camera_pos.sub(self.target_pos);
+                const offset = self.camera_pos.sub(self.target_pos);
                 const current_distance = offset.len();
                 const current_pitch = std.math.asin(offset.y / current_distance);
                 const current_yaw = std.math.atan2(offset.x, offset.z);
@@ -385,6 +385,7 @@ fn sys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mes
         me.d.editor_camera_and_scene_buffer,
         me.d.editor_camera_and_scene_set,
         &me.d.camera,
+        me.d.camera_pos,
     );
 }
 

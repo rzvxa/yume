@@ -260,8 +260,9 @@ pub const MouseButton = enum {
     Right,
 };
 
-pub const KeyState = enum(u1) {
+pub const KeyState = enum(u2) {
     Up,
+    Pressed,
     Down,
 };
 
@@ -287,7 +288,8 @@ pub const InputContext = struct {
     pub fn push(self: *Self, e: *c.SDL_Event) void {
         switch (e.type) {
             c.SDL_EVENT_KEY_DOWN => {
-                self.by_scancode[e.key.scancode] = KeyState.Down;
+                self.by_scancode[e.key.scancode] =
+                    if (self.by_scancode[e.key.scancode] == KeyState.Up) KeyState.Pressed else KeyState.Down;
             },
             c.SDL_EVENT_KEY_UP => {
                 self.by_scancode[e.key.scancode] = KeyState.Up;
@@ -302,7 +304,9 @@ pub const InputContext = struct {
                     c.SDL_BUTTON_RIGHT => 2,
                     else => return,
                 };
-                self.by_mouse_button[button_idx] = KeyState.Down;
+
+                self.by_mouse_button[button_idx] =
+                    if (self.by_mouse_button[button_idx] == KeyState.Up) KeyState.Pressed else KeyState.Down;
             },
             c.SDL_EVENT_MOUSE_BUTTON_UP => {
                 const button_idx: usize = switch (e.button.button) {
@@ -327,7 +331,14 @@ pub const InputContext = struct {
     }
 
     pub inline fn isKeyDown(self: *Self, scancode: ScanCode) bool {
-        return self.stateOf(scancode) == KeyState.Down;
+        return switch (self.stateOf(scancode)) {
+            .Down, .Pressed => true,
+            else => false,
+        };
+    }
+
+    pub inline fn inKeyPressed(self: *Self, scancode: ScanCode) bool {
+        return self.stateOf(scancode) == .Pressed;
     }
 
     pub inline fn isMouseButtonDown(self: *Self, button: MouseButton) bool {
@@ -336,7 +347,19 @@ pub const InputContext = struct {
             MouseButton.Middle => 1,
             MouseButton.Right => 2,
         };
-        return self.by_mouse_button[button_idx] == KeyState.Down;
+        return switch (self.by_mouse_button[button_idx]) {
+            .Down, .Pressed => true,
+            else => false,
+        };
+    }
+
+    pub inline fn isMouseButtonPressed(self: *Self, button: MouseButton) bool {
+        const button_idx = switch (button) {
+            MouseButton.Left => 0,
+            MouseButton.Middle => 1,
+            MouseButton.Right => 2,
+        };
+        return self.by_mouse_button[button_idx] == KeyState.Pressed;
     }
 
     pub inline fn mouseWheel(self: *Self) Vec2 {

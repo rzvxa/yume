@@ -43,7 +43,7 @@ pub const AllocatedImage = extern struct {
     allocation: c.VmaAllocation,
 };
 
-const FrameData = struct {
+const FrameData = extern struct {
     present_semaphore: c.VkSemaphore = null,
     render_semaphore: c.VkSemaphore = null,
     render_fence: c.VkFence = null,
@@ -54,26 +54,23 @@ const FrameData = struct {
     object_descriptor_set: c.VkDescriptorSet = null,
 };
 
-pub const GPUCameraData = struct {
-    view: Mat4,
-    proj: Mat4,
+pub const GPUCameraData = extern struct {
     view_proj: Mat4,
+    pos: Vec3,
 
-    fn fromCamera(cam: *const Camera) GPUCameraData {
+    fn fromCamera(cam: *const Camera, pos: Vec3) GPUCameraData {
         return GPUCameraData{
-            .view = cam.view,
-            .proj = cam.projection,
             .view_proj = cam.view_projection,
+            .pos = pos,
         };
     }
 };
 
-pub const GPUSceneData = struct {
-    fog_color: Vec4,
-    fog_distance: Vec4, // x = start, y = end
+pub const GPUSceneData = extern struct {
+    lights: [4]Vec4,
     ambient_color: Vec4,
-    sunlight_dir: Vec4,
-    sunlight_color: Vec4,
+    exposure: f32,
+    gamma: f32,
 };
 
 const GPUObjectData = struct {
@@ -137,7 +134,7 @@ camera_and_scene_buffer: AllocatedBuffer = undefined,
 
 global_set_layout: c.VkDescriptorSetLayout = null,
 object_set_layout: c.VkDescriptorSetLayout = null,
-single_texture_set_layout: c.VkDescriptorSetLayout = null,
+texture_set_layout: c.VkDescriptorSetLayout = null,
 descriptor_pool: c.VkDescriptorPool = null,
 
 vma_allocator: c.VmaAllocator = undefined,
@@ -148,8 +145,7 @@ image_deletion_queue: std.ArrayList(VmaImageDeleter) = undefined,
 
 current_image_idx: u32 = 0,
 
-pub const MeshPushConstants = struct {
-    data: Vec4,
+pub const MeshPushConstants = extern struct {
     render_matrix: Mat4,
 };
 
@@ -931,9 +927,9 @@ fn initDescriptors(self: *Self) void {
         .pBindings = &texture_bind,
     });
 
-    check_vk(c.vkCreateDescriptorSetLayout(self.device, &texture_set_ci, vk_alloc_cbs, &self.single_texture_set_layout)) catch @panic("Failed to create texture descriptor set layout");
+    check_vk(c.vkCreateDescriptorSetLayout(self.device, &texture_set_ci, vk_alloc_cbs, &self.texture_set_layout)) catch @panic("Failed to create texture descriptor set layout");
 
-    self.deletion_queue.append(VulkanDeleter.make(self.single_texture_set_layout, c.vkDestroyDescriptorSetLayout)) catch @panic("Out of memory");
+    self.deletion_queue.append(VulkanDeleter.make(self.texture_set_layout, c.vkDestroyDescriptorSetLayout)) catch @panic("Out of memory");
 
     for (0..FRAME_OVERLAP) |i| {
         // ======================================================================
@@ -1286,9 +1282,10 @@ pub fn drawObjects(
     ubo_buf: AllocatedBuffer,
     ubo_set: c.VkDescriptorSet,
     cam: *const Camera,
+    cam_pos: Vec3,
 ) void {
     // ----- Camera & Scene Data Setup -----
-    const curr_camera_data = GPUCameraData.fromCamera(cam);
+    const curr_camera_data = GPUCameraData.fromCamera(cam, cam_pos);
     const frame_index: usize = @intCast(@mod(self.frame_number, FRAME_OVERLAP));
 
     const padded_camera_data_size = self.padUniformBufferSize(@sizeOf(GPUCameraData));
@@ -1348,12 +1345,11 @@ pub fn drawObjects(
             c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 1, 1, &currentFrame.object_descriptor_set, 0, null);
         }
 
-        if (material.texture_set != null) {
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 2, 1, &material.texture_set, 0, null);
+        if (material.rsc_count > 0) {
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 2, @intCast(material.rsc_count), material.rsc_descriptor_sets, 0, null);
         }
 
         const push_constants = MeshPushConstants{
-            .data = Vec4.ZERO,
             .render_matrix = matrix.value,
         };
 

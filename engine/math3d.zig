@@ -41,6 +41,14 @@ pub const Vec2 = extern struct {
     pub inline fn toVec3(self: Vec2, z: f32) Vec3 {
         return .{ .x = self.x, .y = self.y, .z = z };
     }
+
+    pub inline fn fromArray(xy: [2]f32) Self {
+        return @as(*const Self, @ptrCast(&xy)).*;
+    }
+
+    pub inline fn toArray(self: Self) [2]f32 {
+        return @as(*const [2]f32, @ptrCast(&self)).*;
+    }
 };
 
 pub const Vec3 = extern struct {
@@ -261,6 +269,14 @@ pub const Vec4 = extern struct {
 
     pub fn toVec3(self: Self) Vec3 {
         return Vec3.make(self.x, self.y, self.z);
+    }
+
+    pub inline fn fromArray(xyzw: [4]f32) Self {
+        return @as(*const Self, @ptrCast(&xyzw)).*;
+    }
+
+    pub inline fn toArray(self: Self) [4]f32 {
+        return @as(*const [4]f32, @ptrCast(&self)).*;
     }
 
     pub inline fn dot(a: Self, b: Self) f32 {
