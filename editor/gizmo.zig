@@ -103,10 +103,63 @@ pub fn editTransform(matrix: *Mat4, tool: ManipulationTool) !bool {
     return result;
 }
 
+// Converts a 3D point into NDC, without clamping the x/y values.
+fn toNdcPoint(vec: Vec3) ?Vec2 {
+    const ndc = context.view_projection.mulVec3(vec);
+
+    if (ndc.z > 1 or ndc.z < -1) return null;
+    return Vec2{ .x = ndc.x, .y = ndc.y };
+}
+
+// Liang–Barsky line clipping on a line in NDC coordinates.
+fn clipLine(a: Vec2, b: Vec2) ?[2]Vec2 {
+    var t0: f32 = 0.0;
+    var t1: f32 = 1.0;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+
+    // We'll define the clip boundaries: left=-1, right=1, bottom=-1, top=1.
+    // Each call adjusts t0 and t1 based on one boundary.
+    if (!clipBoundary(-dx, a.x + 1, &t0, &t1)) return null; // Left boundary
+    if (!clipBoundary(dx, 1 - a.x, &t0, &t1)) return null; // Right boundary
+    if (!clipBoundary(-dy, a.y + 1, &t0, &t1)) return null; // Bottom boundary
+    if (!clipBoundary(dy, 1 - a.y, &t0, &t1)) return null; // Top boundary
+
+    if (t0 > t1) return null; // No visible segment.
+
+    const newA = Vec2{ .x = a.x + t0 * dx, .y = a.y + t0 * dy };
+    const newB = Vec2{ .x = a.x + t1 * dx, .y = a.y + t1 * dy };
+    return [2]Vec2{ newA, newB };
+}
+
+// Liang–Barsky
+fn clipBoundary(p: f32, q: f32, t0: *f32, t1: *f32) bool {
+    if (p == 0) {
+        // Line is parallel to this clipping boundary
+        if (q < 0) return false; // Outside
+    } else {
+        const r = q / p;
+        if (p < 0) {
+            if (r > t1.*) return false;
+            if (r > t0.*) t0.* = r;
+        } else {
+            if (r < t0.*) return false;
+            if (r < t1.*) t1.* = r;
+        }
+    }
+    return true;
+}
+
+fn ndcToScreen(ndc: Vec2) c.ImVec2 {
+    return c.ImVec2{
+        .x = (ndc.x + 1) * 0.5 * context.viewport.width + context.viewport.x,
+        .y = (ndc.y + 1) * 0.5 * context.viewport.height + context.viewport.y,
+    };
+}
+
 pub fn drawBoundingBox(bounds: BoundingBox, transform: Mat4) DrawError!void {
     try drawSanityCheck(&context);
 
-    // Define the eight corner points in local space.
     const localPoints = [8]Vec3{
         Vec3{ .x = bounds.mins.x, .y = bounds.mins.y, .z = bounds.mins.z },
         Vec3{ .x = bounds.maxs.x, .y = bounds.mins.y, .z = bounds.mins.z },
@@ -118,13 +171,11 @@ pub fn drawBoundingBox(bounds: BoundingBox, transform: Mat4) DrawError!void {
         Vec3{ .x = bounds.maxs.x, .y = bounds.maxs.y, .z = bounds.maxs.z },
     };
 
-    // Transform the local points to world space.
     var worldPoints: [8]Vec3 = undefined;
     for (localPoints, 0..) |pt, i| {
         worldPoints[i] = transform.mulVec3(pt);
     }
 
-    // Define edges using the world-space points.
     const edges = [_][2]Vec3{
         .{ worldPoints[0], worldPoints[1] },
         .{ worldPoints[0], worldPoints[2] },
@@ -140,46 +191,23 @@ pub fn drawBoundingBox(bounds: BoundingBox, transform: Mat4) DrawError!void {
         .{ worldPoints[6], worldPoints[7] },
     };
 
-    // Convert the world points to screen-space and draw the edges.
     for (edges) |edge| {
-        const a = toScreenPoint(edge[0]);
-        const b = toScreenPoint(edge[1]);
-        // Don't draw if either point is offscreen.
-        if (a == null or b == null) {
-            continue;
-        }
-        c.ImDrawList_AddLine(context.drawlist, a.?, b.?, red());
+        const ndc_a_opt = toNdcPoint(edge[0]);
+        const ndc_b_opt = toNdcPoint(edge[1]);
+        if (ndc_a_opt == null or ndc_b_opt == null) continue;
+
+        const ndc_a = ndc_a_opt.?;
+        const ndc_b = ndc_b_opt.?;
+
+        const clippedOpt = clipLine(ndc_a, ndc_b);
+        if (clippedOpt == null) continue;
+        const clippedLine = clippedOpt.?;
+
+        const screen_a = ndcToScreen(clippedLine[0]);
+        const screen_b = ndcToScreen(clippedLine[1]);
+
+        c.ImDrawList_AddLine(context.drawlist, screen_a, screen_b, red());
     }
-}
-
-fn toScreenPoint(vec: Vec3) ?c.ImVec2 {
-    var view_proj_vec = context.view_projection.mulVec3(vec);
-
-    if (view_proj_vec.z > 1 or view_proj_vec.z < -1) {
-        return null;
-    }
-
-    if (view_proj_vec.x > 1) {
-        view_proj_vec.x = 1;
-    } else if (view_proj_vec.x < -1) {
-        view_proj_vec.x = -1;
-    }
-    if (view_proj_vec.y > 1) {
-        view_proj_vec.y = 1;
-    } else if (view_proj_vec.y < -1) {
-        view_proj_vec.y = -1;
-    }
-
-    var point = c.ImVec2{
-        .x = (view_proj_vec.x + 1) * 0.5 * context.viewport.width,
-        .y = (view_proj_vec.y + 1) * 0.5 * context.viewport.height,
-    };
-
-    // Apply the possible offsets
-    point.x += context.viewport.x;
-    point.y += context.viewport.y;
-
-    return point;
 }
 
 fn drawSanityCheck(g: *const GizmoContext) DrawError!void {

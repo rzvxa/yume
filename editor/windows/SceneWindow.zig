@@ -105,18 +105,6 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
         const editor_image = c.ImGui_GetWindowDrawList();
         self.scene_view_size = c.ImGui_GetWindowSize();
 
-        if (self.is_focused and !self.state.inUse()) {
-            if (c.ImGui_IsKeyPressed(c.ImGuiKey_Q)) {
-                self.active_tool = .move;
-            } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_W)) {
-                self.active_tool = .rotate;
-            } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_E)) {
-                self.active_tool = .scale;
-            } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_R)) {
-                self.active_tool = .transform;
-            }
-        }
-
         c.ImDrawList_AddCallback(editor_image, extern struct {
             fn f(dl: [*c]const c.ImDrawList, dc: [*c]const c.ImDrawCmd) callconv(.C) void {
                 _ = dl;
@@ -297,6 +285,16 @@ pub fn update(self: *Self, ctx: *GameApp) !void {
                 } else if (wheel.y < 0) {
                     in_use = true;
                     input = input.sub(forward.mulf(scroll_speed));
+                }
+
+                if (Editor.inputs.isKeyPressed(.q)) {
+                    self.active_tool = .move;
+                } else if (Editor.inputs.isKeyPressed(.w)) {
+                    self.active_tool = .rotate;
+                } else if (Editor.inputs.isKeyPressed(.e)) {
+                    self.active_tool = .scale;
+                } else if (Editor.inputs.isKeyPressed(.r)) {
+                    self.active_tool = .transform;
                 }
             }
         },

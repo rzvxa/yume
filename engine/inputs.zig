@@ -344,11 +344,11 @@ pub const InputContext = struct {
         };
     }
 
-    pub inline fn inKeyUp(self: *Self, scancode: ScanCode) bool {
+    pub inline fn isKeyUp(self: *Self, scancode: ScanCode) bool {
         return self.stateOf(scancode) == .up;
     }
 
-    pub inline fn inKeyPressed(self: *Self, scancode: ScanCode) bool {
+    pub inline fn isKeyPressed(self: *Self, scancode: ScanCode) bool {
         return self.stateOf(scancode) == .pressed;
     }
 
