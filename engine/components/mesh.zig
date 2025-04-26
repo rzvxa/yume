@@ -216,6 +216,8 @@ pub fn load_from_obj(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
 }
 
 pub fn load_from_obj2(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
+    const smooth = false;
+    var computedNormalsUsed: bool = false;
     var err: c.ufbx_error = std.mem.zeroes(c.ufbx_error);
     const scene = c.ufbx_load_memory(buffer.ptr, buffer.len, &.{}, &err);
     if (scene == null) {
@@ -249,53 +251,108 @@ pub fn load_from_obj2(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
     for (scene.*.root_node.*.children.data[0..scene.*.root_node.*.children.count]) |*node| {
         log.debug("Object: {s}\n", .{node.*.*.attrib.*.name.data});
         const mesh = node.*.*.mesh;
+        std.debug.assert(mesh != null);
+        log.debug("-> mesh with {} faces\n-> materials {}\n", .{ mesh.*.faces.count, mesh.*.face_groups.count });
 
         const num_tri_indices = mesh.*.max_face_triangles * 3;
         const tri_indices = allocator.alloc(u32, num_tri_indices) catch @panic("OOM");
         defer allocator.free(tri_indices);
-        std.debug.assert(mesh != null);
-        log.debug("-> mesh with {} faces\n-> materials {}\n", .{ mesh.*.faces.count, mesh.*.face_groups.count });
+        // Loop over each face.
         for (mesh.*.faces.data[0..mesh.*.faces.count]) |face| {
             if (face.num_indices < 3) {
                 @panic("Face has fewer than 3 vertices. Not a valid polygon.");
             }
-            const num_tries = c.ufbx_triangulate_face(tri_indices.ptr, num_tri_indices, mesh, face);
+            const num_triangles = c.ufbx_triangulate_face(tri_indices.ptr, num_tri_indices, mesh, face);
+            // Process each triangle produced.
+            for (0..num_triangles) |t| {
+                const i_0 = tri_indices[t * 3 + 0];
+                const i_1 = tri_indices[t * 3 + 1];
+                const i_2 = tri_indices[t * 3 + 2];
 
-            for (0..num_tries * 3) |vi| {
-                const index = tri_indices[vi];
-                std.debug.assert(mesh.*.vertex_position.exists);
-                const position = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_position, index).unnamed_0.v);
-                std.debug.assert(mesh.*.vertex_normal.exists);
-                const normal = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_normal, index).unnamed_0.v);
-                const tangent = blk: {
-                    if (mesh.*.vertex_tangent.exists) {
-                        std.debug.assert(mesh.*.vertex_bitangent.exists);
-                        const bitangent = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_bitangent, index).unnamed_0.v);
-                        const tangent = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_tangent, index).unnamed_0.v);
-                        const handedness: f32 = if (normal.cross(tangent).dot(bitangent) < 0.0) -1.0 else 1.0;
-                        break :blk tangent.toVec4(handedness);
+                const pos0 = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_position, i_0).unnamed_0.v);
+                const pos1 = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_position, i_1).unnamed_0.v);
+                const pos2 = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_position, i_2).unnamed_0.v);
+
+                var computed_normal: Vec3 = Vec3.ZERO;
+                if (!mesh.*.vertex_normal.exists) {
+                    computedNormalsUsed = true;
+                    // Compute flat (face) normal.
+                    const edge1 = pos1.sub(pos0);
+                    const edge2 = pos2.sub(pos0);
+                    computed_normal = edge1.cross(edge2).normalized();
+                }
+
+                // Process each vertex of this triangle.
+                for (0..3) |j| {
+                    const index = tri_indices[t * 3 + j];
+                    const position = switch (j) {
+                        0 => pos0,
+                        1 => pos1,
+                        2 => pos2,
+                        else => Vec3.ZERO,
+                    };
+
+                    var normal: Vec3 = undefined;
+                    if (mesh.*.vertex_normal.exists) {
+                        normal = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_normal, index).unnamed_0.v);
                     } else {
-                        break :blk Vec4.ZERO;
+                        normal = computed_normal;
                     }
-                };
 
-                const color = if (mesh.*.vertex_color.exists)
-                    Vec4.fromArray(c.ufbx_get_vertex_vec4(&mesh.*.vertex_color, index).unnamed_0.v)
-                else
-                    Vec4.scalar(1);
-                const uv = if (mesh.*.vertex_uv.exists)
-                    Vec2.fromArray(c.ufbx_get_vertex_vec2(&mesh.*.vertex_uv, index).unnamed_0.v)
-                else
-                    Vec2.ZERO;
+                    const tangent = blk: {
+                        if (mesh.*.vertex_tangent.exists) {
+                            std.debug.assert(mesh.*.vertex_bitangent.exists);
+                            const bitangent = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_bitangent, index).unnamed_0.v);
+                            const tng = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_tangent, index).unnamed_0.v);
+                            const handedness: f32 = if (normal.cross(tng).dot(bitangent) < 0.0) -1.0 else 1.0;
+                            break :blk tng.toVec4(handedness);
+                        } else {
+                            break :blk Vec4.ZERO;
+                        }
+                    };
 
-                vb.append(.{
-                    .position = position,
-                    .normal = normal,
-                    .tangent = tangent,
-                    .color = color,
-                    .uv = uv,
-                });
+                    const color = if (mesh.*.vertex_color.exists)
+                        Vec4.fromArray(c.ufbx_get_vertex_vec4(&mesh.*.vertex_color, index).unnamed_0.v)
+                    else
+                        Vec4.scalar(1);
+                    const uv = if (mesh.*.vertex_uv.exists)
+                        Vec2.fromArray(c.ufbx_get_vertex_vec2(&mesh.*.vertex_uv, index).unnamed_0.v)
+                    else
+                        Vec2.ZERO;
+
+                    vb.append(.{
+                        .position = position,
+                        .normal = normal,
+                        .tangent = tangent,
+                        .color = color,
+                        .uv = uv,
+                    });
+                }
             }
+        }
+    }
+
+    // Post-process vertex normals for smoothing if desired and if normals were computed.
+    if (smooth and computedNormalsUsed) {
+        // Use an epsilon for comparing vertex positions.
+        const eps: f32 = 1e-4;
+        // Iterate over each vertex and average normals of vertices with matching positions.
+        // This is an O(n^2) pass; for large meshes you might want to use spatial hashing.
+        for (vb.vertices.items, 0..) |*v, i| {
+            var sum: Vec3 = v.normal;
+            var count: usize = 1;
+            for (vb.vertices.items, 0..) |other, j| {
+                if (i != j) {
+                    if (@abs(v.position.x - other.position.x) < eps and
+                        @abs(v.position.y - other.position.y) < eps and
+                        @abs(v.position.z - other.position.z) < eps)
+                    {
+                        sum = sum.add(other.normal);
+                        count += 1;
+                    }
+                }
+            }
+            v.normal = (sum.divf(@floatFromInt(count))).normalized();
         }
     }
 

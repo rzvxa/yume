@@ -16,6 +16,10 @@ pub const PointLight = extern struct {
         return "editor://icons/point-light.png";
     }
 
+    pub fn editorBillboard() [*:0]const u8 {
+        return "editor://icons/point-light.png";
+    }
+
     pub fn default(ptr: *PointLight, _: ecs.Entity, _: *GameApp, _: ecs.ResourceResolver) callconv(.C) bool {
         ptr.* = .{};
         return true;

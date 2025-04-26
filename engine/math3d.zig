@@ -38,6 +38,13 @@ pub const Vec2 = extern struct {
         return make(self.x - other.x, self.y - other.y);
     }
 
+    pub fn lerp(a: Self, b: Self, t: f32) Self {
+        return make(
+            std.math.lerp(a.x, b.x, t),
+            std.math.lerp(a.y, b.y, t),
+        );
+    }
+
     pub inline fn toVec3(self: Vec2, z: f32) Vec3 {
         return .{ .x = self.x, .y = self.y, .z = z };
     }
@@ -154,6 +161,14 @@ pub const Vec3 = extern struct {
     /// Computes the Euclidean distance between two points.
     pub fn distanceTo(self: Vec3, other: Vec3) f32 {
         return self.sub(other).len();
+    }
+
+    pub fn lerp(a: Self, b: Self, t: f32) Self {
+        return make(
+            std.math.lerp(a.x, b.x, t),
+            std.math.lerp(a.y, b.y, t),
+            std.math.lerp(a.z, b.z, t),
+        );
     }
 
     pub fn jsonStringify(self: Self, jws: anytype) !void {

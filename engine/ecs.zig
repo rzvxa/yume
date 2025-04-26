@@ -141,6 +141,10 @@ pub const World = struct {
                 .Struct => if (@hasDecl(T, "editorIcon")) T.editorIcon() else null,
                 else => null,
             },
+            .billboard = switch (@typeInfo(T)) {
+                .Struct => if (@hasDecl(T, "editorBillboard")) T.editorBillboard() else null,
+                else => null,
+            },
             .size = @sizeOf(T),
             .alignment = @alignOf(T),
             .default = if (@hasDecl(T, "default")) struct {
@@ -600,6 +604,7 @@ pub const SerializationResult = extern struct {
 pub const ComponentDef = extern struct {
     id: Entity,
     icon: ?[*:0]const u8,
+    billboard: ?[*:0]const u8,
     size: usize,
     alignment: usize,
     default: ?*const fn (self: *anyopaque, entity: Entity, ctx: *GameApp, resourceResolver: ResourceResolver) callconv(.C) bool,

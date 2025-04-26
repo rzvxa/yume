@@ -40,12 +40,12 @@ pub fn init(allocator: std.mem.Allocator) !void {
         try register(.{ .urn = "ad4bc22b-3765-4a9d-bab7-7984e101428a", .path = "lost_empire-RGBA.png", .category = "builtin" });
         try register(.{ .urn = "00923d64-c2ca-4d36-abbd-90b1fbde7a48", .path = "1x1.png", .category = "builtin" });
         try register(.{ .urn = "54dff348-3f93-429a-83c0-2d29b1ae00dd", .path = "1x1b.png", .category = "builtin" });
+        try register(.{ .urn = "c4340d7a-caab-4925-965c-5ea71d8e447e", .path = "1x1h.png", .category = "builtin" });
         try register(.{ .urn = "ac6b9d14-0a56-458a-a7cc-fd36ede79468", .path = "lost_empire.obj", .category = "builtin" });
         try register(.{ .urn = "6d4f3849-e3d7-4cb0-b593-095a9afafb99", .path = "suzanne.obj", .category = "builtin" });
-        try register(.{ .urn = "d87d80a8-11cd-49ea-bdc9-d5d3b95725fc", .path = "suzanne.mtl", .category = "builtin" });
-        try register(.{ .urn = "acc02aef-7ac0-46e7-b006-378c36ac1b27", .path = "u.obj", .category = "builtin" });
-        try register(.{ .urn = "17c0ee4b-8fa0-43a7-a3d8-8bf7b5e73bb9", .path = "u.mtl", .category = "builtin" });
         try register(.{ .urn = "23400ade-52d7-416b-9679-884a49de1722", .path = "cube.obj", .category = "builtin" });
+        try register(.{ .urn = "ab7151f0-1f77-4ae8-99ad-17695c6ab9de", .path = "sphere.obj", .category = "builtin" });
+        try register(.{ .urn = "ac03092a-60d1-43d4-a4df-4c691aafae7b", .path = "bunny.obj", .category = "builtin" });
     }
 
     {

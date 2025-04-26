@@ -4,7 +4,10 @@ const std = @import("std");
 
 const ecs = @import("yume").ecs;
 const GameApp = @import("yume").GameApp;
+const Mat4 = @import("yume").Mat4;
 
+const gizmo = @import("../gizmo.zig");
+const Editor = @import("../Editor.zig");
 const ComponentEditor = @import("editors.zig").ComponentEditor;
 
 const Self = @This();
@@ -53,11 +56,26 @@ pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) voi
     }
 }
 
+fn onGizmo(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
+    var cam = ctx.world.getMut(entity, ecs.components.Camera).?;
+    var transform = ctx.world.get(entity, ecs.components.Transform).?;
+    switch (cam.opts.kind) {
+        .perspective => {
+            const decomposed = transform.decompose();
+            const aspect = Editor.instance().game_window.game_view_size.x / Editor.instance().game_window.game_view_size.y;
+            cam.updateMatrices(decomposed.translation, decomposed.rotation.toEuler(), aspect);
+            gizmo.drawFrustum(cam.view_projection.inverse() catch Mat4.IDENTITY) catch {};
+        },
+        .orthographic => @panic("TODO"),
+    }
+}
+
 pub fn asComponentEditor() ComponentEditor {
     return .{
         .init = Self.init,
         .deinit = Self.deinit,
         .edit = Self.edit,
+        .gizmo = Self.onGizmo,
         .flags = .{ .no_disable = true },
     };
 }

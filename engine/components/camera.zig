@@ -64,6 +64,10 @@ pub const Camera = extern struct {
         return "editor://icons/camera.png";
     }
 
+    pub fn editorBillboard() [*:0]const u8 {
+        return "editor://icons/camera.png";
+    }
+
     pub fn default(self: *Camera, _: ecs.Entity, _: *GameApp) callconv(.C) bool {
         self.* = .{
             .opts = .{

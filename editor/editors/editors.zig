@@ -13,6 +13,7 @@ const MeshEditor = @import("MeshEditor.zig");
 const MaterialEditor = @import("MaterialEditor.zig");
 const PointLightEditor = @import("PointLightEditor.zig");
 const CameraEditor = @import("CameraEditor.zig");
+const Editor = @import("../Editor.zig");
 
 const imutils = @import("../imutils.zig");
 
@@ -31,6 +32,9 @@ pub const ComponentEditor = struct {
     init: *const fn (allocator: std.mem.Allocator) *anyopaque,
     deinit: *const fn (*anyopaque) void,
     edit: *const fn (self: *anyopaque, comp_id: ecs.Entity, comp: ecs.Entity, ctx: *GameApp) void,
+    gizmo: *const fn (self: *anyopaque, comp_id: ecs.Entity, comp: ecs.Entity, ctx: *GameApp) void = &struct {
+        fn f(_: *anyopaque, _: ecs.Entity, _: ecs.Entity, _: *GameApp) void {}
+    }.f,
     flags: ComponentEditorFlags = .{},
 };
 
@@ -130,6 +134,32 @@ pub fn componentEditorOf(self: *Self, type_id: ecs.Entity) ?ComponentEditor {
     }
 
     return null;
+}
+
+pub fn onDrawGizmos(self: *Self) void {
+    switch (Editor.instance().selection) {
+        .entity => |entity| {
+            const typ = c.ecs_get_type(Editor.instance().ctx.world.inner, entity);
+            const editor = Editor.instance();
+
+            for (0..@intCast(typ[0].count)) |i| {
+                const id: c.ecs_id_t = typ[0].array[i];
+                if (id & c.ECS_PAIR > 0) {
+                    continue;
+                }
+                const comp = id & c.ECS_COMPONENT_MASK;
+
+                const type_id = c.ecs_get_typeid(Editor.instance().ctx.world.inner, comp);
+                const ed = editor.editors.componentEditorOf(type_id) orelse continue;
+                if (self.component_editors.get(entity)) |components| {
+                    if (components.get(comp)) |it| {
+                        ed.gizmo(it.ptr, entity, it.type_id, Editor.instance().ctx);
+                    }
+                }
+            }
+        },
+        else => {},
+    }
 }
 
 fn registerBuiltinComponentEditors(self: *Self) void {

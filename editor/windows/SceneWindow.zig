@@ -46,6 +46,8 @@ distance: f32 = default_cam_distance,
 active_tool: gizmo.ManipulationTool = .move,
 
 is_perspective: bool = true,
+render_lights: bool = true,
+is_lights_button_hovered: bool = false,
 
 scene_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
 scene_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
@@ -60,9 +62,13 @@ editor_camera_and_scene_set: c.VkDescriptorSet = null,
 frame_userdata: FrameData = undefined,
 cast_query: *ecs.Query,
 point_lights_query: *ecs.Query,
+transform_query: *ecs.Query,
 render_system: ecs.Entity,
 
-pub fn init(ctx: *GameApp) Self {
+on_draw_gizmos: *const fn (*anyopaque) void,
+on_draw_gizmos_ctx: *anyopaque,
+
+pub fn init(ctx: *GameApp, on_draw_gizmos: *const fn (*anyopaque) void, on_draw_gizmos_ctx: *anyopaque) Self {
     var self = Self{
         .cast_query = ctx.world.query(&std.mem.zeroInit(
             c.ecs_query_desc_t,
@@ -78,6 +84,12 @@ pub fn init(ctx: *GameApp) Self {
                 .{ .id = ecs.typeId(components.PointLight) },
             } },
         )),
+        .transform_query = ctx.world.query(&std.mem.zeroInit(
+            c.ecs_query_desc_t,
+            .{ .terms = .{
+                .{ .id = ecs.typeId(components.Transform) },
+            } },
+        )),
         .render_system = ctx.world.systemEx(&.{
             .entity = ctx.world.create("Editor Render System"),
             .query = std.mem.zeroInit(c.ecs_query_desc_t, .{ .terms = .{
@@ -87,12 +99,15 @@ pub fn init(ctx: *GameApp) Self {
             } }),
             .callback = @ptrCast(&ecs.SystemImpl(sys).exec),
         }),
+        .on_draw_gizmos = on_draw_gizmos,
+        .on_draw_gizmos_ctx = on_draw_gizmos_ctx,
     };
     self.focus(Vec3.ZERO, default_cam_distance);
     return self;
 }
 
 pub fn deinit(self: *Self) void {
+    self.transform_query.deinit();
     self.point_lights_query.deinit();
     self.cast_query.deinit();
 }
@@ -202,6 +217,26 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
             .height = self.scene_view_size.y,
         });
 
+        {
+            const right = self.scene_view_size.x;
+            const cursor = c.ImGui_GetCursorPos();
+            c.ImGui_SetCursorPos(.{ .x = right - 90, .y = 128 });
+            c.ImGui_TextColored(
+                c.ImVec4{
+                    .x = 0.64,
+                    .y = 0.64,
+                    .z = 0.64,
+                    .w = if (self.is_lights_button_hovered) 0.8 else 0.5,
+                },
+                if (self.render_lights) "Lights: On" else "Lights: Off",
+            );
+            self.is_lights_button_hovered = c.ImGui_IsItemHovered(0);
+            if (c.ImGui_IsItemClicked()) {
+                self.render_lights = !self.render_lights;
+            }
+            c.ImGui_SetCursorPos(cursor);
+        }
+
         blk: {
             switch (Editor.instance().selection) {
                 .entity => |selection| {
@@ -215,7 +250,8 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                     }
 
                     if (ctx.world.get(selection, components.Mesh)) |mesh| {
-                        try gizmo.drawBoundingBox(mesh.bounds, transform.?.value);
+                        // try gizmo.drawBoundingBox(mesh.bounds, transform.?.value);
+                        try gizmo.drawBoundingBoxCorners(mesh.bounds, transform.?.value);
                     }
                     c.ImGuizmo_PushID_Int(@intCast(selection));
                     if (try gizmo.editTransform(&transform.?.value, self.active_tool)) {
@@ -224,6 +260,34 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                     c.ImGuizmo_PopID();
                 },
                 else => {},
+            }
+        }
+
+        {
+            self.on_draw_gizmos(self.on_draw_gizmos_ctx);
+            var iter = self.transform_query.iter();
+            while (iter.next()) {
+                const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
+                for (transforms, 0..) |transform, i| {
+                    const entity = iter.inner.entities[i];
+                    for (try ctx.world.getType(entity)) |id| {
+                        if (ecs.isPair(id)) {
+                            continue;
+                        }
+                        const comp_id = id & ecs.masks.component;
+                        const comp_path = try ctx.world.getPathAlloc(comp_id, ctx.allocator);
+                        defer ctx.allocator.free(comp_path);
+
+                        const def = ctx.components.get(comp_path) orelse continue;
+                        if (def.billboard) |billboard| {
+                            gizmo.drawBillboardIcon(
+                                transform.position(),
+                                try Editor.getImGuiTexture(std.mem.span(billboard), &ctx.engine),
+                                32,
+                            );
+                        }
+                    }
+                }
             }
         }
         gizmo.endFrame();
@@ -451,7 +515,9 @@ fn sys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mes
 
     var lights = std.mem.zeroes([4]Engine.GPUSceneData.GPULightData);
     std.debug.assert(point_lights.items.len < 4);
-    @memcpy(lights[0..point_lights.items.len], point_lights.items);
+    if (me.d.render_lights) {
+        @memcpy(lights[0..point_lights.items.len], point_lights.items);
+    }
     me.app.engine.drawObjects(
         me.cmd,
         matrices,

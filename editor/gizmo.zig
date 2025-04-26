@@ -65,15 +65,18 @@ pub fn newFrame(drawlist: [*c]c.ImDrawList, view: *Mat4, projection: Mat4, dist:
 
     c.ImGuizmo_SetDrawlist(drawlist);
 
-    const viewManipulateRight = c.ImGui_GetWindowPos().x + context.viewport.width;
-    const viewManipulateTop = c.ImGui_GetWindowPos().y;
-    c.ImGuizmo_ViewManipulate_Float(
-        &context.view.values,
-        dist,
-        c.ImVec2{ .x = viewManipulateRight - 128, .y = viewManipulateTop },
-        c.ImVec2{ .x = 128, .y = 128 },
-        0x10101010,
-    );
+    {
+        const style = c.ImGui_GetStyle();
+        const right = c.ImGui_GetWindowPos().x + context.viewport.width;
+        const top = c.ImGui_GetWindowPos().y;
+        c.ImGuizmo_ViewManipulate_Float(
+            &context.view.values,
+            dist,
+            c.ImVec2{ .x = right - 128 + style.*.FramePadding.x, .y = top + style.*.FramePadding.y },
+            c.ImVec2{ .x = 128, .y = 128 },
+            0x10101010,
+        );
+    }
 }
 
 pub fn endFrame() void {
@@ -101,60 +104,6 @@ pub fn editTransform(matrix: *Mat4, tool: ManipulationTool) !bool {
     const result = c.ImGuizmo_Manipulate(&view.values, &proj.values, @intFromEnum(tool), c.IMGUIZMO_WORLD, &matrix.values, null, null, null, null);
     context.is_over_any = context.is_over_any or c.ImGuizmo_IsOver_Nil();
     return result;
-}
-
-// Converts a 3D point into NDC, without clamping the x/y values.
-fn toNdcPoint(vec: Vec3) ?Vec2 {
-    const ndc = context.view_projection.mulVec3(vec);
-
-    if (ndc.z > 1 or ndc.z < -1) return null;
-    return Vec2{ .x = ndc.x, .y = ndc.y };
-}
-
-// Liang–Barsky line clipping on a line in NDC coordinates.
-fn clipLine(a: Vec2, b: Vec2) ?[2]Vec2 {
-    var t0: f32 = 0.0;
-    var t1: f32 = 1.0;
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-
-    // We'll define the clip boundaries: left=-1, right=1, bottom=-1, top=1.
-    // Each call adjusts t0 and t1 based on one boundary.
-    if (!clipBoundary(-dx, a.x + 1, &t0, &t1)) return null; // Left boundary
-    if (!clipBoundary(dx, 1 - a.x, &t0, &t1)) return null; // Right boundary
-    if (!clipBoundary(-dy, a.y + 1, &t0, &t1)) return null; // Bottom boundary
-    if (!clipBoundary(dy, 1 - a.y, &t0, &t1)) return null; // Top boundary
-
-    if (t0 > t1) return null; // No visible segment.
-
-    const newA = Vec2{ .x = a.x + t0 * dx, .y = a.y + t0 * dy };
-    const newB = Vec2{ .x = a.x + t1 * dx, .y = a.y + t1 * dy };
-    return [2]Vec2{ newA, newB };
-}
-
-// Liang–Barsky
-fn clipBoundary(p: f32, q: f32, t0: *f32, t1: *f32) bool {
-    if (p == 0) {
-        // Line is parallel to this clipping boundary
-        if (q < 0) return false; // Outside
-    } else {
-        const r = q / p;
-        if (p < 0) {
-            if (r > t1.*) return false;
-            if (r > t0.*) t0.* = r;
-        } else {
-            if (r < t0.*) return false;
-            if (r < t1.*) t1.* = r;
-        }
-    }
-    return true;
-}
-
-fn ndcToScreen(ndc: Vec2) c.ImVec2 {
-    return c.ImVec2{
-        .x = (ndc.x + 1) * 0.5 * context.viewport.width + context.viewport.x,
-        .y = (ndc.y + 1) * 0.5 * context.viewport.height + context.viewport.y,
-    };
 }
 
 pub fn drawBoundingBox(bounds: BoundingBox, transform: Mat4) DrawError!void {
@@ -192,21 +141,311 @@ pub fn drawBoundingBox(bounds: BoundingBox, transform: Mat4) DrawError!void {
     };
 
     for (edges) |edge| {
-        const ndc_a_opt = toNdcPoint(edge[0]);
-        const ndc_b_opt = toNdcPoint(edge[1]);
-        if (ndc_a_opt == null or ndc_b_opt == null) continue;
+        drawEdge(edge[0], edge[1], red(), 1, 0);
+    }
+}
 
-        const ndc_a = ndc_a_opt.?;
-        const ndc_b = ndc_b_opt.?;
+pub fn drawBoundingBoxCorners(bounds: BoundingBox, transform: Mat4) DrawError!void {
+    try drawSanityCheck(&context);
 
-        const clippedOpt = clipLine(ndc_a, ndc_b);
-        if (clippedOpt == null) continue;
-        const clippedLine = clippedOpt.?;
+    const localPoints = [8]Vec3{
+        Vec3{ .x = bounds.mins.x, .y = bounds.mins.y, .z = bounds.mins.z },
+        Vec3{ .x = bounds.maxs.x, .y = bounds.mins.y, .z = bounds.mins.z },
+        Vec3{ .x = bounds.mins.x, .y = bounds.maxs.y, .z = bounds.mins.z },
+        Vec3{ .x = bounds.maxs.x, .y = bounds.maxs.y, .z = bounds.mins.z },
+        Vec3{ .x = bounds.mins.x, .y = bounds.mins.y, .z = bounds.maxs.z },
+        Vec3{ .x = bounds.maxs.x, .y = bounds.mins.y, .z = bounds.maxs.z },
+        Vec3{ .x = bounds.mins.x, .y = bounds.maxs.y, .z = bounds.maxs.z },
+        Vec3{ .x = bounds.maxs.x, .y = bounds.maxs.y, .z = bounds.maxs.z },
+    };
 
-        const screen_a = ndcToScreen(clippedLine[0]);
-        const screen_b = ndcToScreen(clippedLine[1]);
+    var worldPoints: [8]Vec3 = undefined;
+    for (localPoints, 0..) |pt, i| {
+        worldPoints[i] = transform.mulVec3(pt);
+    }
 
-        c.ImDrawList_AddLine(context.drawlist, screen_a, screen_b, red());
+    const corner_factor = 4;
+
+    const offsetX = (bounds.maxs.x - bounds.mins.x) / corner_factor;
+    const offsetY = (bounds.maxs.y - bounds.mins.y) / corner_factor;
+    const offsetZ = (bounds.maxs.z - bounds.mins.z) / corner_factor;
+
+    // For each corner, determine three endpoint positions (one for each axis) in local space.
+    // The offset direction is determined by whether the corner's coordinate equals the min or max.
+    for (localPoints, 0..) |cornerLocal, i| {
+        const cornerWorld = worldPoints[i];
+
+        // X-axis line: if the local corner is at the min x, move positive; if at max, move negative.
+        var endLocalX: Vec3 = cornerLocal;
+        if (cornerLocal.x == bounds.mins.x) {
+            endLocalX.x += offsetX;
+        } else {
+            endLocalX.x -= offsetX;
+        }
+
+        // Y-axis line: if the local corner is at the min y, move positive; if at max, move negative.
+        var endLocalY: Vec3 = cornerLocal;
+        if (cornerLocal.y == bounds.mins.y) {
+            endLocalY.y += offsetY;
+        } else {
+            endLocalY.y -= offsetY;
+        }
+
+        // Z-axis line: if the local corner is at the min z, move positive; if at max, move negative.
+        var endLocalZ: Vec3 = cornerLocal;
+        if (cornerLocal.z == bounds.mins.z) {
+            endLocalZ.z += offsetZ;
+        } else {
+            endLocalZ.z -= offsetZ;
+        }
+
+        // Transform the local endpoints to world space.
+        const endWorldX = transform.mulVec3(endLocalX);
+        const endWorldY = transform.mulVec3(endLocalY);
+        const endWorldZ = transform.mulVec3(endLocalZ);
+
+        const color = c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0, .y = 208.0 / 255.0, .z = 208.0 / 255.0, .w = 1 });
+        // Draw three short segments from the corner to these endpoints.
+        // Using drawEdge with segments == 1 draws a single segment without gradient.
+        drawEdge(cornerWorld, endWorldX, color, 1, 0);
+        drawEdge(cornerWorld, endWorldY, color, 1, 0);
+        drawEdge(cornerWorld, endWorldZ, color, 1, 0);
+    }
+}
+
+// Draws the camera frustum using the provided inverse view–projection matrix.
+// The canonical eight corners in NDC (with near plane z = -1 and far plane z = 1)
+// are unprojected to world space and then the near, far, and side edges are drawn.
+pub fn drawFrustum(inv_view_proj: Mat4) DrawError!void {
+    try drawSanityCheck(&context);
+
+    // Define the eight canonical NDC corners.
+    const ndc_corners: [8]Vec3 = [_]Vec3{
+        Vec3{ .x = -1, .y = -1, .z = -1 }, // near plane
+        Vec3{ .x = 1, .y = -1, .z = -1 },
+        Vec3{ .x = -1, .y = 1, .z = -1 },
+        Vec3{ .x = 1, .y = 1, .z = -1 },
+        Vec3{ .x = -1, .y = -1, .z = 1 }, // far plane
+        Vec3{ .x = 1, .y = -1, .z = 1 },
+        Vec3{ .x = -1, .y = 1, .z = 1 },
+        Vec3{ .x = 1, .y = 1, .z = 1 },
+    };
+
+    // Unproject NDC corners to world space using the provided inv_view_proj.
+    var world_corners: [8]Vec3 = undefined;
+    for (ndc_corners, 0..) |corner, idx| {
+        world_corners[idx] = inv_view_proj.mulVec3(corner).mul(Vec3.make(1, 1, -1));
+    }
+
+    // Define the indices for the frustum edges.
+    // Near-plane edges (indices 0..3):
+    const near_edges: [4][2]usize = [_][2]usize{
+        .{ 0, 1 },
+        .{ 1, 3 },
+        .{ 3, 2 },
+        .{ 2, 0 },
+    };
+
+    // Far-plane edges (indices 4..7):
+    const far_edges: [4][2]usize = [_][2]usize{
+        .{ 4, 5 },
+        .{ 5, 7 },
+        .{ 7, 6 },
+        .{ 6, 4 },
+    };
+
+    // Side edges (connect corresponding near and far corners):
+    const side_edges: [4][2]usize = [_][2]usize{
+        .{ 0, 4 },
+        .{ 1, 5 },
+        .{ 2, 6 },
+        .{ 3, 7 },
+    };
+
+    // Draw near plane, far plane, and side edges.
+    for (near_edges) |edge| {
+        drawEdge(world_corners[edge[0]], world_corners[edge[1]], green(), 50, 50);
+    }
+    for (far_edges) |edge| {
+        drawEdge(world_corners[edge[0]], world_corners[edge[1]], green(), 50, 50);
+    }
+    for (side_edges) |edge| {
+        drawEdge(world_corners[edge[0]], world_corners[edge[1]], green(), 50, 50);
+    }
+}
+
+pub fn drawBillboardIcon(worldPos: Vec3, icon: c.ImTextureID, iconSize: f32) void {
+    // Transform the world-space point into clip space.
+    const clipPos = context.view_projection.mulVec3(worldPos);
+
+    // If the point is behind the camera or too far, skip drawing.
+    // (Adjust the clipping test depending on your projection conventions.)
+    if (clipPos.z < 0 or clipPos.z > 1) return;
+
+    // Use the x and y from the projected point (clipPos) as NDC.
+    const ndcPos = Vec2{ .x = clipPos.x, .y = clipPos.y };
+
+    // Convert NDC coordinates to screen space.
+    const screenPos = ndcToScreen(ndcPos);
+
+    // Compute the icon rectangle, centered at screenPos.
+    const halfSize: f32 = iconSize * 0.5;
+    var p_min = c.ImVec2{
+        .x = screenPos.x - halfSize,
+        .y = screenPos.y - halfSize,
+    };
+    var p_max = c.ImVec2{
+        .x = screenPos.x + halfSize,
+        .y = screenPos.y + halfSize,
+    };
+
+    // Clamp the destination rectangle to the viewport.
+    if (p_min.x < context.viewport.x) {
+        p_min.x = context.viewport.x;
+    }
+    if (p_min.y < context.viewport.y) {
+        p_min.y = context.viewport.y;
+    }
+    if (p_max.x > context.viewport.x + context.viewport.width) {
+        p_max.x = context.viewport.x + context.viewport.width;
+    }
+    if (p_max.y > context.viewport.y + context.viewport.height) {
+        p_max.y = context.viewport.y + context.viewport.height;
+    }
+
+    // If the resulting rectangle has non-positive area, then it's off–screen.
+    if (p_min.x >= p_max.x or p_min.y >= p_max.y) return;
+
+    // Draw the image using ImGui's draw list.
+    c.ImDrawList_AddImage(context.drawlist, icon, p_min, p_max);
+}
+
+// Converts a 3D point into NDC, without clamping the x/y values.
+fn toNdcPoint(vec: Vec3) ?Vec2 {
+    const ndc = context.view_projection.mulVec3(vec);
+
+    if (ndc.z > 1 or ndc.z < -1) return null;
+    return Vec2{ .x = ndc.x, .y = ndc.y };
+}
+
+// Liang–Barsky line clipping on a line in NDC coordinates.
+fn clipLine(a: Vec2, b: Vec2) ?[2]Vec2 {
+    var t0: f32 = 0.0;
+    var t1: f32 = 1.0;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+
+    // We'll define the clip boundaries: left=-1, right=1, bottom=-1, top=1.
+    // Each call adjusts t0 and t1 based on one boundary.
+    if (!clipBoundary(-dx, a.x + 1, &t0, &t1)) return null; // Left boundary
+    if (!clipBoundary(dx, 1 - a.x, &t0, &t1)) return null; // Right boundary
+    if (!clipBoundary(-dy, a.y + 1, &t0, &t1)) return null; // Bottom boundary
+    if (!clipBoundary(dy, 1 - a.y, &t0, &t1)) return null; // Top boundary
+
+    if (t0 > t1) return null; // No visible segment.
+
+    const new_a = Vec2{ .x = a.x + t0 * dx, .y = a.y + t0 * dy };
+    const new_b = Vec2{ .x = a.x + t1 * dx, .y = a.y + t1 * dy };
+    return [2]Vec2{ new_a, new_b };
+}
+
+// Liang–Barsky
+fn clipBoundary(p: f32, q: f32, t0: *f32, t1: *f32) bool {
+    if (p == 0) {
+        // Line is parallel to this clipping boundary
+        if (q < 0) return false; // Outside
+    } else {
+        const r = q / p;
+        if (p < 0) {
+            if (r > t1.*) return false;
+            if (r > t0.*) t0.* = r;
+        } else {
+            if (r < t0.*) return false;
+            if (r < t1.*) t1.* = r;
+        }
+    }
+    return true;
+}
+
+fn ndcToScreen(ndc: Vec2) c.ImVec2 {
+    return c.ImVec2{
+        .x = (ndc.x + 1) * 0.5 * context.viewport.width + context.viewport.x,
+        .y = (ndc.y + 1) * 0.5 * context.viewport.height + context.viewport.y,
+    };
+}
+
+/// Clip a 3D line segment to the near and far planes in camera space.
+/// 'a' and 'b' are world–space endpoints.
+/// Returns the interpolated (clipped) endpoints in world space.
+fn clipLine3D(a: Vec3, b: Vec3, near: f32, far: f32) ?[2]Vec3 {
+    // Transform endpoints into camera space.
+    const ca = context.view.mulVec3(a);
+    const cb = context.view.mulVec3(b);
+
+    var t0: f32 = 0.0;
+    var t1: f32 = 1.0;
+    const dz = cb.z - ca.z;
+
+    // For a perspective camera looking down -Z:
+    // near plane is at z = -near and far plane at z = -far.
+    if (!clipBoundary(dz, (-near) - ca.z, &t0, &t1)) return null;
+    if (!clipBoundary(-dz, ca.z - (-far), &t0, &t1)) return null;
+    if (t0 > t1) return null;
+
+    return [2]Vec3{
+        a.lerp(b, t0),
+        a.lerp(b, t1),
+    };
+}
+
+/// Draws a line edge that fades toward the far end.
+/// If segments == 1, the edge is drawn as a single segment with the original color.
+/// Otherwise, the edge is subdivided into (segments+1) points and a gradient is applied.
+fn drawEdge(world1: Vec3, world2: Vec3, color: c.ImU32, segments: usize, max_darken_percent: u8) void {
+    // used for line clipping, perhaps it should use the editor's near/far? debug lines are cheap to draw
+    const near_distance: f32 = 0.1;
+    const far_distance: f32 = 10000.0;
+
+    // First clip the 3D line segment.
+    const clipped3D_opt = clipLine3D(world1, world2, near_distance, far_distance);
+    if (clipped3D_opt == null) return;
+    const clipped3D = clipped3D_opt.?;
+
+    if (segments == 1) {
+        // Single segment: project endpoints and draw one line.
+        const ndc_a = context.view_projection.mulVec3(clipped3D[0]);
+        const ndc_b = context.view_projection.mulVec3(clipped3D[1]);
+        const a_ndc = Vec2{ .x = ndc_a.x, .y = ndc_a.y };
+        const b_ndc = Vec2{ .x = ndc_b.x, .y = ndc_b.y };
+        const screen_a = ndcToScreen(a_ndc);
+        const screen_b = ndcToScreen(b_ndc);
+        c.ImDrawList_AddLine(context.drawlist, screen_a, screen_b, color);
+        return;
+    }
+
+    // We'll darken the color gradually from 0% at t = 0 (near end)
+    // to max_darken_percent at t = 1 (far end).
+    var prev_screen: c.ImVec2 = undefined;
+    var first = true;
+
+    // Loop from 0 to segments (inclusive) to get (segments + 1) points.
+    for (0..(segments + 1)) |i| {
+        const t: f32 = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(segments));
+        const world_pos: Vec3 = clipped3D[0].lerp(clipped3D[1], t);
+        const ndc_vec: Vec3 = context.view_projection.mulVec3(world_pos);
+        const ndc_pos: Vec2 = Vec2{ .x = ndc_vec.x, .y = ndc_vec.y };
+        const screen_pos: c.ImVec2 = ndcToScreen(ndc_pos);
+
+        // Compute the darkening percentage: 0 at near (t=0) to max_darken_percent at far (t=1).
+        const darken_prec: u8 = @as(u8, @intFromFloat(t * @as(f32, @floatFromInt(max_darken_percent))));
+        const segcol: c.ImU32 = darkenColor(color, darken_prec);
+
+        if (!first) {
+            c.ImDrawList_AddLine(context.drawlist, prev_screen, screen_pos, segcol);
+        } else {
+            first = false;
+        }
+        prev_screen = screen_pos;
     }
 }
 
