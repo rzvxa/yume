@@ -35,6 +35,7 @@ pub const ManipulationTool = enum(c_uint) {
 
 const GizmoContext = struct {
     inframe: bool = false,
+    is_over_any: bool = false,
     drawlist: [*c]c.ImDrawList = undefined,
     view: *Mat4 = undefined,
     projection: Mat4 = Mat4.IDENTITY,
@@ -49,6 +50,7 @@ pub fn newFrame(drawlist: [*c]c.ImDrawList, view: *Mat4, projection: Mat4, dist:
         @panic("can't start a new frame while in frame");
     }
 
+    context.is_over_any = false;
     context.drawlist = drawlist;
 
     context.projection = projection;
@@ -78,15 +80,27 @@ pub fn endFrame() void {
     context.inframe = false;
 }
 
+pub inline fn isOver() bool {
+    return c.ImGuizmo_IsOver_Nil();
+}
+
+pub inline fn isOverAny() bool {
+    return context.is_over_any;
+}
+
+pub inline fn isUsingAny() bool {
+    return c.ImGuizmo_IsUsingAny();
+}
+
 pub fn editTransform(matrix: *Mat4, tool: ManipulationTool) !bool {
     try drawSanityCheck(&context);
 
-    // const window_width = c.ImGui_GetWindowWidth();
-    // const window_height = c.ImGui_GetWindowHeight();
     c.ImGuizmo_SetRect(c.ImGui_GetWindowPos().x, c.ImGui_GetWindowPos().y, context.viewport.width, context.viewport.height);
     var view = context.view;
     var proj = context.projection;
-    return c.ImGuizmo_Manipulate(&view.values, &proj.values, @intFromEnum(tool), c.IMGUIZMO_WORLD, &matrix.values, null, null, null, null);
+    const result = c.ImGuizmo_Manipulate(&view.values, &proj.values, @intFromEnum(tool), c.IMGUIZMO_WORLD, &matrix.values, null, null, null, null);
+    context.is_over_any = context.is_over_any or c.ImGuizmo_IsOver_Nil();
+    return result;
 }
 
 pub fn drawBoundingBox(bounds: BoundingBox, transform: Mat4) DrawError!void {

@@ -18,7 +18,6 @@ const AllocatedBuffer = @import("yume").AllocatedBuffer;
 const GPULightData = Engine.GPUSceneData.GPULightData;
 
 const MouseButton = @import("yume").inputs.MouseButton;
-const ScanCode = @import("yume").inputs.ScanCode;
 
 const Editor = @import("../Editor.zig");
 
@@ -52,7 +51,8 @@ scene_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
 scene_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
 is_focused: bool = false,
 is_hovered: bool = false,
-is_dragging: bool = false,
+
+state: State = .idle,
 
 editor_camera_and_scene_buffer: AllocatedBuffer = undefined,
 editor_camera_and_scene_set: c.VkDescriptorSet = null,
@@ -105,7 +105,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
         const editor_image = c.ImGui_GetWindowDrawList();
         self.scene_view_size = c.ImGui_GetWindowSize();
 
-        if (self.is_focused and !self.is_dragging) {
+        if (self.is_focused and !self.state.inUse()) {
             if (c.ImGui_IsKeyPressed(c.ImGuiKey_Q)) {
                 self.active_tool = .move;
             } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_W)) {
@@ -244,6 +244,10 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
 }
 
 pub fn update(self: *Self, ctx: *GameApp) !void {
+    if (!self.is_hovered and !self.state.inUse()) {
+        return;
+    }
+
     var input: Vec3 = Vec3.make(0, 0, 0);
     var input_rot: Vec3 = Vec3.make(0, 0, 0);
 
@@ -256,89 +260,118 @@ pub fn update(self: *Self, ctx: *GameApp) !void {
     const up = basis.up;
     const forward = basis.forward.mulf(-1);
 
+    // handle translation inputs (W, A, S, D) relative to view
+    // we don't apply it right away.
+    const wasd = blk: {
+        var wasd = Vec3.ZERO;
+        wasd = wasd.add(forward.mulf(if (Editor.inputs.isKeyDown(.w)) 1 else 0));
+        wasd = wasd.sub(forward.mulf(if (Editor.inputs.isKeyDown(.s)) 1 else 0));
+        wasd = wasd.add(left.mulf(if (Editor.inputs.isKeyDown(.a)) 1 else 0));
+        wasd = wasd.sub(left.mulf(if (Editor.inputs.isKeyDown(.d)) 1 else 0));
+        wasd = wasd.add(up.mulf(if (Editor.inputs.isKeyDown(.e)) 1 else 0));
+        wasd = wasd.sub(up.mulf(if (Editor.inputs.isKeyDown(.q)) 1 else 0));
+        wasd = wasd.mulf(5);
+        break :blk wasd;
+    };
+
     var in_use: bool = false;
 
-    if (self.is_dragging or self.is_hovered) {
-        const wasd = blk: {
-            var wasd = Vec3.ZERO;
-            // Handle translation inputs (W, A, S, D) relative to view
-            wasd = wasd.add(forward.mulf(if (Editor.inputs.isKeyDown(ScanCode.W)) 1 else 0));
-            wasd = wasd.sub(forward.mulf(if (Editor.inputs.isKeyDown(ScanCode.S)) 1 else 0));
-            wasd = wasd.add(left.mulf(if (Editor.inputs.isKeyDown(ScanCode.A)) 1 else 0));
-            wasd = wasd.sub(left.mulf(if (Editor.inputs.isKeyDown(ScanCode.D)) 1 else 0));
-            wasd = wasd.add(up.mulf(if (Editor.inputs.isKeyDown(ScanCode.E)) 1 else 0));
-            wasd = wasd.sub(up.mulf(if (Editor.inputs.isKeyDown(ScanCode.Q)) 1 else 0));
-            wasd = wasd.mulf(5);
-            break :blk wasd;
-        };
-        if (Editor.inputs.isMouseButtonDown(MouseButton.Right)) { // free cam
+    var new_state = self.state;
+    switch (self.state) {
+        .idle => {
+            if (Editor.inputs.isMouseButtonPressed(.right)) {
+                new_state = .free;
+            } else if (Editor.inputs.isMouseButtonPressed(.middle)) {
+                if (Editor.inputs.isKeyDown(.left_shift)) {
+                    new_state = .pan;
+                } else {
+                    new_state = .orbit;
+                }
+            } else { // idle scroll zoom
+                // Mouse wheel for zooming in and out relative to view direction
+                const wheel = Editor.inputs.mouseWheel();
+                const scroll_speed: f32 = 20;
+                if (wheel.y > 0) {
+                    in_use = true;
+                    input = input.add(forward.mulf(scroll_speed));
+                } else if (wheel.y < 0) {
+                    in_use = true;
+                    input = input.sub(forward.mulf(scroll_speed));
+                }
+            }
+        },
+        .free => {
+            if (Editor.inputs.isMouseButtonUp(.right)) {
+                new_state = .idle;
+            }
+
             in_use = true;
             Editor.inputs.setRelativeMouseMode(true);
             const mouse_delta = Editor.inputs.mouseRelative().mulf(0.5);
             input_rot.y -= mouse_delta.x;
             input_rot.x -= mouse_delta.y;
             input = input.add(wasd);
-        } else if (Editor.inputs.isMouseButtonDown(MouseButton.Middle)) {
-            if (Editor.inputs.isKeyDown(ScanCode.LeftShift)) { // panning
-                in_use = true;
-                const mouse_delta = Editor.inputs.mouseDelta();
-                input = input.add(left.mulf(mouse_delta.x));
-                input = input.add(up.mulf(mouse_delta.y));
-            } else { // orbit
-                in_use = true;
-                const orbit_delta = Editor.inputs.mouseRelative();
-                const sensitivity: f32 = 0.005;
-
-                self.target_pos = self.camera_pos.add(forward.mulf(self.distance));
-
-                const offset = self.camera_pos.sub(self.target_pos);
-                const current_distance = offset.len();
-                const current_pitch = std.math.asin(offset.y / current_distance);
-                const current_yaw = std.math.atan2(offset.x, offset.z);
-
-                const new_pitch = current_pitch + orbit_delta.y * sensitivity;
-                const new_yaw = current_yaw - orbit_delta.x * sensitivity;
-
-                const max_pitch = std.math.pi * 0.49;
-                var clamped_pitch = new_pitch;
-                if (clamped_pitch > max_pitch) {
-                    clamped_pitch = max_pitch;
-                } else if (clamped_pitch < -max_pitch) {
-                    clamped_pitch = -max_pitch;
-                }
-
-                const cos_pitch = std.math.cos(clamped_pitch);
-                const sin_pitch = std.math.sin(clamped_pitch);
-                const cos_yaw = std.math.cos(new_yaw);
-                const sin_yaw = std.math.sin(new_yaw);
-                const new_eye = Vec3.make(
-                    self.target_pos.x + current_distance * cos_pitch * sin_yaw,
-                    self.target_pos.y + current_distance * sin_pitch,
-                    self.target_pos.z + current_distance * cos_pitch * cos_yaw,
-                );
-
-                self.camera.view = Mat4.lookAt(new_eye, self.target_pos, Vec3.UP);
-                decomposed = (try self.camera.view.inverse()).decompose() catch Mat4.Decomposed.IDENTITY;
-                input = input.add(wasd);
+        },
+        .pan => {
+            // we keep paning even if shift is released
+            // user should release the mouse botten in order to release the pan
+            if (Editor.inputs.isMouseButtonUp(.middle)) {
+                new_state = .idle;
             }
-        } else {
-            // Mouse wheel for zooming in and out relative to view direction
-            const wheel = Editor.inputs.mouseWheel();
-            const scroll_speed: f32 = 20;
-            if (wheel.y > 0) {
-                in_use = true;
-                input = input.add(forward.mulf(scroll_speed));
-            } else if (wheel.y < 0) {
-                in_use = true;
-                input = input.sub(forward.mulf(scroll_speed));
+
+            in_use = true;
+            const mouse_delta = Editor.inputs.mouseDelta();
+            input = input.add(left.mulf(mouse_delta.x));
+            input = input.add(up.mulf(mouse_delta.y));
+        },
+        .orbit => {
+            if (Editor.inputs.isMouseButtonUp(.middle)) {
+                new_state = .idle;
             }
-        }
+
+            in_use = true;
+            const orbit_delta = Editor.inputs.mouseRelative();
+            const sensitivity: f32 = 0.005;
+
+            self.target_pos = self.camera_pos.add(forward.mulf(self.distance));
+
+            const offset = self.camera_pos.sub(self.target_pos);
+            const current_distance = offset.len();
+            const current_pitch = std.math.asin(offset.y / current_distance);
+            const current_yaw = std.math.atan2(offset.x, offset.z);
+
+            const new_pitch = current_pitch + orbit_delta.y * sensitivity;
+            const new_yaw = current_yaw - orbit_delta.x * sensitivity;
+
+            const max_pitch = std.math.pi * 0.49;
+            var clamped_pitch = new_pitch;
+            if (clamped_pitch > max_pitch) {
+                clamped_pitch = max_pitch;
+            } else if (clamped_pitch < -max_pitch) {
+                clamped_pitch = -max_pitch;
+            }
+
+            const cos_pitch = std.math.cos(clamped_pitch);
+            const sin_pitch = std.math.sin(clamped_pitch);
+            const cos_yaw = std.math.cos(new_yaw);
+            const sin_yaw = std.math.sin(new_yaw);
+            const new_eye = Vec3.make(
+                self.target_pos.x + current_distance * cos_pitch * sin_yaw,
+                self.target_pos.y + current_distance * sin_pitch,
+                self.target_pos.z + current_distance * cos_pitch * cos_yaw,
+            );
+
+            self.camera.view = Mat4.lookAt(new_eye, self.target_pos, Vec3.UP);
+            decomposed = (try self.camera.view.inverse()).decompose() catch Mat4.Decomposed.IDENTITY;
+            input = input.add(wasd);
+        },
     }
 
-    self.is_dragging = in_use;
+    self.state = new_state;
+
     if (!in_use) {
-        if (self.is_hovered and !c.ImGuizmo_IsUsingAny()) {
-            if (Editor.inputs.isMouseButtonDown(.Left)) {
+        if (self.is_hovered and !gizmo.isOverAny()) {
+            if (Editor.inputs.isMouseButtonPressed(.left)) {
                 const mouse_pos = Editor.inputs.mousePos();
                 const ray = screenPosToRay(mouse_pos, self.camera, .{
                     .x = self.scene_window_rect.x,
@@ -576,3 +609,14 @@ fn computeOrbitEye(target: Vec3, orbit_angles: Vec2, distance: f32) Vec3 {
         target.z + distance * cos_pitch * cos_yaw,
     );
 }
+
+const State = enum {
+    idle,
+    free,
+    pan,
+    orbit,
+
+    fn inUse(s: State) bool {
+        return s != .idle;
+    }
+};

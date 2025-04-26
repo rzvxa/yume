@@ -254,9 +254,8 @@ pub fn processEvent(self: *Self, event: *c.SDL_Event) bool {
         c.SDL_EVENT_QUIT => return false,
         else => {},
     }
-    if (self.scene_window.is_focused) {
-        inputs.push(event);
-    } else if (self.game_window.is_game_window_focused) {
+    inputs.push(event);
+    if (self.game_window.is_game_window_focused) {
         self.ctx.inputs.push(event);
     }
 
