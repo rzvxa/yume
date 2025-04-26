@@ -67,7 +67,11 @@ pub const GPUCameraData = extern struct {
 };
 
 pub const GPUSceneData = extern struct {
-    lights: [4]Vec4,
+    pub const GPULightData = extern struct {
+        pos: Vec4,
+        color: Vec4,
+    };
+    lights: [4]GPULightData,
     ambient_color: Vec4,
     exposure: f32,
     gamma: f32,
@@ -1287,6 +1291,7 @@ pub fn drawObjects(
     ubo_set: c.VkDescriptorSet,
     cam: *const Camera,
     cam_pos: Vec3,
+    lights: [4]GPUSceneData.GPULightData,
 ) void {
     // ----- Camera & Scene Data Setup -----
     const curr_camera_data = GPUCameraData.fromCamera(cam, cam_pos);
@@ -1305,8 +1310,8 @@ pub fn drawObjects(
     const camera_data: *GPUCameraData = @ptrFromInt(@intFromPtr(data) + camera_data_offset);
     const scene_data: *GPUSceneData = @ptrFromInt(@intFromPtr(data) + scene_data_offset);
     camera_data.* = curr_camera_data;
-    const framed = @as(f32, @floatFromInt(self.frame_number)) / 120.0;
-    scene_data.ambient_color = Vec3.make(@sin(framed), 0.0, @cos(framed)).toVec4(1);
+    scene_data.lights = lights;
+    scene_data.ambient_color = Vec3.scalar(1).toVec4(0.01);
     scene_data.exposure = 4.5;
     scene_data.gamma = 2.2;
 

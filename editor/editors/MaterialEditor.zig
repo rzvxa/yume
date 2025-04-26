@@ -26,7 +26,7 @@ pub fn deinit(ptr: *anyopaque) void {
 }
 
 pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
-    var mat = ctx.world.getMutAligned(entity, ecs.components.Material, 8).?;
+    var mat = ctx.world.getMut(entity, ecs.components.Material).?;
     c.ImGui_PushID("material-reference");
     var urn = mat.uuid.urnZ();
     _ = c.ImGui_InputText("##material-reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);

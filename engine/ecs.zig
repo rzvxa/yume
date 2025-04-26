@@ -943,16 +943,19 @@ pub const components = struct {
     pub const Meta = @import("components/Meta.zig").Meta;
     pub const Uuid = @import("components/Uuid.zig").Uuid;
 
-    // pub const Position = @import("components/transform.zig").Position;
-    // pub const Rotation = @import("components/transform.zig").Rotation;
-    // pub const Scale = @import("components/transform.zig").Scale;
     pub const Transform = @import("components/transform.zig").Transform;
 
     pub const camera = @import("components/camera.zig");
+
+    pub const lights = @import("components/lights.zig");
+
     pub const mesh = @import("components/mesh.zig");
     pub const material = @import("components/material.zig");
 
     pub const Camera = camera.Camera;
+
+    pub const PointLight = lights.PointLight;
+
     pub const Mesh = mesh.Mesh;
     pub const Material = material.Material;
 

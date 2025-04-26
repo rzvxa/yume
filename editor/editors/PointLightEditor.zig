@@ -26,14 +26,14 @@ pub fn deinit(ptr: *anyopaque) void {
 }
 
 pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
-    var mesh = ctx.world.getMut(entity, ecs.components.Mesh).?;
-    var urn = mesh.uuid.urnZ();
-    c.ImGui_PushID("mesh-reference");
-    _ = c.ImGui_InputText("##mesh-reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);
-    c.ImGui_SameLine();
-    _ = c.ImGui_Button("...");
-    c.ImGui_SameLine();
-    _ = c.ImGui_Text("Mesh");
+    var light = ctx.world.getMut(entity, ecs.components.PointLight).?;
+    c.ImGui_PushID("point-light-editor");
+    var changed: bool = false;
+    changed = changed or c.ImGui_ColorEdit3("Color", @ptrCast(&light.color), 0);
+    changed = changed or c.ImGui_DragFloatEx("Intensity", @ptrCast(&light.intensity), 0.01, 0, 10, null, 0);
+    if (changed) {
+        ctx.world.modified(entity, ecs.components.PointLight);
+    }
     c.ImGui_PopID();
 }
 

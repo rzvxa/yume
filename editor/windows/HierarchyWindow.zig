@@ -191,6 +191,11 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) !bool {
             }
             _ = c.ImGui_MenuItem("Sphere*");
             _ = c.ImGui_MenuItem("Plane*");
+            if (c.ImGui_MenuItem("Suzanne")) {
+                const new_entity = ctx.world.entity(.{ .name = "Suzanne", .parent = entity });
+                ctx.world.set(new_entity, ecs.components.Mesh, (try Assets.getOrLoadMesh(try AssetsDatabase.getResourceId("builtin://suzanne.obj"))).*);
+                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try AssetsDatabase.getResourceId("builtin://materials/pbr.mat"))).*);
+            }
             c.ImGui_Separator();
             if (c.ImGui_MenuItem("Camera")) {
                 const new_entity = ctx.world.entity(.{ .name = "Camera", .parent = entity });
@@ -202,7 +207,10 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) !bool {
             }
             c.ImGui_Separator();
             _ = c.ImGui_MenuItem("Directional Light*");
-            _ = c.ImGui_MenuItem("Point Light*");
+            if (c.ImGui_MenuItem("Point Light")) {
+                const new_entity = ctx.world.entity(.{ .name = "Point Light", .parent = entity });
+                ctx.world.set(new_entity, ecs.components.PointLight, ecs.components.PointLight{});
+            }
             c.ImGui_EndMenu();
         }
         _ = c.ImGui_MenuItem("Copy*");

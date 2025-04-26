@@ -13,136 +13,114 @@ layout(set = 0, binding = 0) uniform UniformBufferCameraObject {
 	vec3 cam_pos;
 } camera_data;
 
+struct LightData {
+	vec4 pos;
+  vec4 color;
+};
+
 layout(set = 0, binding = 1) uniform UniformBufferSceneObject {
-	vec4 lights[FORWARD_LIGHT_COUNT];
-	vec4 ambient_color;
-	float exposure;
-	float gamma;
+	LightData lights[FORWARD_LIGHT_COUNT];
+	vec4      ambient_color;
+	float     exposure;
+	float     gamma;
 } scene_data;
 
-layout (set = 2, binding = 0) uniform sampler2D albedoMap;
-layout (set = 2, binding = 1) uniform sampler2D normalMap;
-layout (set = 2, binding = 2) uniform sampler2D aoMap;
-layout (set = 2, binding = 3) uniform sampler2D metallicMap;
-layout (set = 2, binding = 4) uniform sampler2D roughnessMap;
+layout (set = 2, binding = 0) uniform sampler2D albedo_map;
+layout (set = 2, binding = 1) uniform sampler2D normal_map;
+layout (set = 2, binding = 2) uniform sampler2D ao_map;
+layout (set = 2, binding = 3) uniform sampler2D metallic_map;
+layout (set = 2, binding = 4) uniform sampler2D roughness_map;
 
 
 layout (location = 0) out vec4 frag_color;
 
 #define PI 3.1415926535897932384626433832795
-#define ALBEDO pow(texture(albedoMap, in_uv).rgb, vec3(2.2))
 
-// From http://filmicgames.com/archives/75
-vec3 Uncharted2Tonemap(vec3 x) {
-	float A = 0.15;
-	float B = 0.50;
-	float C = 0.10;
-	float D = 0.20;
-	float E = 0.02;
-	float F = 0.30;
-	return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
-}
-
-// Normal Distribution function --------------------------------------
+// GGX Normal Distribution Function.
 float D_GGX(float dotNH, float roughness) {
-	float alpha = roughness * roughness;
-	float alpha2 = alpha * alpha;
-	float denom = dotNH * dotNH * (alpha2 - 1.0) + 1.0;
-	return (alpha2)/(PI * denom*denom);
+    float alpha = roughness * roughness;
+    float alpha2 = alpha * alpha;
+    float denom = dotNH * dotNH * (alpha2 - 1.0) + 1.0;
+    return alpha2 / (PI * denom * denom);
 }
 
-// Geometric Shadowing function --------------------------------------
-float G_SchlicksmithGGX(float dotNL, float dotNV, float roughness) {
-	float r = (roughness + 1.0);
-	float k = (r*r) / 8.0;
-	float GL = dotNL / (dotNL * (1.0 - k) + k);
-	float GV = dotNV / (dotNV * (1.0 - k) + k);
-	return GL * GV;
+// Schlick–Smith Geometry Function.
+float G_SchlickSmith(float dotNL, float dotNV, float roughness) {
+    float r = roughness + 1.0;
+    float k = (r * r) / 8.0;
+    float GL = dotNL / (dotNL * (1.0 - k) + k);
+    float GV = dotNV / (dotNV * (1.0 - k) + k);
+    return GL * GV;
 }
 
-// Fresnel function ----------------------------------------------------
+// Fresnel function with Schlick’s approximation.
 vec3 F_Schlick(float cosTheta, vec3 F0) {
-	return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
-}
-vec3 F_SchlickR(float cosTheta, vec3 F0, float roughness) {
-	return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
+    return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
 }
 
-vec3 specularContribution(vec3 L, vec3 V, vec3 N, vec3 F0, float metallic, float roughness) {
-	// Precalculate vectors and dot products	
-	vec3 H = normalize (V + L);
-	float dotNH = clamp(dot(N, H), 0.0, 1.0);
-	float dotNV = clamp(dot(N, V), 0.0, 1.0);
-	float dotNL = clamp(dot(N, L), 0.0, 1.0);
+// Calculate the Cook–Torrance specular contribution.
+vec3 calculateSpecularBRDF(vec3 L, vec3 V, vec3 N, vec3 F0, float roughness) {
+    vec3 H = normalize(V + L);    
+    float dotNH = max(dot(N, H), 0.0);
+    float dotNL = max(dot(N, L), 0.0);
+    float dotNV = max(dot(N, V), 0.0);
+    float dotVH = max(dot(V, H), 0.0);
 
-	// Light color fixed
-	vec3 lightColor = vec3(1.0);
+    float D = D_GGX(dotNH, roughness);
+    float G = G_SchlickSmith(dotNL, dotNV, roughness);
+    vec3 F = F_Schlick(dotVH, F0);
 
-	vec3 color = vec3(0.0);
-
-	if (dotNL > 0.0) {
-		// D = Normal distribution (Distribution of the microfacets)
-		float D = D_GGX(dotNH, roughness);
-		// G = Geometric shadowing term (Microfacets shadowing)
-		float G = G_SchlicksmithGGX(dotNL, dotNV, roughness);
-		// F = Fresnel factor (Reflectance depending on angle of incidence)
-		vec3 F = F_Schlick(dotNV, F0);
-		vec3 spec = D * F * G / (4.0 * dotNL * dotNV + 0.001);
-		vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);	
-		color += (kD * ALBEDO / PI + spec) * dotNL;
-	}
-
-	return color;
+    float denom = max(4.0 * dotNL * dotNV, 0.001);
+    return (D * G * F) / denom;
 }
 
-vec3 calculateNormal() {
-	vec3 tangent_normal = texture(normalMap, in_uv).xyz * 2.0 - 1.0;
-
-	vec3 N = normalize(in_normal);
-	vec3 T = normalize(in_tangent.xyz);
-	vec3 B = normalize(cross(N, T));
-	mat3 TBN = mat3(T, B, N);
-	return normalize(TBN * tangent_normal);
+// -----------------------------------------------------------------------------
+// Lambertian diffuse term.
+vec3 diffuseLambert(vec3 albedo, vec3 N, vec3 L) {
+    float dotNL = max(dot(N, L), 0.0);
+    return (albedo / PI) * dotNL;
 }
 
 void main() {
-	vec3 N = calculateNormal();
+    // Sample material parameters.
+    vec3 albedo    = texture(albedo_map, in_uv).rgb;
+    float metallic = texture(metallic_map, in_uv).r;
+    float roughness = texture(roughness_map, in_uv).r;
 
-	vec3 V = normalize(camera_data.cam_pos - in_world_pos);
-	vec3 R = reflect(-V, N);
+    // Use the vertex normal directly.
+    vec3 N = normalize(in_normal);
 
-	float metallic = texture(metallicMap, in_uv).r;
-	// float roughness = texture(roughnessMap, in_uv).r;
-	float roughness = 0;
+    // Compute the view vector (from fragment to camera).
+    vec3 V = normalize(camera_data.cam_pos - in_world_pos);
 
-	vec3 F0 = vec3(0.04);
-	F0 = mix(F0, ALBEDO, metallic);
+    // Calculate reflectance at normal incidence.
+    // Dielectrics tend to have F0 ~ 0.04; metals use the albedo.
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
-	vec3 Lo = vec3(0.0);
-	for(int i = 0; i < scene_data.lights[i].length(); i++) {
-		vec3 L = normalize(scene_data.lights[i].xyz - in_world_pos);
-		Lo += specularContribution(L, V, N, F0, metallic, roughness);
-	}
+    // Accumulate light contributions.
+    vec3 Lo = vec3(0.0);
+    for (int i = 0; i < FORWARD_LIGHT_COUNT; ++i) {
+        vec3 light_pos = scene_data.lights[i].pos.xyz;
+        vec3 light_color = scene_data.lights[i].color.xyz;
+        float light_intensity = scene_data.lights[i].color.a;
+        vec3 L = normalize(light_pos - in_world_pos);
 
+        // Evaluate both specular and diffuse lighting.
+        vec3 specular = calculateSpecularBRDF(L, V, N, F0, roughness);
+        vec3 diffuse  = diffuseLambert(albedo, N, L) * (1.0 - metallic);
 
-	vec3 diffuse = ALBEDO;
+        // Dot factor for the current light.
+        float NdotL = max(dot(N, L), 0.0);
+        Lo += (diffuse + specular) * light_color * light_intensity * NdotL;
+    }
 
-	vec3 F = F_SchlickR(max(dot(N, V), 0.0), F0, roughness);
+   // Add ambient light (without AO).
+    vec3 ambient = scene_data.ambient_color.rgb * scene_data.ambient_color.a * albedo;
+    vec3 color = ambient + Lo;
 
-	vec3 specular = 1 * F;
+    // Apply tone mapping (simulate exposure) and gamma correction.
+    color = vec3(1.0) - exp(-color * scene_data.exposure);
+    color = pow(color, vec3(1.0 / scene_data.gamma));
 
-	// Ambient part
-	vec3 kD = 1.0 - F;
-	kD *= 1.0 - metallic;
-	vec3 ambient = (kD * diffuse + specular) * texture(aoMap, in_uv).rrr;
-
-	vec3 color = ambient + Lo;
-
-	// Tone mapping
-	color = Uncharted2Tonemap(color * scene_data.exposure);
-	color = color * (1.0f / Uncharted2Tonemap(vec3(11.2f)));
-	// Gamma correction
-	color = pow(color, vec3(1.0f / scene_data.gamma));
-
-	frag_color = vec4(color, 1.0);
+    frag_color = vec4(color, 1.0);
 }

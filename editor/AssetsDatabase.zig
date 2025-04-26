@@ -39,7 +39,10 @@ pub fn init(allocator: std.mem.Allocator) !void {
         try register(.{ .urn = "61de2700-0eac-4fd5-9c56-0bd5b6b9ba10", .path = "materials/pbr.mat", .category = "builtin" });
         try register(.{ .urn = "ad4bc22b-3765-4a9d-bab7-7984e101428a", .path = "lost_empire-RGBA.png", .category = "builtin" });
         try register(.{ .urn = "00923d64-c2ca-4d36-abbd-90b1fbde7a48", .path = "1x1.png", .category = "builtin" });
+        try register(.{ .urn = "54dff348-3f93-429a-83c0-2d29b1ae00dd", .path = "1x1b.png", .category = "builtin" });
         try register(.{ .urn = "ac6b9d14-0a56-458a-a7cc-fd36ede79468", .path = "lost_empire.obj", .category = "builtin" });
+        try register(.{ .urn = "6d4f3849-e3d7-4cb0-b593-095a9afafb99", .path = "suzanne.obj", .category = "builtin" });
+        try register(.{ .urn = "d87d80a8-11cd-49ea-bdc9-d5d3b95725fc", .path = "suzanne.mtl", .category = "builtin" });
         try register(.{ .urn = "acc02aef-7ac0-46e7-b006-378c36ac1b27", .path = "u.obj", .category = "builtin" });
         try register(.{ .urn = "17c0ee4b-8fa0-43a7-a3d8-8bf7b5e73bb9", .path = "u.mtl", .category = "builtin" });
         try register(.{ .urn = "23400ade-52d7-416b-9679-884a49de1722", .path = "cube.obj", .category = "builtin" });
@@ -70,6 +73,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
         try register(.{ .urn = "72bb403a-8624-4541-bbaa-a85668340db1", .path = "icons/camera.png", .category = "editor" });
         try register(.{ .urn = "1e2e7db3-8b27-45b9-adf1-05e808175043", .path = "icons/mesh.png", .category = "editor" });
         try register(.{ .urn = "849d928a-a459-4df7-97c4-49877fba782c", .path = "icons/material.png", .category = "editor" });
+        try register(.{ .urn = "e54f4382-dc55-4380-89db-0475bc02dd03", .path = "icons/point-light.png", .category = "editor" });
 
         try register(.{ .urn = "682be1c4-a465-40ed-a4f0-31a07f2b1a20", .path = "icons/error.png", .category = "editor" });
         try register(.{ .urn = "a330bc08-999b-46df-a49b-f959a3b75b65", .path = "icons/warning.png", .category = "editor" });
