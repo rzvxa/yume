@@ -210,7 +210,10 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) !bool {
                 }));
             }
             c.ImGui_Separator();
-            _ = c.ImGui_MenuItem("Directional Light*");
+            if (c.ImGui_MenuItem("Directional Light")) {
+                const new_entity = ctx.world.entity(.{ .name = "Directional Light", .parent = entity });
+                ctx.world.set(new_entity, ecs.components.DirectionalLight, ecs.components.DirectionalLight{});
+            }
             if (c.ImGui_MenuItem("Point Light")) {
                 const new_entity = ctx.world.entity(.{ .name = "Point Light", .parent = entity });
                 ctx.world.set(new_entity, ecs.components.PointLight, ecs.components.PointLight{});

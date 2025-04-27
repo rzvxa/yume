@@ -22,7 +22,7 @@ const FrameData = struct {
     d: *Self,
     camera: ?*const components.Camera = null,
     camera_pos: Vec3 = Vec3.ZERO,
-    lights: []GPULightData = undefined,
+    point_lights: []GPULightData = undefined,
 };
 
 const Self = @This();
@@ -105,18 +105,20 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                     var sfa = std.heap.stackFallback(512, me.app.allocator);
                     const a = sfa.get();
                     var iter = me.d.point_lights_query.iter();
-                    var lights = std.ArrayList(GPULightData).init(a);
+                    var point_lights = std.ArrayList(GPULightData).init(a);
                     while (iter.next()) {
                         const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
-                        const point_lights = ecs.field(&iter, components.PointLight, @alignOf(components.PointLight), 1).?;
-                        for (point_lights, transforms) |light, transform| {
-                            lights.append(.{
-                                .pos = transform.position().toVec4(1),
-                                .color = light.color.toVec4(light.intensity),
+                        const pls = ecs.field(&iter, components.PointLight, @alignOf(components.PointLight), 1).?;
+                        for (pls, transforms) |light, transform| {
+                            point_lights.append(.{
+                                .pos = transform.position(),
+                                .color = light.color,
+                                .intensity = light.intensity,
+                                .range = light.range,
                             }) catch @panic("OOM");
                         }
                     }
-                    break :blk lights;
+                    break :blk point_lights;
                 };
                 defer point_lights.deinit();
 
@@ -131,14 +133,14 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
 
                         std.mem.sort(GPULightData, point_lights.items, decomposed.translation, struct {
                             pub fn f(cam_pos: Vec3, a: GPULightData, b: GPULightData) bool {
-                                return a.pos.toVec3().distanceTo(cam_pos) < b.pos.toVec3().distanceTo(cam_pos);
+                                return a.pos.distanceTo(cam_pos) < b.pos.distanceTo(cam_pos);
                             }
                         }.f);
 
                         var new_me = me.*;
                         new_me.camera = camera;
                         new_me.camera_pos = transform.position();
-                        new_me.lights = point_lights.items;
+                        new_me.point_lights = point_lights.items;
                         _ = c.ecs_run(iter.inner.real_world, me.d.render_system, me.app.delta, &new_me);
                     }
                 }
@@ -167,18 +169,20 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
 
 fn renderSys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mesh, materials: []components.Material) void {
     const me: *FrameData = @ptrCast(@alignCast(it.param));
-    var lights = std.mem.zeroes([4]Engine.GPUSceneData.GPULightData);
-    std.debug.assert(me.lights.len < 4);
-    @memcpy(lights[0..me.lights.len], me.lights);
+    var point_lights = std.mem.zeroes([4]Engine.GPUSceneData.GPULightData);
+    std.debug.assert(me.point_lights.len < 4);
+    @memcpy(point_lights[0..me.point_lights.len], me.point_lights);
     me.app.engine.drawObjects(
         me.cmd,
-        matrices,
-        meshes,
-        materials,
-        me.app.engine.camera_and_scene_buffer,
-        me.app.engine.camera_and_scene_set,
-        me.camera.?,
-        me.camera_pos,
-        lights,
+        .{
+            .matrices = matrices,
+            .meshes = meshes,
+            .materials = materials,
+            .ubo_buf = me.app.engine.camera_and_scene_buffer,
+            .ubo_set = me.app.engine.camera_and_scene_set,
+            .cam = me.camera.?,
+            .cam_pos = me.camera_pos,
+            .point_lights = point_lights,
+        },
     );
 }

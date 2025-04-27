@@ -235,7 +235,7 @@ pub fn drawFrustum(inv_view_proj: Mat4) DrawError!void {
     // Unproject NDC corners to world space using the provided inv_view_proj.
     var world_corners: [8]Vec3 = undefined;
     for (ndc_corners, 0..) |corner, idx| {
-        world_corners[idx] = inv_view_proj.mulVec3(corner).mul(Vec3.make(1, 1, -1));
+        world_corners[idx] = inv_view_proj.mulVec3(corner);
     }
 
     // Define the indices for the frustum edges.
@@ -427,7 +427,7 @@ fn clipLine3D(a: Vec3, b: Vec3, near: f32, far: f32) ?[2]Vec3 {
 /// Draws a line edge that fades toward the far end.
 /// If segments == 1, the edge is drawn as a single segment with the original color.
 /// Otherwise, the edge is subdivided into (segments+1) points and a gradient is applied.
-fn drawEdge(world1: Vec3, world2: Vec3, color: c.ImU32, segments: usize, max_darken_percent: u8) void {
+pub fn drawEdge(world1: Vec3, world2: Vec3, color: c.ImU32, segments: usize, max_darken_percent: u8) void {
     // used for line clipping, perhaps it should use the editor's near/far? debug lines are cheap to draw
     const near_distance: f32 = 0.1;
     const far_distance: f32 = 10000.0;
@@ -475,6 +475,38 @@ fn drawEdge(world1: Vec3, world2: Vec3, color: c.ImU32, segments: usize, max_dar
     }
 }
 
+pub fn drawCircle(
+    origin: Vec3,
+    axis_x: Vec3,
+    axis_y: Vec3,
+    radius: f32,
+    color: c.ImU32,
+    segments: usize,
+) void {
+    var prev: Vec3 = origin.add(axis_x.mulf(radius));
+    for (0..segments) |i| {
+        const angle: f32 = 2.0 * std.math.pi * (@as(f32, @floatFromInt(i + 1))) / @as(f32, @floatFromInt(segments));
+        const curr: Vec3 = origin.add(axis_x.mulf(radius * std.math.cos(angle))
+            .add(axis_y.mulf(radius * std.math.sin(angle))));
+        drawEdge(prev, curr, color, 1, 0);
+        prev = curr;
+    }
+}
+
+pub fn drawSphere(
+    origin: Vec3,
+    radius: f32,
+    color: c.ImU32,
+    segments: usize,
+) void {
+    // Circle in the XY plane.
+    drawCircle(origin, Vec3.make(1, 0, 0), Vec3.make(0, 1, 0), radius, color, segments);
+    // Circle in the XZ plane.
+    drawCircle(origin, Vec3.make(1, 0, 0), Vec3.make(0, 0, 1), radius, color, segments);
+    // Circle in the YZ plane.
+    drawCircle(origin, Vec3.make(0, 1, 0), Vec3.make(0, 0, 1), radius, color, segments);
+}
+
 fn drawSanityCheck(g: *const GizmoContext) DrawError!void {
     if (!g.inframe) {
         return error.NotInAFrame;
@@ -483,19 +515,19 @@ fn drawSanityCheck(g: *const GizmoContext) DrawError!void {
 
 pub const DrawError = error{NotInAFrame};
 
-fn black() c.ImU32 {
+pub fn black() c.ImU32 {
     return c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0, .y = 0, .z = 0, .w = 1 });
 }
 
-fn red() c.ImU32 {
+pub fn red() c.ImU32 {
     return c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 1, .y = 0, .z = 0, .w = 1 });
 }
 
-fn green() c.ImU32 {
+pub fn green() c.ImU32 {
     return c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0, .y = 1, .z = 0, .w = 1 });
 }
 
-fn blue() c.ImU32 {
+pub fn blue() c.ImU32 {
     return c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0, .y = 0, .z = 1, .w = 1 });
 }
 

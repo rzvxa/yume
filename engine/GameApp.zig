@@ -78,6 +78,7 @@ pub fn init(a: std.mem.Allocator, loader: assets.ResourceLoader, window_title: [
     self.registerComponent(ecs.components.Transform);
 
     self.registerComponent(ecs.components.Camera);
+    self.registerComponent(ecs.components.DirectionalLight);
     self.registerComponent(ecs.components.PointLight);
 
     self.registerComponent(ecs.components.Mesh);

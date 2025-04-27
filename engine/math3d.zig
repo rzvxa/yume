@@ -381,6 +381,10 @@ pub const Quat = extern struct {
         );
     }
 
+    pub fn toVec4(self: Self) Vec4 {
+        return @as(*const Vec4, @ptrCast(&self)).*;
+    }
+
     pub fn toEuler(self: Self) Vec3 {
         const half_pi: f32 = std.math.pi / 2.0;
         var euler = Vec3.ZERO;

@@ -11,6 +11,7 @@ const EntityMetaEditor = @import("entity.zig");
 const ObjectTransformEditor = @import("transform.zig");
 const MeshEditor = @import("MeshEditor.zig");
 const MaterialEditor = @import("MaterialEditor.zig");
+const DirectionalLightEditor = @import("DirectionalLightEditor.zig");
 const PointLightEditor = @import("PointLightEditor.zig");
 const CameraEditor = @import("CameraEditor.zig");
 const Editor = @import("../Editor.zig");
@@ -164,6 +165,7 @@ pub fn onDrawGizmos(self: *Self) void {
 
 fn registerBuiltinComponentEditors(self: *Self) void {
     self.component_editor_types.put(ecs.typeId(ecs.components.Camera), CameraEditor.asComponentEditor()) catch @panic("OOM");
+    self.component_editor_types.put(ecs.typeId(ecs.components.DirectionalLight), DirectionalLightEditor.asComponentEditor()) catch @panic("OOM");
     self.component_editor_types.put(ecs.typeId(ecs.components.PointLight), PointLightEditor.asComponentEditor()) catch @panic("OOM");
     self.component_editor_types.put(ecs.typeId(ecs.components.Mesh), MeshEditor.asComponentEditor()) catch @panic("OOM");
     self.component_editor_types.put(ecs.typeId(ecs.components.Material), MaterialEditor.asComponentEditor()) catch @panic("OOM");

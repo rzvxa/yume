@@ -959,6 +959,7 @@ pub const components = struct {
 
     pub const Camera = camera.Camera;
 
+    pub const DirectionalLight = lights.DirectionalLight;
     pub const PointLight = lights.PointLight;
 
     pub const Mesh = mesh.Mesh;

@@ -14,12 +14,15 @@ layout(set = 0, binding = 0) uniform UniformBufferCameraObject {
 } camera_data;
 
 struct LightData {
-	vec4 pos;
-  vec4 color;
+	vec3  pos;
+  float range; // unused in directional lighting
+  vec3  color;
+  float intensity;
 };
 
 layout(set = 0, binding = 1) uniform UniformBufferSceneObject {
-	LightData lights[FORWARD_LIGHT_COUNT];
+	LightData point_lights[FORWARD_LIGHT_COUNT];
+  LightData directional_light;
 	vec4      ambient_color;
 	float     exposure;
 	float     gamma;
@@ -60,7 +63,7 @@ vec3 F_Schlick(float cosTheta, vec3 F0) {
 
 // Calculate the Cook–Torrance specular contribution.
 vec3 calculateSpecularBRDF(vec3 L, vec3 V, vec3 N, vec3 F0, float roughness) {
-    vec3 H = normalize(V + L);    
+    vec3 H = normalize(V + L);
     float dotNH = max(dot(N, H), 0.0);
     float dotNL = max(dot(N, L), 0.0);
     float dotNV = max(dot(N, V), 0.0);
@@ -81,6 +84,29 @@ vec3 diffuseLambert(vec3 albedo, vec3 N, vec3 L) {
     return (albedo / PI) * dotNL;
 }
 
+vec3 radiance(
+            vec3  L,
+            vec3  N,
+            vec3  V,
+            vec3  F0,
+
+            vec3  light_color,
+            float light_intensity,
+
+            vec3  albedo,
+
+            float roughness,
+            float metallic
+        ) {
+        // Evaluate both specular and diffuse lighting.
+        vec3 specular = calculateSpecularBRDF(L, V, N, F0, roughness);
+        vec3 diffuse  = diffuseLambert(albedo, N, L) * (1.0 - metallic);
+
+        // Dot factor for the current light.
+        float NdotL = max(dot(N, L), 0.0);
+        return (diffuse + specular) * light_color * light_intensity * NdotL;
+}
+
 void main() {
     // Sample material parameters.
     vec3 albedo    = texture(albedo_map, in_uv).rgb;
@@ -99,19 +125,20 @@ void main() {
 
     // Accumulate light contributions.
     vec3 Lo = vec3(0.0);
+
+    {
+        LightData light = scene_data.directional_light;
+        vec3 L = normalize(-light.pos);
+        Lo += radiance(L, N, V, F0, light.color, light.intensity, albedo, roughness, metallic);
+    }
+
     for (int i = 0; i < FORWARD_LIGHT_COUNT; ++i) {
-        vec3 light_pos = scene_data.lights[i].pos.xyz;
-        vec3 light_color = scene_data.lights[i].color.xyz;
-        float light_intensity = scene_data.lights[i].color.a;
-        vec3 L = normalize(light_pos - in_world_pos);
-
-        // Evaluate both specular and diffuse lighting.
-        vec3 specular = calculateSpecularBRDF(L, V, N, F0, roughness);
-        vec3 diffuse  = diffuseLambert(albedo, N, L) * (1.0 - metallic);
-
-        // Dot factor for the current light.
-        float NdotL = max(dot(N, L), 0.0);
-        Lo += (diffuse + specular) * light_color * light_intensity * NdotL;
+        LightData light = scene_data.point_lights[i];
+        vec3 L = normalize(light.pos - in_world_pos);
+        float distance = length(light.pos - in_world_pos);
+        float attenuation = clamp(1.0 - (distance / light.range), 0.0, 1.0);
+        attenuation = attenuation * attenuation;
+        Lo += radiance(L, N, V, F0, light.color, light.intensity, albedo, roughness, metallic) * attenuation;
     }
 
    // Add ambient light (without AO).

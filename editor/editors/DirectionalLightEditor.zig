@@ -27,37 +27,40 @@ pub fn deinit(ptr: *anyopaque) void {
 }
 
 pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
-    var light = ctx.world.getMut(entity, ecs.components.PointLight).?;
-    c.ImGui_PushID("point-light-editor");
+    var light = ctx.world.getMut(entity, ecs.components.DirectionalLight).?;
+    c.ImGui_PushID("direcitonal-light-editor");
     var changed: bool = false;
     changed = c.ImGui_ColorEdit3("Color", @ptrCast(&light.color), 0) or changed;
 
     const fmax = std.math.floatMax(f32);
     const flag = c.ImGuiSliderFlags_ClampZeroRange;
     changed = c.ImGui_DragFloatEx("Intensity", @ptrCast(&light.intensity), 0.01, 0, fmax, null, flag) or changed;
-    changed = c.ImGui_DragFloatEx("Range", @ptrCast(&light.range), 0.01, 0, fmax, null, flag) or changed;
 
     if (changed) {
-        ctx.world.modified(entity, ecs.components.PointLight);
+        ctx.world.modified(entity, ecs.components.DirectionalLight);
     }
     c.ImGui_PopID();
 }
 
 fn onGizmo(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
-    // Get the light’s transform and its world position.
     var transform = ctx.world.get(entity, ecs.components.Transform).?;
     const decomposed = transform.decompose();
+    const basis = decomposed.rotation.toBasisVectors();
     const origin = decomposed.translation;
 
-    const light = ctx.world.get(entity, ecs.components.PointLight).?;
-
-    const radius = light.range;
-
-    const segments: usize = 32;
-
+    const ray_count: usize = 8;
+    const ray_len: f32 = 1.0;
+    const offset_radius: f32 = 0.1;
     const color = c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 228.0 / 255.0, .y = 143.0 / 255.0, .z = 32.0 / 255.0, .w = 1 });
 
-    gizmo.drawSphere(origin, radius, color, segments);
+    for (0..ray_count) |i| {
+        const angle: f32 = (2.0 * std.math.pi * @as(f32, @floatFromInt(i))) / @as(f32, @floatFromInt(ray_count));
+        const offset: Vec3 = basis.right.mulf(std.math.cos(angle)).add(basis.up.mulf(std.math.sin(angle)));
+        const rayStart: Vec3 = origin.add(offset.mulf(offset_radius));
+        const rayEnd: Vec3 = rayStart.add(basis.forward.mulf(ray_len));
+
+        gizmo.drawEdge(rayStart, rayEnd, color, 1, 0);
+    }
 }
 
 pub fn asComponentEditor() ComponentEditor {
@@ -65,6 +68,6 @@ pub fn asComponentEditor() ComponentEditor {
         .init = @This().init,
         .deinit = @This().deinit,
         .edit = @This().edit,
-        .gizmo = @This().onGizmo,
+        .gizmo = Self.onGizmo,
     };
 }

@@ -61,6 +61,7 @@ editor_camera_and_scene_set: c.VkDescriptorSet = null,
 
 frame_userdata: FrameData = undefined,
 cast_query: *ecs.Query,
+directional_light_query: *ecs.Query,
 point_lights_query: *ecs.Query,
 transform_query: *ecs.Query,
 render_system: ecs.Entity,
@@ -75,6 +76,13 @@ pub fn init(ctx: *GameApp, on_draw_gizmos: *const fn (*anyopaque) void, on_draw_
             .{ .terms = .{
                 .{ .id = ecs.typeId(components.Transform) },
                 .{ .id = ecs.typeId(components.Mesh) },
+            } },
+        )),
+        .directional_light_query = ctx.world.query(&std.mem.zeroInit(
+            c.ecs_query_desc_t,
+            .{ .terms = .{
+                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.DirectionalLight) },
             } },
         )),
         .point_lights_query = ctx.world.query(&std.mem.zeroInit(
@@ -108,13 +116,14 @@ pub fn init(ctx: *GameApp, on_draw_gizmos: *const fn (*anyopaque) void, on_draw_
 
 pub fn deinit(self: *Self) void {
     self.transform_query.deinit();
+    self.directional_light_query.deinit();
     self.point_lights_query.deinit();
     self.cast_query.deinit();
 }
 
 pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
     self.frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .d = self };
-    if (c.ImGui_Begin("Scene", null, c.ImGuiWindowFlags_NoCollapse | c.ImGuiWindowFlags_NoNav)) {
+    if (c.ImGui_Begin("Scene", null, c.ImGuiWindowFlags_NoCollapse | c.ImGuiWindowFlags_NoNav | c.ImGuiWindowFlags_NoScrollbar | c.ImGuiWindowFlags_NoScrollWithMouse)) {
         self.is_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
         self.is_hovered = c.ImGui_IsWindowHovered(c.ImGuiFocusedFlags_None);
         const editor_image = c.ImGui_GetWindowDrawList();
@@ -496,6 +505,24 @@ fn focus(self: *Self, target: Vec3, distance: f32) void {
 fn sys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mesh, materials: []components.Material) void {
     const me: *FrameData = @ptrCast(@alignCast(it.param));
 
+    const directional_light: GPULightData = blk: {
+        var iter = me.d.directional_light_query.iter();
+        while (iter.next()) {
+            const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
+            const lights = ecs.field(&iter, components.DirectionalLight, @alignOf(components.DirectionalLight), 1).?;
+            for (lights, transforms) |light, transform| {
+                iter.deinit();
+                break :blk .{
+                    .pos = transform.rotation().toBasisVectors().forward,
+                    .color = light.color,
+                    .intensity = light.intensity,
+                    .range = 0,
+                };
+            }
+        }
+        break :blk std.mem.zeroes(GPULightData);
+    };
+
     const point_lights = blk: {
         var sfa = std.heap.stackFallback(512, me.app.allocator);
         const a = sfa.get();
@@ -506,8 +533,10 @@ fn sys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mes
             const point_lights = ecs.field(&iter, components.PointLight, @alignOf(components.PointLight), 1).?;
             for (point_lights, transforms) |light, transform| {
                 lights.append(.{
-                    .pos = transform.position().toVec4(1),
-                    .color = light.color.toVec4(light.intensity),
+                    .pos = transform.position(),
+                    .color = light.color,
+                    .intensity = light.intensity,
+                    .range = light.range,
                 }) catch @panic("OOM");
             }
         }
@@ -517,7 +546,7 @@ fn sys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mes
 
     std.mem.sort(GPULightData, point_lights.items, me.d.camera_pos, struct {
         pub fn f(cam_pos: Vec3, a: GPULightData, b: GPULightData) bool {
-            return a.pos.toVec3().distanceTo(cam_pos) < b.pos.toVec3().distanceTo(cam_pos);
+            return a.pos.distanceTo(cam_pos) < b.pos.distanceTo(cam_pos);
         }
     }.f);
 
@@ -528,14 +557,17 @@ fn sys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mes
     }
     me.app.engine.drawObjects(
         me.cmd,
-        matrices,
-        meshes,
-        materials,
-        me.d.editor_camera_and_scene_buffer,
-        me.d.editor_camera_and_scene_set,
-        &me.d.camera,
-        me.d.camera_pos,
-        lights,
+        .{
+            .matrices = matrices,
+            .meshes = meshes,
+            .materials = materials,
+            .ubo_buf = me.d.editor_camera_and_scene_buffer,
+            .ubo_set = me.d.editor_camera_and_scene_set,
+            .cam = &me.d.camera,
+            .cam_pos = me.d.camera_pos,
+            .directional_light = directional_light,
+            .point_lights = lights,
+        },
     );
 }
 

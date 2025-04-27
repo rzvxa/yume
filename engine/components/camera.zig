@@ -251,7 +251,7 @@ pub const Camera = extern struct {
         const rot_y = Mat4.rotation(Vec3.make(0.0, 1.0, 0.0), std.math.degreesToRadians(rot.y));
         const rot_z = Mat4.rotation(Vec3.make(0.0, 0.0, 1.0), std.math.degreesToRadians(rot.z));
 
-        const g = Vec3.make(-pos.x, -pos.y, pos.z);
+        const g = Vec3.make(-pos.x, -pos.y, -pos.z);
         self.view = rot_x.mul(rot_y).mul(rot_z).mul(Mat4.translation(g));
     }
 
@@ -273,7 +273,7 @@ pub const Camera = extern struct {
         const rot_y = Mat4.rotation(Vec3.make(0.0, 1.0, 0.0), rot.y);
         const rot_z = Mat4.rotation(Vec3.make(0.0, 0.0, 1.0), rot.z);
 
-        const g = Vec3.make(-pos.x, -pos.y, pos.z);
+        const g = Vec3.make(-pos.x, -pos.y, -pos.z);
         self.view = rot_x.mul(rot_y).mul(rot_z).mul(Mat4.translation(g));
     }
 
