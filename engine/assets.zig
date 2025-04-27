@@ -10,7 +10,7 @@ const components = @import("ecs.zig").components;
 
 const Mesh = components.Mesh;
 const Vertex = components.mesh.Vertex;
-const load_from_obj = components.mesh.load_from_obj;
+const load_from_obj = components.mesh.load_from_obj2;
 
 const Material = components.Material;
 
@@ -106,13 +106,13 @@ pub const Assets = struct {
         return asset.data.texture;
     }
 
-    pub fn loadTexture(id: Uuid) !TextureAssetHandle {
-        if (instance.loaded_ids.contains(id)) {
-            return TextureAssetHandle.fromAssetIdUnsafe(id);
+    pub fn loadTexture(img_id: Uuid) !TextureAssetHandle {
+        if (instance.loaded_ids.contains(img_id)) {
+            return TextureAssetHandle.fromAssetIdUnsafe(img_id);
         }
-        const handle = TextureAssetHandle{ .uuid = id };
+        const handle = TextureAssetHandle.fromAssetIdUnsafe(img_id);
 
-        const image = try Self.getOrLoadImage(id);
+        const image = try Self.getOrLoadImage(img_id);
 
         const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -136,7 +136,7 @@ pub const Assets = struct {
 
         var texture = try instance.allocator.create(Texture);
         texture.* = Texture{
-            .image = image,
+            .image = image.*,
             .image_view = null,
         };
 
@@ -144,7 +144,7 @@ pub const Assets = struct {
 
         const loaded = LoadedAsset{ .data = .{ .texture = texture } };
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
-        try instance.loaded_ids.put(id, {});
+        try instance.loaded_ids.put(handle.uuid, {});
         return handle;
     }
 
@@ -292,7 +292,7 @@ pub const Assets = struct {
         pipeline_builder.vertex_input_state.pVertexBindingDescriptions = vertex_descritpion.bindings.ptr;
         pipeline_builder.vertex_input_state.vertexBindingDescriptionCount = @as(u32, @intCast(vertex_descritpion.bindings.len));
 
-        const vert_code = try instance.loader(instance.allocator, matparsed.value.passes.vertex, 20_000);
+        const vert_code = try instance.loader(instance.allocator, matparsed.value.shader.passes.vertex, 20_000);
         defer instance.allocator.free(vert_code);
         const vert_module = instance.engine.createShaderModule(vert_code) orelse null;
         defer c.vkDestroyShaderModule(instance.engine.device, vert_module, Engine.vk_alloc_cbs);
@@ -306,14 +306,60 @@ pub const Assets = struct {
             .size = @sizeOf(Engine.MeshPushConstants),
         });
 
-        const set_layouts = try instance.allocator.alloc(c.VkDescriptorSetLayout, matparsed.value.set_layouts.len);
-        defer instance.allocator.free(set_layouts);
-        for (matparsed.value.set_layouts, 0..) |set_layout, i| {
-            set_layouts[i] = switch (set_layout) {
-                .global => instance.engine.global_set_layout,
-                .object => instance.engine.object_set_layout,
-                .single_texture => instance.engine.single_texture_set_layout,
-            };
+        var set_layouts = [3]c.VkDescriptorSetLayout{
+            instance.engine.global_set_layout,
+            instance.engine.object_set_layout,
+            instance.engine.getDescriptorSetLayout(matparsed.value.shader.layouts) catch @panic("Failed to create shader resouces descriptor set layout"),
+        };
+        const resources_uuids = try instance.allocator.alloc(Uuid, matparsed.value.resources.len);
+
+        // Allocate descriptor set for shader resources
+        const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
+            .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = instance.engine.descriptor_pool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &set_layouts[2],
+        });
+
+        var resource_set: c.VkDescriptorSet = undefined;
+        check_vk(c.vkAllocateDescriptorSets(instance.engine.device, &descriptor_set_alloc_info, &resource_set)) catch @panic("Failed to allocate descriptor set");
+
+        for (matparsed.value.shader.layouts, matparsed.value.resources, 0..) |layout, resource, i| {
+            switch (layout) {
+                .texture => {
+                    resources_uuids[i] = resource.?;
+                    const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
+                        .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                        .magFilter = c.VK_FILTER_NEAREST,
+                        .minFilter = c.VK_FILTER_NEAREST,
+                        .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                        .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                        .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                    });
+                    var sampler: c.VkSampler = undefined;
+                    check_vk(c.vkCreateSampler(instance.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
+                    instance.engine.deletion_queue.append(Engine.VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("Out of memory");
+
+                    const tex = Self.getOrLoadTexture(resource.?) catch @panic("Failed to load texture");
+                    const descriptor_image_info = std.mem.zeroInit(c.VkDescriptorImageInfo, .{
+                        .sampler = sampler,
+                        .imageView = tex.image_view,
+                        .imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    });
+
+                    const write_descriptor_set = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
+                        .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                        .dstSet = resource_set,
+                        .dstBinding = @as(u32, @intCast(i)),
+                        .descriptorCount = 1,
+                        .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                        .pImageInfo = &descriptor_image_info,
+                    });
+
+                    c.vkUpdateDescriptorSets(instance.engine.device, 1, &write_descriptor_set, 0, null);
+                },
+                .cube => @panic("TODO"),
+            }
         }
         var pipeline_layout_ci = std.mem.zeroInit(c.VkPipelineLayoutCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -331,7 +377,7 @@ pub const Assets = struct {
             &pipeline_layout,
         )) catch @panic("Failed to create textured mesh pipeline layout");
 
-        const frag_code = try instance.loader(instance.allocator, matparsed.value.passes.fragment, 20_000);
+        const frag_code = try instance.loader(instance.allocator, matparsed.value.shader.passes.fragment, 20_000);
         defer instance.allocator.free(frag_code);
         const frag_module = instance.engine.createShaderModule(frag_code) orelse null;
         defer c.vkDestroyShaderModule(instance.engine.device, frag_module, Engine.vk_alloc_cbs);
@@ -345,6 +391,10 @@ pub const Assets = struct {
             .uuid = id,
             .pipeline = pipeline,
             .pipeline_layout = pipeline_layout,
+
+            .rsc_count = @intCast(resources_uuids.len),
+            .rsc_uuids = resources_uuids.ptr,
+            .rsc_descriptor_set = resource_set,
         };
 
         const loaded = LoadedAsset{ .data = .{ .material = material } };
@@ -428,11 +478,11 @@ pub const TextureAssetHandle = struct {
     }
 
     inline fn fromAssetHandleUnsafe(hndl: AssetHandle) @This() {
-        return .{ .uuid = hndl.uuid };
+        return fromAssetIdUnsafe(hndl.uuid);
     }
 
     inline fn fromAssetIdUnsafe(id: Uuid) @This() {
-        return .{ .uuid = id };
+        return .{ .uuid = .{ .raw = id.raw + 1 } };
     }
 };
 
@@ -526,6 +576,7 @@ const LoadedAsset = struct {
                 layout_del.delete(Assets.instance.engine);
                 var pipeline_del = Engine.VulkanDeleter.make(it.pipeline, c.vkDestroyPipeline);
                 pipeline_del.delete(Assets.instance.engine);
+                Assets.instance.allocator.free(it.rsc_uuids[0..@intCast(it.rsc_count)]);
                 Assets.instance.allocator.destroy(it);
             },
             .scene => {
@@ -536,43 +587,60 @@ const LoadedAsset = struct {
     }
 };
 
-const Passes = struct {
-    vertex: Uuid,
-    fragment: Uuid,
-};
-
-const SetLayout = enum {
-    global,
-    object,
-    single_texture,
+const ShaderDef = struct {
+    const Passes = struct {
+        vertex: Uuid,
+        fragment: Uuid,
+    };
+    passes: Passes,
+    layouts: []Engine.UniformBindingKind,
 };
 
 const MaterialDef = struct {
     name: []const u8,
-    passes: Passes,
-    set_layouts: []SetLayout,
+    shader: ShaderDef,
+    resources: []?Uuid,
+
+    pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, opts: anytype) !@This() {
+        var tk = try jrs.next();
+        if (tk != .object_begin) return error.UnexpectedEndOfInput;
+
+        var result: MaterialDef = undefined;
+        var resources: ?[]?Uuid = null;
+
+        while (true) {
+            tk = try jrs.nextAlloc(a, .alloc_if_needed);
+            if (tk == .object_end) break;
+
+            const field_name = switch (tk) {
+                inline .string, .allocated_string => |slice| slice,
+                else => {
+                    log.err("{}\n", .{tk});
+                    return error.UnexpectedToken;
+                },
+            };
+
+            if (std.mem.eql(u8, field_name, "name")) {
+                result.name = switch (try jrs.next()) {
+                    inline .string => |slice| try a.dupeZ(u8, slice),
+                    else => {
+                        log.err("{}\n", .{tk});
+                        return error.UnexpectedToken;
+                    },
+                };
+            } else if (std.mem.eql(u8, field_name, "shader")) {
+                result.shader = try std.json.innerParse(ShaderDef, a, jrs, opts);
+            } else if (std.mem.eql(u8, field_name, "resources")) {
+                resources = try std.json.innerParse([]?Uuid, a, jrs, opts);
+            } else {
+                try jrs.skipValue();
+            }
+        }
+
+        result.resources = resources orelse try a.alloc(?Uuid, 0);
+
+        return result;
+    }
 };
-
-fn parseJson(json_str: []const u8, allocator: *std.mem.Allocator) !Material {
-    const json = std.json.parse(json_str, allocator) catch return error.InvalidJson;
-    return Material{
-        .name = json.get([]const u8, "name") catch return error.MissingKey,
-        .passes = Passes{
-            .vertex = json.get([]const u8, "passes").get([]const u8, "vertex") catch return error.MissingKey,
-            .fragment = json.get([]const u8, "passes").get([]const u8, "fragment") catch return error.MissingKey,
-        },
-        .set_layouts = try json.get([]const u8, "set_layouts").map(setLayoutFromString),
-    };
-}
-
-fn setLayoutFromString(layout: []const u8) !SetLayout {
-    if (std.mem.eql(u8, layout, "global")) {
-        return SetLayout.global;
-    } else if (std.mem.eql(u8, layout, "object")) {
-        return SetLayout.object;
-    } else if (std.mem.eql(u8, layout, "single_texture")) {
-        return SetLayout.single_texture;
-    } else unreachable;
-}
 
 pub const ResourceLoader = *const fn (allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) error{ ResourceNotFound, FailedToOpenResource, FailedToReadResource }![]u8;

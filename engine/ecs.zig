@@ -141,6 +141,10 @@ pub const World = struct {
                 .Struct => if (@hasDecl(T, "editorIcon")) T.editorIcon() else null,
                 else => null,
             },
+            .billboard = switch (@typeInfo(T)) {
+                .Struct => if (@hasDecl(T, "editorBillboard")) T.editorBillboard() else null,
+                else => null,
+            },
             .size = @sizeOf(T),
             .alignment = @alignOf(T),
             .default = if (@hasDecl(T, "default")) struct {
@@ -600,6 +604,7 @@ pub const SerializationResult = extern struct {
 pub const ComponentDef = extern struct {
     id: Entity,
     icon: ?[*:0]const u8,
+    billboard: ?[*:0]const u8,
     size: usize,
     alignment: usize,
     default: ?*const fn (self: *anyopaque, entity: Entity, ctx: *GameApp, resourceResolver: ResourceResolver) callconv(.C) bool,
@@ -943,16 +948,20 @@ pub const components = struct {
     pub const Meta = @import("components/Meta.zig").Meta;
     pub const Uuid = @import("components/Uuid.zig").Uuid;
 
-    // pub const Position = @import("components/transform.zig").Position;
-    // pub const Rotation = @import("components/transform.zig").Rotation;
-    // pub const Scale = @import("components/transform.zig").Scale;
     pub const Transform = @import("components/transform.zig").Transform;
 
     pub const camera = @import("components/camera.zig");
+
+    pub const lights = @import("components/lights.zig");
+
     pub const mesh = @import("components/mesh.zig");
     pub const material = @import("components/material.zig");
 
     pub const Camera = camera.Camera;
+
+    pub const DirectionalLight = lights.DirectionalLight;
+    pub const PointLight = lights.PointLight;
+
     pub const Mesh = mesh.Mesh;
     pub const Material = material.Material;
 

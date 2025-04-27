@@ -38,8 +38,23 @@ pub const Vec2 = extern struct {
         return make(self.x - other.x, self.y - other.y);
     }
 
+    pub fn lerp(a: Self, b: Self, t: f32) Self {
+        return make(
+            std.math.lerp(a.x, b.x, t),
+            std.math.lerp(a.y, b.y, t),
+        );
+    }
+
     pub inline fn toVec3(self: Vec2, z: f32) Vec3 {
         return .{ .x = self.x, .y = self.y, .z = z };
+    }
+
+    pub inline fn fromArray(xy: [2]f32) Self {
+        return @as(*const Self, @ptrCast(&xy)).*;
+    }
+
+    pub inline fn toArray(self: Self) [2]f32 {
+        return @as(*const [2]f32, @ptrCast(&self)).*;
     }
 };
 
@@ -146,6 +161,14 @@ pub const Vec3 = extern struct {
     /// Computes the Euclidean distance between two points.
     pub fn distanceTo(self: Vec3, other: Vec3) f32 {
         return self.sub(other).len();
+    }
+
+    pub fn lerp(a: Self, b: Self, t: f32) Self {
+        return make(
+            std.math.lerp(a.x, b.x, t),
+            std.math.lerp(a.y, b.y, t),
+            std.math.lerp(a.z, b.z, t),
+        );
     }
 
     pub fn jsonStringify(self: Self, jws: anytype) !void {
@@ -263,6 +286,14 @@ pub const Vec4 = extern struct {
         return Vec3.make(self.x, self.y, self.z);
     }
 
+    pub inline fn fromArray(xyzw: [4]f32) Self {
+        return @as(*const Self, @ptrCast(&xyzw)).*;
+    }
+
+    pub inline fn toArray(self: Self) [4]f32 {
+        return @as(*const [4]f32, @ptrCast(&self)).*;
+    }
+
     pub inline fn dot(a: Self, b: Self) f32 {
         return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
     }
@@ -348,6 +379,10 @@ pub const Quat = extern struct {
             self.z / length,
             self.w / length,
         );
+    }
+
+    pub fn toVec4(self: Self) Vec4 {
+        return @as(*const Vec4, @ptrCast(&self)).*;
     }
 
     pub fn toEuler(self: Self) Vec3 {

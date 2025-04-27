@@ -36,15 +36,21 @@ pub fn init(allocator: std.mem.Allocator) !void {
     {
         try register(.{ .urn = "3e21192b-6c22-4a4f-98ca-a4a43f675986", .path = "materials/default.mat", .category = "builtin" });
         try register(.{ .urn = "e732bb0c-19bb-492b-a79d-24fde85964d2", .path = "materials/none.mat", .category = "builtin" });
+        try register(.{ .urn = "61de2700-0eac-4fd5-9c56-0bd5b6b9ba10", .path = "materials/pbr.mat", .category = "builtin" });
         try register(.{ .urn = "ad4bc22b-3765-4a9d-bab7-7984e101428a", .path = "lost_empire-RGBA.png", .category = "builtin" });
+        try register(.{ .urn = "00923d64-c2ca-4d36-abbd-90b1fbde7a48", .path = "1x1.png", .category = "builtin" });
+        try register(.{ .urn = "54dff348-3f93-429a-83c0-2d29b1ae00dd", .path = "1x1b.png", .category = "builtin" });
+        try register(.{ .urn = "c4340d7a-caab-4925-965c-5ea71d8e447e", .path = "1x1h.png", .category = "builtin" });
         try register(.{ .urn = "ac6b9d14-0a56-458a-a7cc-fd36ede79468", .path = "lost_empire.obj", .category = "builtin" });
-        try register(.{ .urn = "acc02aef-7ac0-46e7-b006-378c36ac1b27", .path = "u.obj", .category = "builtin" });
-        try register(.{ .urn = "17c0ee4b-8fa0-43a7-a3d8-8bf7b5e73bb9", .path = "u.mtl", .category = "builtin" });
+        try register(.{ .urn = "6d4f3849-e3d7-4cb0-b593-095a9afafb99", .path = "suzanne.obj", .category = "builtin" });
         try register(.{ .urn = "23400ade-52d7-416b-9679-884a49de1722", .path = "cube.obj", .category = "builtin" });
+        try register(.{ .urn = "ab7151f0-1f77-4ae8-99ad-17695c6ab9de", .path = "sphere.obj", .category = "builtin" });
+        try register(.{ .urn = "ac03092a-60d1-43d4-a4df-4c691aafae7b", .path = "bunny.obj", .category = "builtin" });
     }
 
     {
         try registerBuiltinShader("cf64bfc9-703c-43b0-9d01-c8032706872c", "tri_mesh.vert.glsl");
+        try registerBuiltinShader("79d1e1cc-607d-491c-b2e8-d1d3a44bd6a4", "pbr.frag.glsl");
         try registerBuiltinShader("8b4db7d0-33a6-4f42-96cc-7b1d88566f27", "default_lit.frag.glsl");
         try registerBuiltinShader("9939ab1b-d72c-4463-b039-58211f2d6531", "textured_lit.frag.glsl");
     }
@@ -67,6 +73,8 @@ pub fn init(allocator: std.mem.Allocator) !void {
         try register(.{ .urn = "72bb403a-8624-4541-bbaa-a85668340db1", .path = "icons/camera.png", .category = "editor" });
         try register(.{ .urn = "1e2e7db3-8b27-45b9-adf1-05e808175043", .path = "icons/mesh.png", .category = "editor" });
         try register(.{ .urn = "849d928a-a459-4df7-97c4-49877fba782c", .path = "icons/material.png", .category = "editor" });
+        try register(.{ .urn = "e54f4382-dc55-4380-89db-0475bc02dd03", .path = "icons/point-light.png", .category = "editor" });
+        try register(.{ .urn = "e17a74c7-cb8e-4cd3-90f2-d76ee499a13e", .path = "icons/sun.png", .category = "editor" });
 
         try register(.{ .urn = "682be1c4-a465-40ed-a4f0-31a07f2b1a20", .path = "icons/error.png", .category = "editor" });
         try register(.{ .urn = "a330bc08-999b-46df-a49b-f959a3b75b65", .path = "icons/warning.png", .category = "editor" });

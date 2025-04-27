@@ -43,7 +43,7 @@ pub const AllocatedImage = extern struct {
     allocation: c.VmaAllocation,
 };
 
-const FrameData = struct {
+const FrameData = extern struct {
     present_semaphore: c.VkSemaphore = null,
     render_semaphore: c.VkSemaphore = null,
     render_fence: c.VkFence = null,
@@ -54,26 +54,30 @@ const FrameData = struct {
     object_descriptor_set: c.VkDescriptorSet = null,
 };
 
-pub const GPUCameraData = struct {
-    view: Mat4,
-    proj: Mat4,
+pub const GPUCameraData = extern struct {
     view_proj: Mat4,
+    pos: Vec3,
 
-    fn fromCamera(cam: *const Camera) GPUCameraData {
+    fn fromCamera(cam: *const Camera, pos: Vec3) GPUCameraData {
         return GPUCameraData{
-            .view = cam.view,
-            .proj = cam.projection,
             .view_proj = cam.view_projection,
+            .pos = pos,
         };
     }
 };
 
-pub const GPUSceneData = struct {
-    fog_color: Vec4,
-    fog_distance: Vec4, // x = start, y = end
+pub const GPUSceneData = extern struct {
+    pub const GPULightData = extern struct {
+        pos: Vec3,
+        range: f32,
+        color: Vec3,
+        intensity: f32,
+    };
+    point_lights: [4]GPULightData,
+    directional_light: GPULightData,
     ambient_color: Vec4,
-    sunlight_dir: Vec4,
-    sunlight_color: Vec4,
+    exposure: f32,
+    gamma: f32,
 };
 
 const GPUObjectData = struct {
@@ -137,7 +141,8 @@ camera_and_scene_buffer: AllocatedBuffer = undefined,
 
 global_set_layout: c.VkDescriptorSetLayout = null,
 object_set_layout: c.VkDescriptorSetLayout = null,
-single_texture_set_layout: c.VkDescriptorSetLayout = null,
+texture_set_layout: c.VkDescriptorSetLayout = null,
+shaders_set_layouts: std.AutoHashMap(u32, c.VkDescriptorSetLayout) = undefined,
 descriptor_pool: c.VkDescriptorPool = null,
 
 vma_allocator: c.VmaAllocator = undefined,
@@ -148,8 +153,7 @@ image_deletion_queue: std.ArrayList(VmaImageDeleter) = undefined,
 
 current_image_idx: u32 = 0,
 
-pub const MeshPushConstants = struct {
-    data: Vec4,
+pub const MeshPushConstants = extern struct {
     render_matrix: Mat4,
 };
 
@@ -205,6 +209,7 @@ pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
     var engine = Self{
         .window = window,
         .allocator = a,
+        .shaders_set_layouts = std.AutoHashMap(u32, c.VkDescriptorSetLayout).init(a),
         .deletion_queue = std.ArrayList(VulkanDeleter).init(a),
         .buffer_deletion_queue = std.ArrayList(VmaBufferDeleter).init(a),
         .image_deletion_queue = std.ArrayList(VmaImageDeleter).init(a),
@@ -806,7 +811,7 @@ fn initDescriptors(self: *Self) void {
         .binding = 0,
         .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
         .descriptorCount = 1,
-        .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT,
+        .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT | c.VK_SHADER_STAGE_FRAGMENT_BIT,
     });
 
     // Scene param binding
@@ -931,9 +936,9 @@ fn initDescriptors(self: *Self) void {
         .pBindings = &texture_bind,
     });
 
-    check_vk(c.vkCreateDescriptorSetLayout(self.device, &texture_set_ci, vk_alloc_cbs, &self.single_texture_set_layout)) catch @panic("Failed to create texture descriptor set layout");
+    check_vk(c.vkCreateDescriptorSetLayout(self.device, &texture_set_ci, vk_alloc_cbs, &self.texture_set_layout)) catch @panic("Failed to create texture descriptor set layout");
 
-    self.deletion_queue.append(VulkanDeleter.make(self.single_texture_set_layout, c.vkDestroyDescriptorSetLayout)) catch @panic("Out of memory");
+    self.deletion_queue.append(VulkanDeleter.make(self.texture_set_layout, c.vkDestroyDescriptorSetLayout)) catch @panic("Out of memory");
 
     for (0..FRAME_OVERLAP) |i| {
         // ======================================================================
@@ -1018,6 +1023,8 @@ pub fn createShaderModule(self: *Self, code: []const u8) ?c.VkShaderModule {
 
 pub fn deinit(self: *Self) void {
     check_vk(c.vkDeviceWaitIdle(self.device)) catch @panic("Failed to wait for device idle");
+
+    self.shaders_set_layouts.deinit();
 
     for (self.buffer_deletion_queue.items) |*entry| {
         entry.delete(self);
@@ -1280,15 +1287,20 @@ pub fn beginPresentRenderPass(self: *Self, cmd: RenderCommand) void {
 pub fn drawObjects(
     self: *Self,
     cmd: c.VkCommandBuffer,
-    matrices: []components.Transform,
-    meshes: []components.Mesh,
-    materials: []components.Material,
-    ubo_buf: AllocatedBuffer,
-    ubo_set: c.VkDescriptorSet,
-    cam: *const Camera,
+    opts: struct {
+        matrices: []components.Transform,
+        meshes: []components.Mesh,
+        materials: []components.Material,
+        ubo_buf: AllocatedBuffer,
+        ubo_set: c.VkDescriptorSet,
+        cam: *const Camera,
+        cam_pos: Vec3,
+        point_lights: [4]GPUSceneData.GPULightData,
+        directional_light: GPUSceneData.GPULightData = std.mem.zeroes(GPUSceneData.GPULightData),
+    },
 ) void {
     // ----- Camera & Scene Data Setup -----
-    const curr_camera_data = GPUCameraData.fromCamera(cam);
+    const curr_camera_data = GPUCameraData.fromCamera(opts.cam, opts.cam_pos);
     const frame_index: usize = @intCast(@mod(self.frame_number, FRAME_OVERLAP));
 
     const padded_camera_data_size = self.padUniformBufferSize(@sizeOf(GPUCameraData));
@@ -1299,21 +1311,24 @@ pub fn drawObjects(
     const scene_data_offset = scene_data_base_offset + padded_scene_data_size * frame_index;
 
     var data: ?*align(@alignOf(GPUCameraData)) anyopaque = undefined;
-    check_vk(c.vmaMapMemory(self.vma_allocator, ubo_buf.allocation, &data)) catch @panic("Failed to map camera buffer");
+    check_vk(c.vmaMapMemory(self.vma_allocator, opts.ubo_buf.allocation, &data)) catch @panic("Failed to map camera buffer");
 
     const camera_data: *GPUCameraData = @ptrFromInt(@intFromPtr(data) + camera_data_offset);
     const scene_data: *GPUSceneData = @ptrFromInt(@intFromPtr(data) + scene_data_offset);
     camera_data.* = curr_camera_data;
-    const framed = @as(f32, @floatFromInt(self.frame_number)) / 120.0;
-    scene_data.ambient_color = Vec3.make(@sin(framed), 0.0, @cos(framed)).toVec4(1);
+    scene_data.point_lights = opts.point_lights;
+    scene_data.directional_light = opts.directional_light;
+    scene_data.ambient_color = Vec3.scalar(1).toVec4(0.01);
+    scene_data.exposure = 4.5;
+    scene_data.gamma = 2.2;
 
-    c.vmaUnmapMemory(self.vma_allocator, ubo_buf.allocation);
+    c.vmaUnmapMemory(self.vma_allocator, opts.ubo_buf.allocation);
 
     // ----- Object Buffer Batch Setup -----
     var currentFrame = self.getCurrentFrame();
     const batch_offset = self.object_buffer_offset;
 
-    const num_objects = matrices.len;
+    const num_objects = opts.matrices.len;
     std.debug.assert(batch_offset + num_objects <= MAX_OBJECTS);
 
     // Map the object buffer and write GPUObjectData for the objects in this batch.
@@ -1322,7 +1337,7 @@ pub fn drawObjects(
 
     // Cast the pointer to an array pointer. We assume that object_buffer is large enough.
     var object_data_arr: [*]GPUObjectData = @ptrCast(object_data orelse unreachable);
-    for (matrices, 0..) |*matrix, index| {
+    for (opts.matrices, 0..) |*matrix, index| {
         // Write into the region starting at the batch_offset.
         object_data_arr[batch_offset + index] = GPUObjectData{
             .model_matrix = matrix.value,
@@ -1334,8 +1349,8 @@ pub fn drawObjects(
     self.object_buffer_offset += num_objects;
 
     // ----- Issue Draw Calls Using the Correct Buffer Region -----
-    for (matrices, materials, meshes, 0..) |*matrix, *material, *mesh, index| {
-        if (index == 0 or material != &materials[index - 1]) {
+    for (opts.matrices, opts.materials, opts.meshes, 0..) |*matrix, *material, *mesh, index| {
+        if (index == 0 or material != &opts.materials[index - 1]) {
             c.vkCmdBindPipeline(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline);
 
             const uniform_offsets = [_]u32{
@@ -1343,23 +1358,22 @@ pub fn drawObjects(
                 @as(u32, @intCast(scene_data_offset)),
             };
 
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 0, 1, &ubo_set, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 0, 1, &opts.ubo_set, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
 
             c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 1, 1, &currentFrame.object_descriptor_set, 0, null);
         }
 
-        if (material.texture_set != null) {
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 2, 1, &material.texture_set, 0, null);
+        if (material.rsc_descriptor_set != null) {
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 2, 1, &material.rsc_descriptor_set, 0, null);
         }
 
         const push_constants = MeshPushConstants{
-            .data = Vec4.ZERO,
             .render_matrix = matrix.value,
         };
 
         c.vkCmdPushConstants(cmd, material.pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &push_constants);
 
-        if (index == 0 or mesh != &meshes[index - 1]) {
+        if (index == 0 or mesh != &opts.meshes[index - 1]) {
             const offset: c.VkDeviceSize = 0;
             c.vkCmdBindVertexBuffers(cmd, 0, 1, &mesh.vertex_buffer.buffer, &offset);
         }
@@ -1367,18 +1381,6 @@ pub fn drawObjects(
         // we add batch_offset to the instance index.
         c.vkCmdDraw(cmd, @as(u32, @intCast(mesh.vertices_count)), 1, 0, @intCast(batch_offset + index));
     }
-}
-
-fn createMaterial(self: *Self, pipeline: c.VkPipeline, pipeline_layout: c.VkPipelineLayout, name: []const u8) *Material {
-    self.materials.put(name, Material{
-        .pipeline = pipeline,
-        .pipeline_layout = pipeline_layout,
-    }) catch @panic("Out of memory");
-    return self.materials.getPtr(name) orelse unreachable;
-}
-
-fn getMaterial(self: *Self, name: []const u8) ?*Material {
-    return self.material.getPtr(name);
 }
 
 pub fn createBuffer(self: *Self, alloc_size: usize, usage: c.VkBufferUsageFlags, memory_usage: c.VmaMemoryUsage) AllocatedBuffer {
@@ -1471,4 +1473,54 @@ pub fn immediateSubmit(self: *Self, submit_ctx: anytype) void {
     check_vk(c.vkResetFences(self.device, 1, &self.upload_context.upload_fence)) catch @panic("Failed to reset upload fence");
 
     check_vk(c.vkResetCommandPool(self.device, self.upload_context.command_pool, 0)) catch @panic("Failed to reset command pool");
+}
+
+pub fn getDescriptorSetLayout(self: *Self, layout: []const UniformBindingKind) !c.VkDescriptorSetLayout {
+    const pattern = uniformBindingLayoutHash(layout);
+    const entry = try self.shaders_set_layouts.getOrPut(pattern);
+    if (entry.found_existing) {
+        return entry.value_ptr.*;
+    }
+
+    const bindings = try self.allocator.alloc(c.VkDescriptorSetLayoutBinding, layout.len);
+    defer self.allocator.free(bindings);
+
+    for (layout, 0..) |binding, i| {
+        bindings[i] = switch (binding) {
+            .texture => std.mem.zeroInit(c.VkDescriptorSetLayoutBinding, .{
+                .binding = @as(u32, @intCast(i)),
+                .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .descriptorCount = 1,
+                .stageFlags = c.VK_SHADER_STAGE_FRAGMENT_BIT,
+            }),
+            .cube => @panic("TODO"),
+        };
+    }
+
+    const set_ci = std.mem.zeroInit(c.VkDescriptorSetLayoutCreateInfo, .{
+        .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = @as(u32, @intCast(bindings.len)),
+        .pBindings = bindings.ptr,
+    });
+
+    check_vk(c.vkCreateDescriptorSetLayout(self.device, &set_ci, vk_alloc_cbs, entry.value_ptr)) catch @panic("Failed to create texture descriptor set layout");
+
+    self.deletion_queue.append(VulkanDeleter.make(entry.value_ptr.*, c.vkDestroyDescriptorSetLayout)) catch @panic("Out of memory");
+    return entry.value_ptr.*;
+}
+
+pub const UniformBindingKind = enum {
+    texture,
+    cube,
+};
+
+pub fn uniformBindingLayoutHash(layout: []const UniformBindingKind) u32 {
+    var hash: u32 = 0;
+    const prime: u32 = 31;
+
+    for (layout) |binding| {
+        hash = hash * prime + @intFromEnum(binding);
+    }
+
+    return hash;
 }

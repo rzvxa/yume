@@ -15,13 +15,18 @@ const Engine = @import("yume").VulkanEngine;
 const GameApp = @import("yume").GameApp;
 const components = @import("yume").ecs.components;
 const AllocatedBuffer = @import("yume").AllocatedBuffer;
+const GPULightData = Engine.GPUSceneData.GPULightData;
 
 const MouseButton = @import("yume").inputs.MouseButton;
-const ScanCode = @import("yume").inputs.ScanCode;
 
 const Editor = @import("../Editor.zig");
 
-const FrameData = struct { app: *GameApp, cmd: GameApp.RenderCommand, d: *Self };
+const FrameData = struct {
+    app: *GameApp,
+    cmd: GameApp.RenderCommand,
+    d: *Self,
+    lights: []GPULightData = undefined,
+};
 
 const default_cam_distance = 10;
 const default_cam_angle = Vec2.make(std.math.degreesToRadians(30), std.math.degreesToRadians(90));
@@ -34,33 +39,63 @@ camera: components.Camera = components.Camera.makePerspectiveCamera(.{
     .near = 0.1,
 }),
 
+camera_pos: Vec3 = Vec3.ZERO,
 target_pos: Vec3 = Vec3.ZERO,
 distance: f32 = default_cam_distance,
 
 active_tool: gizmo.ManipulationTool = .move,
 
 is_perspective: bool = true,
+render_lights: bool = true,
+is_lights_button_hovered: bool = false,
 
 scene_window_rect: c.ImVec4 = std.mem.zeroInit(c.ImVec4, .{}),
 scene_view_size: c.ImVec2 = std.mem.zeroInit(c.ImVec2, .{}),
 is_focused: bool = false,
 is_hovered: bool = false,
-is_dragging: bool = false,
+
+state: State = .idle,
 
 editor_camera_and_scene_buffer: AllocatedBuffer = undefined,
 editor_camera_and_scene_set: c.VkDescriptorSet = null,
 
 frame_userdata: FrameData = undefined,
 cast_query: *ecs.Query,
+directional_light_query: *ecs.Query,
+point_lights_query: *ecs.Query,
+transform_query: *ecs.Query,
 render_system: ecs.Entity,
 
-pub fn init(ctx: *GameApp) Self {
+on_draw_gizmos: *const fn (*anyopaque) void,
+on_draw_gizmos_ctx: *anyopaque,
+
+pub fn init(ctx: *GameApp, on_draw_gizmos: *const fn (*anyopaque) void, on_draw_gizmos_ctx: *anyopaque) Self {
     var self = Self{
         .cast_query = ctx.world.query(&std.mem.zeroInit(
             c.ecs_query_desc_t,
             .{ .terms = .{
                 .{ .id = ecs.typeId(components.Transform) },
                 .{ .id = ecs.typeId(components.Mesh) },
+            } },
+        )),
+        .directional_light_query = ctx.world.query(&std.mem.zeroInit(
+            c.ecs_query_desc_t,
+            .{ .terms = .{
+                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.DirectionalLight) },
+            } },
+        )),
+        .point_lights_query = ctx.world.query(&std.mem.zeroInit(
+            c.ecs_query_desc_t,
+            .{ .terms = .{
+                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.PointLight) },
+            } },
+        )),
+        .transform_query = ctx.world.query(&std.mem.zeroInit(
+            c.ecs_query_desc_t,
+            .{ .terms = .{
+                .{ .id = ecs.typeId(components.Transform) },
             } },
         )),
         .render_system = ctx.world.systemEx(&.{
@@ -72,34 +107,27 @@ pub fn init(ctx: *GameApp) Self {
             } }),
             .callback = @ptrCast(&ecs.SystemImpl(sys).exec),
         }),
+        .on_draw_gizmos = on_draw_gizmos,
+        .on_draw_gizmos_ctx = on_draw_gizmos_ctx,
     };
     self.focus(Vec3.ZERO, default_cam_distance);
     return self;
 }
 
 pub fn deinit(self: *Self) void {
+    self.transform_query.deinit();
+    self.directional_light_query.deinit();
+    self.point_lights_query.deinit();
     self.cast_query.deinit();
 }
 
 pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
     self.frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .d = self };
-    if (c.ImGui_Begin("Scene", null, c.ImGuiWindowFlags_NoCollapse | c.ImGuiWindowFlags_NoNav)) {
+    if (c.ImGui_Begin("Scene", null, c.ImGuiWindowFlags_NoCollapse | c.ImGuiWindowFlags_NoNav | c.ImGuiWindowFlags_NoScrollbar | c.ImGuiWindowFlags_NoScrollWithMouse)) {
         self.is_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
         self.is_hovered = c.ImGui_IsWindowHovered(c.ImGuiFocusedFlags_None);
         const editor_image = c.ImGui_GetWindowDrawList();
         self.scene_view_size = c.ImGui_GetWindowSize();
-
-        if (self.is_focused and !self.is_dragging) {
-            if (c.ImGui_IsKeyPressed(c.ImGuiKey_Q)) {
-                self.active_tool = .move;
-            } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_W)) {
-                self.active_tool = .rotate;
-            } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_E)) {
-                self.active_tool = .scale;
-            } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_R)) {
-                self.active_tool = .transform;
-            }
-        }
 
         c.ImDrawList_AddCallback(editor_image, extern struct {
             fn f(dl: [*c]const c.ImDrawList, dc: [*c]const c.ImDrawCmd) callconv(.C) void {
@@ -198,6 +226,26 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
             .height = self.scene_view_size.y,
         });
 
+        {
+            const right = self.scene_view_size.x;
+            const cursor = c.ImGui_GetCursorPos();
+            c.ImGui_SetCursorPos(.{ .x = right - 90, .y = 128 });
+            c.ImGui_TextColored(
+                c.ImVec4{
+                    .x = 0.64,
+                    .y = 0.64,
+                    .z = 0.64,
+                    .w = if (self.is_lights_button_hovered) 0.8 else 0.5,
+                },
+                if (self.render_lights) "Lights: On" else "Lights: Off",
+            );
+            self.is_lights_button_hovered = c.ImGui_IsItemHovered(0);
+            if (c.ImGui_IsItemClicked()) {
+                self.render_lights = !self.render_lights;
+            }
+            c.ImGui_SetCursorPos(cursor);
+        }
+
         blk: {
             switch (Editor.instance().selection) {
                 .entity => |selection| {
@@ -211,7 +259,8 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                     }
 
                     if (ctx.world.get(selection, components.Mesh)) |mesh| {
-                        try gizmo.drawBoundingBox(mesh.bounds, transform.?.value);
+                        // try gizmo.drawBoundingBox(mesh.bounds, transform.?.value);
+                        try gizmo.drawBoundingBoxCorners(mesh.bounds, transform.?.value);
                     }
                     c.ImGuizmo_PushID_Int(@intCast(selection));
                     if (try gizmo.editTransform(&transform.?.value, self.active_tool)) {
@@ -222,108 +271,186 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 else => {},
             }
         }
+
+        {
+            self.on_draw_gizmos(self.on_draw_gizmos_ctx);
+            var iter = self.transform_query.iter();
+            while (iter.next()) {
+                const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
+                for (transforms, 0..) |transform, i| {
+                    const entity = iter.inner.entities[i];
+                    var entity_id_buf = std.mem.zeroes([19:0]u8);
+                    c.ImGui_PushID((try std.fmt.bufPrintZ(&entity_id_buf, "{d}", .{entity})).ptr);
+                    for (try ctx.world.getType(entity)) |id| {
+                        if (ecs.isPair(id)) {
+                            continue;
+                        }
+                        const comp_id = id & ecs.masks.component;
+                        const comp_path = try ctx.world.getPathAlloc(comp_id, ctx.allocator);
+                        defer ctx.allocator.free(comp_path);
+
+                        const def = ctx.components.get(comp_path) orelse continue;
+                        if (def.billboard) |billboard| {
+                            var id_buf = std.mem.zeroes([19:0]u8);
+                            if (gizmo.drawBillboardIcon(
+                                (try std.fmt.bufPrintZ(&id_buf, "{d}", .{comp_id})).ptr,
+                                transform.position(),
+                                try Editor.getImGuiTexture(std.mem.span(billboard), &ctx.engine),
+                                32,
+                            )) {
+                                Editor.instance().selection = .{ .entity = entity };
+                            }
+                        }
+                    }
+
+                    c.ImGui_PopID();
+                }
+            }
+        }
         gizmo.endFrame();
     }
     c.ImGui_End();
 }
 
 pub fn update(self: *Self, ctx: *GameApp) !void {
+    if (!self.is_hovered and !self.state.inUse()) {
+        return;
+    }
+
     var input: Vec3 = Vec3.make(0, 0, 0);
     var input_rot: Vec3 = Vec3.make(0, 0, 0);
 
     const inversed = self.camera.view.inverse() catch Mat4.IDENTITY;
     var decomposed = inversed.decompose() catch Mat4.Decomposed.IDENTITY;
+    self.camera_pos = decomposed.translation;
     const basis = decomposed.rotation.toBasisVectors();
 
     const left = basis.right.mulf(-1);
     const up = basis.up;
     const forward = basis.forward.mulf(-1);
 
+    // handle translation inputs (W, A, S, D) relative to view
+    // we don't apply it right away.
+    const wasd = blk: {
+        var wasd = Vec3.ZERO;
+        wasd = wasd.add(forward.mulf(if (Editor.inputs.isKeyDown(.w)) 1 else 0));
+        wasd = wasd.sub(forward.mulf(if (Editor.inputs.isKeyDown(.s)) 1 else 0));
+        wasd = wasd.add(left.mulf(if (Editor.inputs.isKeyDown(.a)) 1 else 0));
+        wasd = wasd.sub(left.mulf(if (Editor.inputs.isKeyDown(.d)) 1 else 0));
+        wasd = wasd.add(up.mulf(if (Editor.inputs.isKeyDown(.e)) 1 else 0));
+        wasd = wasd.sub(up.mulf(if (Editor.inputs.isKeyDown(.q)) 1 else 0));
+        wasd = wasd.mulf(5);
+        break :blk wasd;
+    };
+
     var in_use: bool = false;
 
-    if (self.is_dragging or self.is_hovered) {
-        const wasd = blk: {
-            var wasd = Vec3.ZERO;
-            // Handle translation inputs (W, A, S, D) relative to view
-            wasd = wasd.add(forward.mulf(if (Editor.inputs.isKeyDown(ScanCode.W)) 1 else 0));
-            wasd = wasd.sub(forward.mulf(if (Editor.inputs.isKeyDown(ScanCode.S)) 1 else 0));
-            wasd = wasd.add(left.mulf(if (Editor.inputs.isKeyDown(ScanCode.A)) 1 else 0));
-            wasd = wasd.sub(left.mulf(if (Editor.inputs.isKeyDown(ScanCode.D)) 1 else 0));
-            wasd = wasd.add(up.mulf(if (Editor.inputs.isKeyDown(ScanCode.E)) 1 else 0));
-            wasd = wasd.sub(up.mulf(if (Editor.inputs.isKeyDown(ScanCode.Q)) 1 else 0));
-            wasd = wasd.mulf(5);
-            break :blk wasd;
-        };
-        if (Editor.inputs.isMouseButtonDown(MouseButton.Right)) { // free cam
+    var new_state = self.state;
+    switch (self.state) {
+        .idle => {
+            if (Editor.inputs.isMouseButtonPressed(.right)) {
+                new_state = .free;
+            } else if (Editor.inputs.isMouseButtonPressed(.middle)) {
+                if (Editor.inputs.isKeyDown(.left_shift)) {
+                    new_state = .pan;
+                } else {
+                    new_state = .orbit;
+                }
+            } else { // idle scroll zoom
+                // Mouse wheel for zooming in and out relative to view direction
+                const wheel = Editor.inputs.mouseWheel();
+                const scroll_speed: f32 = 20;
+                if (wheel.y > 0) {
+                    in_use = true;
+                    input = input.add(forward.mulf(scroll_speed));
+                } else if (wheel.y < 0) {
+                    in_use = true;
+                    input = input.sub(forward.mulf(scroll_speed));
+                }
+
+                if (Editor.inputs.isKeyPressed(.q)) {
+                    self.active_tool = .move;
+                } else if (Editor.inputs.isKeyPressed(.w)) {
+                    self.active_tool = .rotate;
+                } else if (Editor.inputs.isKeyPressed(.e)) {
+                    self.active_tool = .scale;
+                } else if (Editor.inputs.isKeyPressed(.r)) {
+                    self.active_tool = .transform;
+                }
+            }
+        },
+        .free => {
+            if (Editor.inputs.isMouseButtonUp(.right)) {
+                new_state = .idle;
+            }
+
             in_use = true;
             Editor.inputs.setRelativeMouseMode(true);
             const mouse_delta = Editor.inputs.mouseRelative().mulf(0.5);
             input_rot.y -= mouse_delta.x;
             input_rot.x -= mouse_delta.y;
             input = input.add(wasd);
-        } else if (Editor.inputs.isMouseButtonDown(MouseButton.Middle)) {
-            if (Editor.inputs.isKeyDown(ScanCode.LeftShift)) { // panning
-                in_use = true;
-                const mouse_delta = Editor.inputs.mouseDelta();
-                input = input.add(left.mulf(mouse_delta.x));
-                input = input.add(up.mulf(mouse_delta.y));
-            } else { // orbit
-                in_use = true;
-                const orbit_delta = Editor.inputs.mouseRelative();
-                const sensitivity: f32 = 0.005;
-
-                const camera_pos = decomposed.translation;
-
-                self.target_pos = camera_pos.add(forward.mulf(self.distance));
-
-                const offset = camera_pos.sub(self.target_pos);
-                const current_distance = offset.len();
-                const current_pitch = std.math.asin(offset.y / current_distance);
-                const current_yaw = std.math.atan2(offset.x, offset.z);
-
-                const new_pitch = current_pitch + orbit_delta.y * sensitivity;
-                const new_yaw = current_yaw - orbit_delta.x * sensitivity;
-
-                const max_pitch = std.math.pi * 0.49;
-                var clamped_pitch = new_pitch;
-                if (clamped_pitch > max_pitch) {
-                    clamped_pitch = max_pitch;
-                } else if (clamped_pitch < -max_pitch) {
-                    clamped_pitch = -max_pitch;
-                }
-
-                const cos_pitch = std.math.cos(clamped_pitch);
-                const sin_pitch = std.math.sin(clamped_pitch);
-                const cos_yaw = std.math.cos(new_yaw);
-                const sin_yaw = std.math.sin(new_yaw);
-                const new_eye = Vec3.make(
-                    self.target_pos.x + current_distance * cos_pitch * sin_yaw,
-                    self.target_pos.y + current_distance * sin_pitch,
-                    self.target_pos.z + current_distance * cos_pitch * cos_yaw,
-                );
-
-                self.camera.view = Mat4.lookAt(new_eye, self.target_pos, Vec3.UP);
-                decomposed = (try self.camera.view.inverse()).decompose() catch Mat4.Decomposed.IDENTITY;
-                input = input.add(wasd);
+        },
+        .pan => {
+            // we keep paning even if shift is released
+            // user should release the mouse botten in order to release the pan
+            if (Editor.inputs.isMouseButtonUp(.middle)) {
+                new_state = .idle;
             }
-        } else {
-            // Mouse wheel for zooming in and out relative to view direction
-            const wheel = Editor.inputs.mouseWheel();
-            const scroll_speed: f32 = 20;
-            if (wheel.y > 0) {
-                in_use = true;
-                input = input.add(forward.mulf(scroll_speed));
-            } else if (wheel.y < 0) {
-                in_use = true;
-                input = input.sub(forward.mulf(scroll_speed));
+
+            in_use = true;
+            const mouse_delta = Editor.inputs.mouseDelta();
+            input = input.add(left.mulf(mouse_delta.x));
+            input = input.add(up.mulf(mouse_delta.y));
+        },
+        .orbit => {
+            if (Editor.inputs.isMouseButtonUp(.middle)) {
+                new_state = .idle;
             }
-        }
+
+            in_use = true;
+            const orbit_delta = Editor.inputs.mouseRelative();
+            const sensitivity: f32 = 0.005;
+
+            self.target_pos = self.camera_pos.add(forward.mulf(self.distance));
+
+            const offset = self.camera_pos.sub(self.target_pos);
+            const current_distance = offset.len();
+            const current_pitch = std.math.asin(offset.y / current_distance);
+            const current_yaw = std.math.atan2(offset.x, offset.z);
+
+            const new_pitch = current_pitch + orbit_delta.y * sensitivity;
+            const new_yaw = current_yaw - orbit_delta.x * sensitivity;
+
+            const max_pitch = std.math.pi * 0.49;
+            var clamped_pitch = new_pitch;
+            if (clamped_pitch > max_pitch) {
+                clamped_pitch = max_pitch;
+            } else if (clamped_pitch < -max_pitch) {
+                clamped_pitch = -max_pitch;
+            }
+
+            const cos_pitch = std.math.cos(clamped_pitch);
+            const sin_pitch = std.math.sin(clamped_pitch);
+            const cos_yaw = std.math.cos(new_yaw);
+            const sin_yaw = std.math.sin(new_yaw);
+            const new_eye = Vec3.make(
+                self.target_pos.x + current_distance * cos_pitch * sin_yaw,
+                self.target_pos.y + current_distance * sin_pitch,
+                self.target_pos.z + current_distance * cos_pitch * cos_yaw,
+            );
+
+            self.camera.view = Mat4.lookAt(new_eye, self.target_pos, Vec3.UP);
+            decomposed = (try self.camera.view.inverse()).decompose() catch Mat4.Decomposed.IDENTITY;
+            input = input.add(wasd);
+        },
     }
 
-    self.is_dragging = in_use;
+    self.state = new_state;
+
     if (!in_use) {
-        if (self.is_hovered and !c.ImGuizmo_IsUsingAny()) {
-            if (Editor.inputs.isMouseButtonDown(.Left)) {
+        if (self.is_hovered and !gizmo.isOverAny()) {
+            if (Editor.inputs.isMouseButtonPressed(.left)) {
                 const mouse_pos = Editor.inputs.mousePos();
                 const ray = screenPosToRay(mouse_pos, self.camera, .{
                     .x = self.scene_window_rect.x,
@@ -377,14 +504,70 @@ fn focus(self: *Self, target: Vec3, distance: f32) void {
 
 fn sys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mesh, materials: []components.Material) void {
     const me: *FrameData = @ptrCast(@alignCast(it.param));
+
+    const directional_light: GPULightData = blk: {
+        var iter = me.d.directional_light_query.iter();
+        while (iter.next()) {
+            const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
+            const lights = ecs.field(&iter, components.DirectionalLight, @alignOf(components.DirectionalLight), 1).?;
+            for (lights, transforms) |light, transform| {
+                iter.deinit();
+                break :blk .{
+                    .pos = transform.rotation().toBasisVectors().forward,
+                    .color = light.color,
+                    .intensity = light.intensity,
+                    .range = 0,
+                };
+            }
+        }
+        break :blk std.mem.zeroes(GPULightData);
+    };
+
+    const point_lights = blk: {
+        var sfa = std.heap.stackFallback(512, me.app.allocator);
+        const a = sfa.get();
+        var iter = me.d.point_lights_query.iter();
+        var lights = std.ArrayList(GPULightData).init(a);
+        while (iter.next()) {
+            const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
+            const point_lights = ecs.field(&iter, components.PointLight, @alignOf(components.PointLight), 1).?;
+            for (point_lights, transforms) |light, transform| {
+                lights.append(.{
+                    .pos = transform.position(),
+                    .color = light.color,
+                    .intensity = light.intensity,
+                    .range = light.range,
+                }) catch @panic("OOM");
+            }
+        }
+        break :blk lights;
+    };
+    defer point_lights.deinit();
+
+    std.mem.sort(GPULightData, point_lights.items, me.d.camera_pos, struct {
+        pub fn f(cam_pos: Vec3, a: GPULightData, b: GPULightData) bool {
+            return a.pos.distanceTo(cam_pos) < b.pos.distanceTo(cam_pos);
+        }
+    }.f);
+
+    var lights = std.mem.zeroes([4]Engine.GPUSceneData.GPULightData);
+    std.debug.assert(point_lights.items.len < 4);
+    if (me.d.render_lights) {
+        @memcpy(lights[0..point_lights.items.len], point_lights.items);
+    }
     me.app.engine.drawObjects(
         me.cmd,
-        matrices,
-        meshes,
-        materials,
-        me.d.editor_camera_and_scene_buffer,
-        me.d.editor_camera_and_scene_set,
-        &me.d.camera,
+        .{
+            .matrices = matrices,
+            .meshes = meshes,
+            .materials = materials,
+            .ubo_buf = me.d.editor_camera_and_scene_buffer,
+            .ubo_set = me.d.editor_camera_and_scene_set,
+            .cam = &me.d.camera,
+            .cam_pos = me.d.camera_pos,
+            .directional_light = directional_light,
+            .point_lights = lights,
+        },
     );
 }
 
@@ -530,3 +713,14 @@ fn computeOrbitEye(target: Vec3, orbit_angles: Vec2, distance: f32) Vec3 {
         target.z + distance * cos_pitch * cos_yaw,
     );
 }
+
+const State = enum {
+    idle,
+    free,
+    pan,
+    orbit,
+
+    fn inUse(s: State) bool {
+        return s != .idle;
+    }
+};

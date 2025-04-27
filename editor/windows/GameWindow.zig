@@ -12,6 +12,7 @@ const Vec3 = @import("yume").Vec3;
 const Engine = @import("yume").VulkanEngine;
 const GameApp = @import("yume").GameApp;
 const AllocatedBuffer = @import("yume").AllocatedBuffer;
+const GPULightData = Engine.GPUSceneData.GPULightData;
 
 const Editor = @import("../Editor.zig");
 
@@ -20,6 +21,8 @@ const FrameData = struct {
     cmd: GameApp.RenderCommand,
     d: *Self,
     camera: ?*const components.Camera = null,
+    camera_pos: Vec3 = Vec3.ZERO,
+    point_lights: []GPULightData = undefined,
 };
 
 const Self = @This();
@@ -30,6 +33,7 @@ is_game_window_focused: bool = false,
 
 frame_userdata: FrameData = undefined,
 camera_query: *ecs.Query,
+point_lights_query: *ecs.Query,
 render_system: ecs.Entity,
 
 pub fn init(ctx: *GameApp) Self {
@@ -37,8 +41,15 @@ pub fn init(ctx: *GameApp) Self {
         .camera_query = ctx.world.query(&std.mem.zeroInit(
             c.ecs_query_desc_t,
             .{ .terms = .{
-                .{ .id = ecs.typeId(components.Camera) },
                 .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.Camera) },
+            } },
+        )),
+        .point_lights_query = ctx.world.query(&std.mem.zeroInit(
+            c.ecs_query_desc_t,
+            .{ .terms = .{
+                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.PointLight) },
             } },
         )),
         .render_system = ctx.world.systemEx(&.{
@@ -54,6 +65,7 @@ pub fn init(ctx: *GameApp) Self {
 }
 
 pub fn deinit(self: *Self) void {
+    self.point_lights_query.deinit();
     self.camera_query.deinit();
 }
 
@@ -89,16 +101,46 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                     .maxDepth = 1.0,
                 }});
 
+                const point_lights = blk: {
+                    var sfa = std.heap.stackFallback(512, me.app.allocator);
+                    const a = sfa.get();
+                    var iter = me.d.point_lights_query.iter();
+                    var point_lights = std.ArrayList(GPULightData).init(a);
+                    while (iter.next()) {
+                        const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
+                        const pls = ecs.field(&iter, components.PointLight, @alignOf(components.PointLight), 1).?;
+                        for (pls, transforms) |light, transform| {
+                            point_lights.append(.{
+                                .pos = transform.position(),
+                                .color = light.color,
+                                .intensity = light.intensity,
+                                .range = light.range,
+                            }) catch @panic("OOM");
+                        }
+                    }
+                    break :blk point_lights;
+                };
+                defer point_lights.deinit();
+
                 var iter = me.d.camera_query.iter();
                 const aspect = me.d.game_view_size.x / me.d.game_view_size.y;
                 while (iter.next()) {
-                    const cameras = ecs.field(&iter, components.Camera, @alignOf(components.Camera), 0).?;
-                    const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 1).?;
+                    const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
+                    const cameras = ecs.field(&iter, components.Camera, @alignOf(components.Camera), 1).?;
                     for (cameras, transforms) |*camera, transform| {
                         const decomposed = transform.decompose();
                         camera.updateMatrices(decomposed.translation, decomposed.rotation.toEuler(), aspect);
+
+                        std.mem.sort(GPULightData, point_lights.items, decomposed.translation, struct {
+                            pub fn f(cam_pos: Vec3, a: GPULightData, b: GPULightData) bool {
+                                return a.pos.distanceTo(cam_pos) < b.pos.distanceTo(cam_pos);
+                            }
+                        }.f);
+
                         var new_me = me.*;
                         new_me.camera = camera;
+                        new_me.camera_pos = transform.position();
+                        new_me.point_lights = point_lights.items;
                         _ = c.ecs_run(iter.inner.real_world, me.d.render_system, me.app.delta, &new_me);
                     }
                 }
@@ -127,13 +169,20 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
 
 fn renderSys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mesh, materials: []components.Material) void {
     const me: *FrameData = @ptrCast(@alignCast(it.param));
+    var point_lights = std.mem.zeroes([4]Engine.GPUSceneData.GPULightData);
+    std.debug.assert(me.point_lights.len < 4);
+    @memcpy(point_lights[0..me.point_lights.len], me.point_lights);
     me.app.engine.drawObjects(
         me.cmd,
-        matrices,
-        meshes,
-        materials,
-        me.app.engine.camera_and_scene_buffer,
-        me.app.engine.camera_and_scene_set,
-        me.camera.?,
+        .{
+            .matrices = matrices,
+            .meshes = meshes,
+            .materials = materials,
+            .ubo_buf = me.app.engine.camera_and_scene_buffer,
+            .ubo_set = me.app.engine.camera_and_scene_set,
+            .cam = me.camera.?,
+            .cam_pos = me.camera_pos,
+            .point_lights = point_lights,
+        },
     );
 }

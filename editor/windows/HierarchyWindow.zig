@@ -187,10 +187,19 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) !bool {
             if (c.ImGui_MenuItem("Cube")) {
                 const new_entity = ctx.world.entity(.{ .name = "Cube", .parent = entity });
                 ctx.world.set(new_entity, ecs.components.Mesh, (try Assets.getOrLoadMesh(try AssetsDatabase.getResourceId("builtin://cube.obj"))).*);
-                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try AssetsDatabase.getResourceId("builtin://materials/none.mat"))).*);
+                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try AssetsDatabase.getResourceId("builtin://materials/pbr.mat"))).*);
             }
-            _ = c.ImGui_MenuItem("Sphere*");
+            if (c.ImGui_MenuItem("Sphere")) {
+                const new_entity = ctx.world.entity(.{ .name = "Sphere", .parent = entity });
+                ctx.world.set(new_entity, ecs.components.Mesh, (try Assets.getOrLoadMesh(try AssetsDatabase.getResourceId("builtin://sphere.obj"))).*);
+                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try AssetsDatabase.getResourceId("builtin://materials/pbr.mat"))).*);
+            }
             _ = c.ImGui_MenuItem("Plane*");
+            if (c.ImGui_MenuItem("Suzanne")) {
+                const new_entity = ctx.world.entity(.{ .name = "Suzanne", .parent = entity });
+                ctx.world.set(new_entity, ecs.components.Mesh, (try Assets.getOrLoadMesh(try AssetsDatabase.getResourceId("builtin://suzanne.obj"))).*);
+                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try AssetsDatabase.getResourceId("builtin://materials/pbr.mat"))).*);
+            }
             c.ImGui_Separator();
             if (c.ImGui_MenuItem("Camera")) {
                 const new_entity = ctx.world.entity(.{ .name = "Camera", .parent = entity });
@@ -201,8 +210,14 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) !bool {
                 }));
             }
             c.ImGui_Separator();
-            _ = c.ImGui_MenuItem("Directional Light*");
-            _ = c.ImGui_MenuItem("Point Light*");
+            if (c.ImGui_MenuItem("Directional Light")) {
+                const new_entity = ctx.world.entity(.{ .name = "Directional Light", .parent = entity });
+                ctx.world.set(new_entity, ecs.components.DirectionalLight, ecs.components.DirectionalLight{});
+            }
+            if (c.ImGui_MenuItem("Point Light")) {
+                const new_entity = ctx.world.entity(.{ .name = "Point Light", .parent = entity });
+                ctx.world.set(new_entity, ecs.components.PointLight, ecs.components.PointLight{});
+            }
             c.ImGui_EndMenu();
         }
         _ = c.ImGui_MenuItem("Copy*");

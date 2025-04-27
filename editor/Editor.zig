@@ -167,10 +167,11 @@ pub fn init(ctx: *GameApp) *Self {
         .hierarchy_window = HierarchyWindow.init(ctx),
         .project_explorer = ProjectExplorerWindow{},
         .properties_window = PropertiesWindow.init(ctx),
-        .scene_window = SceneWindow.init(ctx),
         .game_window = GameWindow.init(ctx),
         .logs_windows = LogsWindow.init(ctx),
+        .scene_window = undefined,
     };
+    singleton.scene_window = SceneWindow.init(ctx, @ptrCast(&Editors.onDrawGizmos), &singleton.editors);
     singleton.bootstrapEditorPipeline(ctx.world);
     singleton.init_descriptors(&ctx.engine);
     init_imgui(&ctx.engine) catch @panic("failed to init imgui");
@@ -254,9 +255,8 @@ pub fn processEvent(self: *Self, event: *c.SDL_Event) bool {
         c.SDL_EVENT_QUIT => return false,
         else => {},
     }
-    if (self.scene_window.is_focused) {
-        inputs.push(event);
-    } else if (self.game_window.is_game_window_focused) {
+    inputs.push(event);
+    if (self.game_window.is_game_window_focused) {
         self.ctx.inputs.push(event);
     }
 
