@@ -6,6 +6,7 @@ const yume = @import("yume");
 
 const Vec2 = yume.Vec2;
 const Vec3 = yume.Vec3;
+const Vec4 = yume.Vec4;
 const Mat4 = yume.Mat4;
 const Rect = yume.Rect;
 
@@ -274,29 +275,42 @@ pub fn drawFrustum(inv_view_proj: Mat4) DrawError!void {
     }
 }
 
-pub fn drawBillboardIcon(worldPos: Vec3, icon: c.ImTextureID, iconSize: f32) void {
-    // Transform the world-space point into clip space.
-    const clipPos = context.view_projection.mulVec3(worldPos);
+pub fn drawBillboardIcon(str_id: [*c]const u8, world_pos: Vec3, icon: c.ImTextureID, icon_size: f32) bool {
+    c.ImGui_PushID(str_id);
+    defer c.ImGui_PopID();
 
-    // If the point is behind the camera or too far, skip drawing.
-    // (Adjust the clipping test depending on your projection conventions.)
-    if (clipPos.z < 0 or clipPos.z > 1) return;
+    // Transform the world-space point into clip space using a homogeneous Vec4.
+    const pos4 = context.view_projection.mulVec4(Vec4.make(
+        world_pos.x,
+        world_pos.y,
+        world_pos.z,
+        1.0,
+    ));
 
-    // Use the x and y from the projected point (clipPos) as NDC.
-    const ndcPos = Vec2{ .x = clipPos.x, .y = clipPos.y };
+    // Ensure we have a non-zero w for perspective division.
+    if (pos4.w == 0.0) return false;
+    const ndc_x: f32 = pos4.x / pos4.w;
+    const ndc_y: f32 = pos4.y / pos4.w;
+    const ndc_z: f32 = pos4.z / pos4.w;
+
+    // If the point is outside the view depth, skip drawing.
+    if (ndc_z < 0 or ndc_z > 1) return false;
+
+    // Build a 2D NDC position.
+    const ndc_pos = Vec2{ .x = ndc_x, .y = ndc_y };
 
     // Convert NDC coordinates to screen space.
-    const screenPos = ndcToScreen(ndcPos);
+    const screen_pos = ndcToScreen(ndc_pos);
 
-    // Compute the icon rectangle, centered at screenPos.
-    const halfSize: f32 = iconSize * 0.5;
+    // Compute the icon rectangle, centered at screen_pos.
+    const half_size: f32 = icon_size * 0.5;
     var p_min = c.ImVec2{
-        .x = screenPos.x - halfSize,
-        .y = screenPos.y - halfSize,
+        .x = screen_pos.x - half_size,
+        .y = screen_pos.y - half_size,
     };
     var p_max = c.ImVec2{
-        .x = screenPos.x + halfSize,
-        .y = screenPos.y + halfSize,
+        .x = screen_pos.x + half_size,
+        .y = screen_pos.y + half_size,
     };
 
     // Clamp the destination rectangle to the viewport.
@@ -313,11 +327,23 @@ pub fn drawBillboardIcon(worldPos: Vec3, icon: c.ImTextureID, iconSize: f32) voi
         p_max.y = context.viewport.y + context.viewport.height;
     }
 
-    // If the resulting rectangle has non-positive area, then it's off–screen.
-    if (p_min.x >= p_max.x or p_min.y >= p_max.y) return;
+    // If the resulting rectangle has non-positive area, it's off–screen.
+    if (p_min.x >= p_max.x or p_min.y >= p_max.y) return false;
+
+    // Create an invisible button over the icon's area.
+    const button_size = c.ImVec2{
+        .x = p_max.x - p_min.x,
+        .y = p_max.y - p_min.y,
+    };
+    const cursor = c.ImGui_GetCursorScreenPos();
+    c.ImGui_SetCursorScreenPos(p_min);
+    const clicked = c.ImGui_InvisibleButton(str_id, button_size, 0);
 
     // Draw the image using ImGui's draw list.
     c.ImDrawList_AddImage(context.drawlist, icon, p_min, p_max);
+
+    c.ImGui_SetCursorScreenPos(cursor);
+    return clicked;
 }
 
 // Converts a 3D point into NDC, without clamping the x/y values.

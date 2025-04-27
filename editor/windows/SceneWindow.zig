@@ -270,6 +270,8 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
                 for (transforms, 0..) |transform, i| {
                     const entity = iter.inner.entities[i];
+                    var entity_id_buf = std.mem.zeroes([19:0]u8);
+                    c.ImGui_PushID((try std.fmt.bufPrintZ(&entity_id_buf, "{d}", .{entity})).ptr);
                     for (try ctx.world.getType(entity)) |id| {
                         if (ecs.isPair(id)) {
                             continue;
@@ -280,13 +282,19 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
 
                         const def = ctx.components.get(comp_path) orelse continue;
                         if (def.billboard) |billboard| {
-                            gizmo.drawBillboardIcon(
+                            var id_buf = std.mem.zeroes([19:0]u8);
+                            if (gizmo.drawBillboardIcon(
+                                (try std.fmt.bufPrintZ(&id_buf, "{d}", .{comp_id})).ptr,
                                 transform.position(),
                                 try Editor.getImGuiTexture(std.mem.span(billboard), &ctx.engine),
                                 32,
-                            );
+                            )) {
+                                Editor.instance().selection = .{ .entity = entity };
+                            }
                         }
                     }
+
+                    c.ImGui_PopID();
                 }
             }
         }
