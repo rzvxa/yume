@@ -33,14 +33,23 @@ pub fn getHomeDirectoryOwned(allocator: std.mem.Allocator) ![]u8 {
 }
 
 pub fn pathExists(path: []const u8) !bool {
-    var dir = std.fs.openDirAbsolute(path, .{}) catch |e| switch (e) {
+    var dir = std.fs.cwd().openDir(path, .{}) catch |e| switch (e) {
+        error.NotDir => {
+            var file = std.fs.cwd().openFile(path, .{}) catch |e2| switch (e2) {
+                error.FileNotFound => {
+                    return false;
+                },
+                else => return e2,
+            };
+            defer file.close();
+            return true;
+        },
         error.FileNotFound => {
             return false;
         },
         else => return e,
     };
     defer dir.close();
-    log.debug("fullpath {s} {}\n", .{ path, try dir.createFile("Hello.txt", .{}) });
     return true;
 }
 

@@ -17,23 +17,21 @@ allocator: std.mem.Allocator,
 
 logs: std.ArrayList(Log),
 
-filter_buf: std.ArrayList(u8),
+filter_str: imutils.ImString,
 
 pub fn init(ctx: *GameApp) Self {
-    var self = Self{
+    return .{
         .allocator = ctx.allocator,
 
         .logs = std.ArrayList(Log).init(ctx.allocator),
 
-        .filter_buf = std.ArrayList(u8).init(ctx.allocator),
+        .filter_str = imutils.ImString.init(ctx.allocator) catch @panic("OOM"),
     };
-    self.filter_buf.append(0) catch @panic("OOM");
-    return self;
 }
 
 pub fn deinit(self: *Self) void {
     self.logs.deinit();
-    self.filter_buf.deinit();
+    self.filter_str.deinit();
 }
 
 pub fn draw(self: *Self) void {
@@ -62,15 +60,14 @@ pub fn draw(self: *Self) void {
             c.ImGui_Text("filter:");
             c.ImGui_SameLine();
 
-            var callback = imutils.ArrayListU8ResizeCallback{ .buf = &self.filter_buf };
             c.ImGui_PushItemWidth(filter_width);
             _ = c.ImGui_InputTextEx(
                 "##filter-input",
-                self.filter_buf.items.ptr,
-                self.filter_buf.capacity,
+                self.filter_str.buf,
+                self.filter_str.size(),
                 c.ImGuiInputTextFlags_CallbackResize,
-                imutils.ArrayListU8ResizeCallback.InputTextCallback,
-                &callback,
+                imutils.ImString.InputTextCallback,
+                &self.filter_str,
             );
             c.ImGui_PopItemWidth();
 
@@ -127,7 +124,7 @@ inline fn filter(self: Self, log: Log) bool {
         return false;
     }
 
-    const needle = std.mem.span(@as([*:0]const u8, @ptrCast(self.filter_buf.items.ptr)));
+    const needle = self.filter_str.span();
     if (needle.len == 0) {
         return true;
     }

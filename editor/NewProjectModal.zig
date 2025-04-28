@@ -31,8 +31,8 @@ allocator: std.mem.Allocator,
 id: c.ImGuiID = undefined,
 is_open: bool = false,
 
-project_name: std.ArrayList(u8),
-project_path: std.ArrayList(u8),
+project_name: imutils.ImString,
+project_path: imutils.ImString,
 
 const yume_projects_root = switch (builtin.os.tag) {
     .windows => "Documents\\Yume Projects",
@@ -44,18 +44,13 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     const default_project_name = "New Project";
     const home_dir = try utils.getHomeDirectoryOwned(allocator);
     defer allocator.free(home_dir);
-    const default_project_path = try std.fs.path.join(allocator, &[_][]const u8{ home_dir, yume_projects_root });
+    const default_project_path = try std.fs.path.joinZ(allocator, &[_][]const u8{ home_dir, yume_projects_root });
     defer allocator.free(default_project_path);
-    var self = Self{
+    return .{
         .allocator = allocator,
-        .project_name = try std.ArrayList(u8).initCapacity(allocator, default_project_name.len + 1),
-        .project_path = try std.ArrayList(u8).initCapacity(allocator, default_project_path.len + 1),
+        .project_name = try imutils.ImString.fromSlice(allocator, default_project_name),
+        .project_path = try imutils.ImString.fromSlice(allocator, default_project_path),
     };
-    self.project_name.appendSliceAssumeCapacity(default_project_name);
-    self.project_name.appendAssumeCapacity(0);
-    self.project_path.appendSliceAssumeCapacity(default_project_path);
-    self.project_path.appendAssumeCapacity(0);
-    return self;
 }
 
 pub fn deinit(self: *Self) void {
@@ -103,16 +98,15 @@ pub fn show(self: *Self, ctx: *GameApp) void {
         c.ImGui_Text("Project Name:");
         for (0..1) |_| c.ImGui_Spacing();
         c.ImGui_PopFont();
-        var callback = imutils.ArrayListU8ResizeCallback{ .buf = &self.project_name };
         c.ImGui_PushItemWidth(-padding_x);
         c.ImGui_PushFont(Editor.roboto24);
         _ = c.ImGui_InputTextEx(
             "##new_project-project_name",
-            self.project_name.items.ptr,
-            self.project_name.capacity,
+            self.project_name.buf,
+            self.project_name.size(),
             c.ImGuiInputTextFlags_CallbackResize,
-            imutils.ArrayListU8ResizeCallback.InputTextCallback,
-            &callback,
+            &imutils.ImString.InputTextCallback,
+            &self.project_name,
         );
         c.ImGui_PopItemWidth();
         c.ImGui_PopFont();
@@ -122,17 +116,16 @@ pub fn show(self: *Self, ctx: *GameApp) void {
         c.ImGui_Text("Project Path:");
         for (0..1) |_| c.ImGui_Spacing();
         c.ImGui_PopFont();
-        callback = imutils.ArrayListU8ResizeCallback{ .buf = &self.project_path };
         c.ImGui_PushItemWidth(-padding_x);
         c.ImGui_PushFont(Editor.roboto24);
         _ = imutils.inputDirPath(
             "##new_project-project_path",
             ctx.window,
-            self.project_path.items.ptr,
-            self.project_path.capacity,
+            self.project_path.buf,
+            self.project_path.size(),
             c.ImGuiInputTextFlags_CallbackResize,
-            imutils.ArrayListU8ResizeCallback.InputTextCallback,
-            &callback,
+            imutils.ImString.InputTextCallback,
+            &self.project_path,
             &onPathSelect,
             self,
             false,
@@ -158,9 +151,10 @@ pub fn show(self: *Self, ctx: *GameApp) void {
 }
 
 fn onCreateClick(self: *Self, ctx: *GameApp) !void {
-    const project_name = self.project_name.items[0 .. self.project_name.items.len - 1];
-    const fullpath = try std.fs.path.join(self.allocator, &[_][]const u8{
-        self.project_path.items[0 .. self.project_path.items.len - 1],
+    const project_name = self.project_name.span();
+    const project_path = self.project_path.span();
+    const fullpath = try std.fs.path.resolve(self.allocator, &[_][]const u8{
+        project_path,
         project_name,
     });
     defer self.allocator.free(fullpath);
@@ -179,7 +173,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
     var project = Project{
         .allocator = self.allocator,
 
-        .project_name = project_name,
+        .project_name = try self.allocator.dupe(u8, project_name),
         .scenes = std.ArrayList(Uuid).init(self.allocator),
         .default_scene = Uuid.new(),
 
@@ -229,11 +223,9 @@ fn onPathSelect(user_data: ?*anyopaque, paths: [*c]const [*c]const u8, _: c_int)
         log.err("empty selection\n", .{});
         return;
     }
-    me.project_path.clearRetainingCapacity();
-    me.project_path.appendSlice(std.mem.span(paths[0])) catch @panic("OOM");
-    me.project_path.append(0) catch @panic("OOM");
+    me.project_path.set(std.mem.span(paths[0])) catch @panic("OOM");
 }
 
 fn haveValidParams(self: *Self) bool {
-    return (self.project_name.items.len > 0 and self.project_name.items[0] != 0) and (self.project_path.items.len > 0 and self.project_path.items[0] != 0);
+    return self.project_name.length() > 0 and self.project_path.length() > 0;
 }

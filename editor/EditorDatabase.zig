@@ -13,7 +13,7 @@ pub const LogFilters = struct {
 };
 
 const EditorDatabase = struct {
-    last_open_project: ?[]u8 = null,
+    last_open_project: ?[:0]u8 = null,
     last_open_scene: ?Uuid = null,
     log_filters: LogFilters = .{},
 };
@@ -64,7 +64,7 @@ pub fn setLastOpenProject(value: ?[]const u8) !void {
     }
 
     if (value != null) {
-        storage().last_open_project = try instance.db_arena.allocator().dupe(u8, value.?);
+        storage().last_open_project = try instance.db_arena.allocator().dupeZ(u8, value.?);
     } else {
         storage().last_open_project = null;
     }
