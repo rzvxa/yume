@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const Uuid = @import("yume").Uuid;
+const utils = @import("yume").utils;
 const log = std.log.scoped(.AssetsDatabase);
 
 pub const Resource = struct {
@@ -19,6 +20,13 @@ resources: std.AutoHashMap(Uuid, Resource),
 resources_index: std.StringHashMap(Uuid),
 resources_builtins: std.AutoHashMap(Uuid, Resource),
 
+resource_tree: ResourceTree,
+
+const ResourceTree = struct {
+    resource: ?Resource = null,
+    children: std.AutoArrayHashMap([]const u8, ResourceTree),
+};
+
 fn instance() *Self {
     std.debug.assert(singleton != null);
     return &singleton.?;
@@ -31,6 +39,10 @@ pub fn init(allocator: std.mem.Allocator) !void {
         .resources = std.AutoHashMap(Uuid, Resource).init(allocator),
         .resources_index = std.StringHashMap(Uuid).init(allocator),
         .resources_builtins = std.AutoHashMap(Uuid, Resource).init(allocator),
+        .resource_tree = .{
+            .resource = null,
+            .children = std.AutoArrayHashMap([]const u8, ResourceTree).init(allocator),
+        },
     };
 
     {
@@ -113,6 +125,7 @@ pub fn deinit() void {
         }
     }
     self.resources_builtins.deinit();
+    self.resource_tree.children.deinit();
 }
 
 pub fn getResourceId(path: []const u8) !Uuid {
@@ -168,9 +181,29 @@ pub fn register(opts: struct {
         try std.fs.path.join(self.allocator, &[_][]const u8{ gameRoot, "assets", opts.category, opts.path })
     else
         try self.allocator.dupe(u8, opts.path);
+    errdefer self.allocator.free(path);
+
+    log.debug("path: {s}", .{path});
+    log.debug("orig_path = {s}", .{opts.path});
+    log.debug("cat = {s}", .{opts.category});
+    log.debug("gameRoot = {s}", .{gameRoot});
+
+    if (!try utils.pathExists(path)) {
+        return error.FileNotFound;
+    }
+    var uri: []const u8 = try std.fmt.allocPrint(self.allocator, "{s}://{s}", .{ opts.category, opts.path });
+    const index_entry = try self.resources_index.getOrPut(uri);
+    if (index_entry.found_existing) {
+        self.allocator.free(uri);
+        uri = index_entry.key_ptr.*;
+    }
+
+    var pseg_iter = try std.fs.path.componentIterator(opts.path);
+    while (pseg_iter.next()) |seg| {
+        log.debug("{?}", .{seg});
+    }
 
     try storage.put(id, Resource{ .id = id, .path = path });
-    const uri = try std.fmt.allocPrint(self.allocator, "{s}://{s}", .{ opts.category, opts.path });
     try self.resources_index.put(uri, id);
 }
 

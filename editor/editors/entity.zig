@@ -13,21 +13,18 @@ const Self = @This();
 
 allocator: std.mem.Allocator,
 
-name_buf: std.ArrayList(u8),
+name_str: imutils.ImString,
 
 pub fn init(allocator: std.mem.Allocator, entity: ecs.Entity, ctx: *GameApp) Self {
     const name = ctx.world.getName(entity);
-    var self = Self{
+    return .{
         .allocator = allocator,
-        .name_buf = std.ArrayList(u8).init(allocator),
+        .name_str = imutils.ImString.fromSlice(allocator, name) catch @panic("OOM"),
     };
-    self.name_buf.appendSlice(name) catch @panic("OOM");
-    self.name_buf.append(0) catch @panic("OOM");
-    return self;
 }
 
 pub fn deinit(self: *Self) void {
-    self.name_buf.deinit();
+    self.name_str.deinit();
 }
 
 pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
@@ -35,9 +32,7 @@ pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
     const pathName = ctx.world.getPathName(entity);
     var has_path_name = pathName != null;
 
-    self.name_buf.clearRetainingCapacity();
-    self.name_buf.appendSlice(pathName orelse metaName) catch @panic("OOM");
-    self.name_buf.append(0) catch @panic("OOM");
+    self.name_str.set(pathName orelse metaName) catch @panic("OOM");
 
     const icon = Editor.object_icon_ds;
     const avail = c.ImGui_GetContentRegionAvail();
@@ -58,29 +53,29 @@ pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
     _ = c.ImGui_Checkbox("###enabled", &enabled);
     c.ImGui_SameLine();
 
-    var callback = imutils.ArrayListU8ResizeCallback{ .buf = &self.name_buf };
     const renamed = imutils.DelayedInputTextEx(
         "###Name",
-        self.name_buf.items.ptr,
-        self.name_buf.capacity,
+        self.name_str.buf,
+        self.name_str.size(),
         c.ImGuiInputTextFlags_CallbackResize,
-        imutils.ArrayListU8ResizeCallback.InputTextCallback,
-        &callback,
+        imutils.ImString.InputTextCallback,
+        &self.name_str,
     );
 
+    const name = self.name_str.span();
     if (renamed) {
         if (has_path_name) {
             _ = Editor.trySetUniquePathName(
                 ctx.world,
                 entity,
-                @ptrCast(self.name_buf.items.ptr),
+                name,
                 self.allocator,
             ) catch |err| switch (err) {
                 error.Cancel => {},
                 else => @panic("Failed to set path name as unqiue"),
             };
         } else {
-            _ = ctx.world.setMetaName(entity, @ptrCast(self.name_buf.items.ptr));
+            _ = ctx.world.setMetaName(entity, name);
         }
     }
 
@@ -94,7 +89,7 @@ pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
                 _ = Editor.trySetUniquePathName(
                     ctx.world,
                     entity,
-                    @ptrCast(self.name_buf.items.ptr),
+                    name,
                     self.allocator,
                 ) catch |err| switch (err) {
                     error.Cancel => {},
@@ -102,7 +97,7 @@ pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
                 };
             } else {
                 _ = ctx.world.setPathName(entity, null);
-                _ = ctx.world.setMetaName(entity, @ptrCast(self.name_buf.items.ptr));
+                _ = ctx.world.setMetaName(entity, name);
             }
         }
         c.ImGui_SameLine();

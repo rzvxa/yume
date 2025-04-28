@@ -22,6 +22,7 @@ const FrameData = struct {
     d: *Self,
     camera: ?*const components.Camera = null,
     camera_pos: Vec3 = Vec3.ZERO,
+    directional_light: GPULightData = undefined,
     point_lights: []GPULightData = undefined,
 };
 
@@ -33,6 +34,7 @@ is_game_window_focused: bool = false,
 
 frame_userdata: FrameData = undefined,
 camera_query: *ecs.Query,
+directional_light_query: *ecs.Query,
 point_lights_query: *ecs.Query,
 render_system: ecs.Entity,
 
@@ -43,6 +45,13 @@ pub fn init(ctx: *GameApp) Self {
             .{ .terms = .{
                 .{ .id = ecs.typeId(components.Transform) },
                 .{ .id = ecs.typeId(components.Camera) },
+            } },
+        )),
+        .directional_light_query = ctx.world.query(&std.mem.zeroInit(
+            c.ecs_query_desc_t,
+            .{ .terms = .{
+                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.DirectionalLight) },
             } },
         )),
         .point_lights_query = ctx.world.query(&std.mem.zeroInit(
@@ -65,6 +74,7 @@ pub fn init(ctx: *GameApp) Self {
 }
 
 pub fn deinit(self: *Self) void {
+    self.directional_light_query.deinit();
     self.point_lights_query.deinit();
     self.camera_query.deinit();
 }
@@ -100,6 +110,24 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                     .minDepth = 0.0,
                     .maxDepth = 1.0,
                 }});
+
+                const directional_light: GPULightData = blk: {
+                    var iter = me.d.directional_light_query.iter();
+                    while (iter.next()) {
+                        const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
+                        const lights = ecs.field(&iter, components.DirectionalLight, @alignOf(components.DirectionalLight), 1).?;
+                        for (lights, transforms) |light, transform| {
+                            iter.deinit();
+                            break :blk .{
+                                .pos = transform.rotation().toBasisVectors().forward,
+                                .color = light.color,
+                                .intensity = light.intensity,
+                                .range = 0,
+                            };
+                        }
+                    }
+                    break :blk std.mem.zeroes(GPULightData);
+                };
 
                 const point_lights = blk: {
                     var sfa = std.heap.stackFallback(512, me.app.allocator);
@@ -140,6 +168,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                         var new_me = me.*;
                         new_me.camera = camera;
                         new_me.camera_pos = transform.position();
+                        new_me.directional_light = directional_light;
                         new_me.point_lights = point_lights.items;
                         _ = c.ecs_run(iter.inner.real_world, me.d.render_system, me.app.delta, &new_me);
                     }
@@ -182,6 +211,7 @@ fn renderSys(it: *ecs.Iter, matrices: []components.Transform, meshes: []componen
             .ubo_set = me.app.engine.camera_and_scene_set,
             .cam = me.camera.?,
             .cam_pos = me.camera_pos,
+            .directional_light = me.directional_light,
             .point_lights = point_lights,
         },
     );

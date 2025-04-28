@@ -1,19 +1,65 @@
 const c = @import("clibs");
 const std = @import("std");
 
+const utils = @import("yume").utils;
 const Editor = @import("Editor.zig");
 
-pub const ArrayListU8ResizeCallback = struct {
-    buf: *std.ArrayList(u8),
+pub const ImString = struct {
+    allocator: std.mem.Allocator,
+    buf: [*:0]u8,
+    ccp: usize,
+
+    pub fn init(allocator: std.mem.Allocator) !ImString {
+        const str = .{
+            .allocator = allocator,
+            .buf = try allocator.allocSentinel(u8, 0, 0),
+            .ccp = 0,
+        };
+        return str;
+    }
+
+    pub fn fromSlice(allocator: std.mem.Allocator, s: [:0]const u8) !ImString {
+        return .{
+            .allocator = allocator,
+            .buf = (try allocator.dupeZ(u8, s)).ptr,
+            .ccp = s.len,
+        };
+    }
+
+    pub fn deinit(self: ImString) void {
+        self.allocator.free(self.buf[0..self.size()]);
+    }
+
+    pub inline fn span(self: *const ImString) [:0]const u8 {
+        return std.mem.span(self.buf);
+    }
+
+    pub inline fn size(self: *const ImString) usize {
+        return self.ccp + 1;
+    }
+
+    pub inline fn length(self: *const ImString) usize {
+        return self.span().len;
+    }
+
+    pub fn set(self: *ImString, s: [:0]const u8) !void {
+        try self.ensureCapacity(s.len);
+        @memcpy(self.buf[0 .. s.len + 1], utils.absorbSentinel(s));
+    }
+
+    pub fn ensureCapacity(self: *ImString, ccp: usize) !void {
+        self.buf = @ptrCast(try self.allocator.realloc(self.buf[0..self.size()], ccp + 1));
+        self.ccp = ccp;
+    }
+
     pub fn InputTextCallback(data: [*c]c.ImGuiInputTextCallbackData) callconv(.C) c_int {
         const user_data = @as(*@This(), @ptrCast(@alignCast(data.*.UserData)));
         if (data.*.EventFlag == c.ImGuiInputTextFlags_CallbackResize) {
             // Resize string callback
             // If for some reason we refuse the new length (BufTextLen) and/or capacity (BufSize) we need to set them back to what we want.
-            // std::string* str = user_data->Str;
-            std.debug.assert(data.*.Buf == user_data.buf.items.ptr);
-            user_data.buf.resize(@intCast(data.*.BufTextLen)) catch @panic("OOM");
-            data.*.Buf = user_data.buf.items.ptr;
+            std.debug.assert(data.*.Buf == user_data.buf);
+            user_data.ensureCapacity(@intCast(data.*.BufSize)) catch @panic("OOM");
+            data.*.Buf = user_data.buf;
         }
         return 0;
     }

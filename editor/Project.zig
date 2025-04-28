@@ -40,6 +40,11 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     defer project_root.close();
     try project_root.setAsCwd();
 
+    var iter = instance.?.resources.iterator();
+    while (iter.next()) |it| {
+        try AssetsDatabase.register(.{ .urn = &it.key_ptr.urn(), .path = it.value_ptr.path });
+    }
+
     try EditorDatabase.setLastOpenProject(path);
 }
 
@@ -235,7 +240,6 @@ fn parseResources(a: std.mem.Allocator, jrs: *std.json.Scanner) !std.AutoHashMap
 
         if (uuid == null) return error.MissingField;
         try resources.put(uuid.?, resource);
-        AssetsDatabase.register(.{ .urn = &resource.id.urn(), .path = resource.path }) catch return error.UnexpectedToken;
     }
 
     return resources;

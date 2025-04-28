@@ -30,7 +30,7 @@ allocator: std.mem.Allocator,
 id: c.ImGuiID = undefined,
 is_open: bool = false,
 
-project_path: std.ArrayList(u8),
+project_path: imutils.ImString,
 
 const yume_projects_root = switch (builtin.os.tag) {
     .windows => "Documents\\Yume Projects",
@@ -41,18 +41,16 @@ const yume_projects_root = switch (builtin.os.tag) {
 pub fn init(allocator: std.mem.Allocator) !Self {
     const home_dir = try utils.getHomeDirectoryOwned(allocator);
     defer allocator.free(home_dir);
-    const default_project_path = try std.fs.path.join(allocator, &[_][]const u8{ home_dir, yume_projects_root });
+    const default_project_path = try std.fs.path.joinZ(allocator, &[_][]const u8{ home_dir, yume_projects_root });
     defer allocator.free(default_project_path);
     var self = Self{
         .allocator = allocator,
-        .project_path = try std.ArrayList(u8).initCapacity(allocator, default_project_path.len + 1),
+        .project_path = try imutils.ImString.init(allocator),
     };
     if (EditorDatabase.storage().last_open_project) |lop| {
-        try self.project_path.appendSlice(lop);
-        try self.project_path.append(0);
+        try self.project_path.set(lop);
     } else {
-        self.project_path.appendSliceAssumeCapacity(default_project_path);
-        self.project_path.appendAssumeCapacity(0);
+        try self.project_path.set(default_project_path);
     }
     return self;
 }
@@ -103,17 +101,16 @@ pub fn show(self: *Self, ctx: *GameApp) void {
         c.ImGui_Text("Project Path:");
         for (0..1) |_| c.ImGui_Spacing();
         c.ImGui_PopFont();
-        var callback = imutils.ArrayListU8ResizeCallback{ .buf = &self.project_path };
         c.ImGui_PushItemWidth(-padding_x);
         c.ImGui_PushFont(Editor.roboto24);
         _ = imutils.inputFilePath(
             "##open_project-project_path",
             ctx.window,
-            self.project_path.items.ptr,
-            self.project_path.capacity,
+            self.project_path.buf,
+            self.project_path.size(),
             c.ImGuiInputTextFlags_CallbackResize,
-            imutils.ArrayListU8ResizeCallback.InputTextCallback,
-            &callback,
+            imutils.ImString.InputTextCallback,
+            &self.project_path,
             &onPathSelect,
             self,
             false,
@@ -129,7 +126,7 @@ pub fn show(self: *Self, ctx: *GameApp) void {
         c.ImGui_SetCursorPosX(avail.x - (padding_x + open_label_size.x));
         c.ImGui_SetCursorPosY(end_y);
         if (c.ImGui_Button(open_label)) {
-            Project.load(self.allocator, self.project_path.items[0 .. self.project_path.items.len - 1]) catch @panic("Failed to load project");
+            Project.load(self.allocator, self.project_path.span()) catch @panic("Failed to load project");
             const default_scene = Project.current().?.default_scene;
             ctx.loadScene(default_scene) catch @panic("Failed to load the default scene");
             EditorDatabase.storage().last_open_scene = default_scene;
@@ -152,11 +149,9 @@ fn onPathSelect(user_data: ?*anyopaque, paths: [*c]const [*c]const u8, _: c_int)
         log.err("empty selection\n", .{});
         return;
     }
-    me.project_path.clearRetainingCapacity();
-    me.project_path.appendSlice(std.mem.span(paths[0])) catch @panic("OOM");
-    me.project_path.append(0) catch @panic("OOM");
+    me.project_path.set(std.mem.span(paths[0])) catch @panic("OOM");
 }
 
 fn haveValidParams(self: *Self) bool {
-    return self.project_path.items.len > 0 and self.project_path.items[0] != 0;
+    return self.project_path.length() > 0 and self.project_path.length() > 0;
 }

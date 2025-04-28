@@ -20,7 +20,7 @@ pub const DirectionalLight = extern struct {
         return "editor://icons/sun.png";
     }
 
-    pub fn default(ptr: *PointLight, _: ecs.Entity, _: *GameApp, _: ecs.ResourceResolver) callconv(.C) bool {
+    pub fn default(ptr: *DirectionalLight, _: ecs.Entity, _: *GameApp, _: ecs.ResourceResolver) callconv(.C) bool {
         ptr.* = .{};
         return true;
     }
