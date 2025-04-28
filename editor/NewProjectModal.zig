@@ -207,6 +207,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
     defer file.close();
     try file.writeAll(json);
 
+    Editor.instance().selection = .{ .none = {} };
     try Project.load(self.allocator, projfile);
     try ctx.loadScene(project.default_scene);
     EditorDatabase.storage().last_open_scene = project.default_scene;

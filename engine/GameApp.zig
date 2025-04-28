@@ -176,6 +176,9 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
         old_scene.deinit();
     }
 
+    self.world.clear(self.scene_root);
+    self.world.deleteWith(ecs.pair(ecs.relations.ChildOf, self.scene_root));
+
     var dfs = try self.scene.dfs();
     defer dfs.deinit();
     var entity_map = std.AutoHashMap(Uuid, ecs.Entity).init(self.allocator);
