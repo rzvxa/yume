@@ -44,56 +44,6 @@ pub const OrderedItem = struct {
     }
 };
 
-pub const ItemDrawer = struct {
-    pub fn draw(
-        allocator: std.mem.Allocator,
-        icon: c.ImTextureID,
-        key: []const u8,
-        item_sz: f32,
-        style: c.ImGuiStyle,
-        selected_file: ?[]const u8,
-    ) !ItemResult {
-        const name = try allocator.dupeZ(u8, key);
-        var is_selected = false;
-        if (selected_file) |sel| {
-            if (std.mem.eql(u8, sel, name)) is_selected = true;
-        }
-        c.ImGui_PushID(name.ptr);
-        const pos = c.ImGui_GetCursorPos();
-        const wrap_width = item_sz;
-        const text_size = c.ImGui_CalcTextSizeEx(name.ptr, null, false, wrap_width);
-        const btn_width = item_sz + (2 * style.FramePadding.x);
-        const btn_height = item_sz + text_size.y + (2 * style.FramePadding.y);
-        const btn_size = c.ImVec2{ .x = btn_width, .y = btn_height };
-        if (is_selected)
-            c.ImGui_PushStyleColor(
-                c.ImGuiCol_Button,
-                c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0, .y = 0.478, .z = 0.8, .w = 1 }),
-            );
-        const clicked = c.ImGui_ButtonEx("##name", btn_size);
-        if (is_selected)
-            c.ImGui_PopStyleColor();
-        var result: ItemResult = .none;
-        if (clicked)
-            result = .click;
-        if (c.ImGui_IsItemHovered(c.ImGuiHoveredFlags_None) and c.ImGui_IsMouseDoubleClicked(0))
-            result = .double_click;
-        c.ImGui_SetCursorPos(pos);
-        const icon_x = pos.x + ((btn_size.x - item_sz) / 2);
-        c.ImGui_SetCursorPosX(icon_x);
-        _ = c.ImGui_Image(icon, c.ImVec2{ .x = item_sz, .y = item_sz });
-        const text_y = pos.y + item_sz;
-        const text_area_x = pos.x + ((btn_size.x - wrap_width) / 2);
-        c.ImGui_SetCursorPos(c.ImVec2{ .x = text_area_x, .y = text_y });
-        c.ImGui_PushTextWrapPos(text_area_x + wrap_width);
-        _ = c.ImGui_TextWrapped(name.ptr);
-        c.ImGui_PopTextWrapPos();
-        c.ImGui_PopID();
-        allocator.free(name);
-        return result;
-    }
-};
-
 pub fn draw(self: *Self) !void {
     var sfa_heap = std.heap.stackFallback(2048, self.allocator);
     const allocator = sfa_heap.get();
@@ -159,7 +109,7 @@ pub fn draw(self: *Self) !void {
                     },
                 );
 
-                const result = try ItemDrawer.draw(allocator, icon, item.key, item_sz, style, self.selected_file);
+                const result = try drawItem(allocator, icon, item.key, item_sz, style, self.selected_file);
                 if (result == .click) {
                     try self.setSelectedFile(item.key);
                 } else if (result == .double_click) {
@@ -200,6 +150,54 @@ pub fn draw(self: *Self) !void {
         c.ImGui_EndDisabled();
         c.ImGui_SameLineEx(0, 0);
     }
+}
+
+fn drawItem(
+    allocator: std.mem.Allocator,
+    icon: c.ImTextureID,
+    key: []const u8,
+    item_sz: f32,
+    style: c.ImGuiStyle,
+    selected_file: ?[]const u8,
+) !ItemResult {
+    const name = try allocator.dupeZ(u8, key);
+    var is_selected = false;
+    if (selected_file) |sel| {
+        if (std.mem.eql(u8, sel, name)) is_selected = true;
+    }
+    c.ImGui_PushID(name.ptr);
+    const pos = c.ImGui_GetCursorPos();
+    const wrap_width = item_sz;
+    const text_size = c.ImGui_CalcTextSizeEx(name.ptr, null, false, wrap_width);
+    const btn_width = item_sz + (2 * style.FramePadding.x);
+    const btn_height = item_sz + text_size.y + (2 * style.FramePadding.y);
+    const btn_size = c.ImVec2{ .x = btn_width, .y = btn_height };
+    if (is_selected)
+        c.ImGui_PushStyleColor(
+            c.ImGuiCol_Button,
+            c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0, .y = 0.478, .z = 0.8, .w = 1 }),
+        );
+    const clicked = c.ImGui_ButtonEx("##name", btn_size);
+    if (is_selected)
+        c.ImGui_PopStyleColor();
+    var result: ItemResult = .none;
+    if (clicked)
+        result = .click;
+    if (c.ImGui_IsItemHovered(c.ImGuiHoveredFlags_None) and c.ImGui_IsMouseDoubleClicked(0))
+        result = .double_click;
+    c.ImGui_SetCursorPos(pos);
+    const icon_x = pos.x + ((btn_size.x - item_sz) / 2);
+    c.ImGui_SetCursorPosX(icon_x);
+    _ = c.ImGui_Image(icon, c.ImVec2{ .x = item_sz, .y = item_sz });
+    const text_y = pos.y + item_sz;
+    const text_area_x = pos.x + ((btn_size.x - wrap_width) / 2) + ((wrap_width - text_size.x) / 2);
+    c.ImGui_SetCursorPos(c.ImVec2{ .x = text_area_x, .y = text_y });
+    c.ImGui_PushTextWrapPos(text_area_x + wrap_width);
+    c.ImGui_TextWrapped(name.ptr);
+    c.ImGui_PopTextWrapPos();
+    c.ImGui_PopID();
+    allocator.free(name);
+    return result;
 }
 
 fn setProjectExplorerPath(self: *Self, path: []const u8) !void {
