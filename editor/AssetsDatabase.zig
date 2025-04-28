@@ -102,6 +102,14 @@ pub fn init(allocator: std.mem.Allocator) !void {
     }
 }
 
+pub fn reinit(new_allocator: std.mem.Allocator) !void {
+    if (singleton != null) {
+        deinit();
+        singleton = null;
+    }
+    try init(new_allocator);
+}
+
 pub fn deinit() void {
     var self = instance();
     {
@@ -196,6 +204,11 @@ pub fn register(opts: struct {
     if (index_entry.found_existing) {
         self.allocator.free(uri);
         uri = index_entry.key_ptr.*;
+        if (storage.fetchRemove(index_entry.value_ptr.*)) |it| {
+            self.allocator.free(it.value.path);
+        }
+
+        log.warn("Duplicate resource being registered to the Assets Database, Replacing the old asset. {s}:{s}", .{ index_entry.value_ptr.urn(), uri });
     }
 
     var pseg_iter = try std.fs.path.componentIterator(opts.path);
@@ -204,7 +217,7 @@ pub fn register(opts: struct {
     }
 
     try storage.put(id, Resource{ .id = id, .path = path });
-    try self.resources_index.put(uri, id);
+    index_entry.value_ptr.* = id;
 }
 
 fn registerBuiltinShader(urn: []const u8, path: []const u8) !void {

@@ -300,6 +300,10 @@ pub const World = struct {
         c.ecs_delete(self.inner, ent);
     }
 
+    pub inline fn deleteWith(self: Self, id: Entity) void {
+        c.ecs_delete_with(self.inner, id);
+    }
+
     pub inline fn clear(self: Self, ent: Entity) void {
         c.ecs_clear(self.inner, ent);
     }

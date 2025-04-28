@@ -40,6 +40,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     defer project_root.close();
     try project_root.setAsCwd();
 
+    try AssetsDatabase.reinit(allocator);
     var iter = instance.?.resources.iterator();
     while (iter.next()) |it| {
         try AssetsDatabase.register(.{ .urn = &it.key_ptr.urn(), .path = it.value_ptr.path });
