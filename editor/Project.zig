@@ -40,6 +40,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     defer project_root.close();
     try project_root.setAsCwd();
 
+    // we can also unload assets one by one based on the resources
     try AssetsDatabase.reinit(allocator);
     var iter = instance.?.resources.iterator();
     while (iter.next()) |it| {

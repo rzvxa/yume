@@ -19,13 +19,13 @@ logs: std.ArrayList(Log),
 
 filter_str: imutils.ImString,
 
-pub fn init(ctx: *GameApp) Self {
+pub fn init(allocator: std.mem.Allocator) Self {
     return .{
-        .allocator = ctx.allocator,
+        .allocator = allocator,
 
-        .logs = std.ArrayList(Log).init(ctx.allocator),
+        .logs = std.ArrayList(Log).init(allocator),
 
-        .filter_str = imutils.ImString.init(ctx.allocator) catch @panic("OOM"),
+        .filter_str = imutils.ImString.init(allocator) catch @panic("OOM"),
     };
 }
 
@@ -34,7 +34,7 @@ pub fn deinit(self: *Self) void {
     self.filter_str.deinit();
 }
 
-pub fn draw(self: *Self) void {
+pub fn draw(self: *Self) !void {
     if (c.ImGui_Begin("Logs", null, c.ImGuiWindowFlags_NoCollapse)) {
         logs_harness.drainInto(&self.logs) catch @panic("OOM");
 
@@ -73,16 +73,36 @@ pub fn draw(self: *Self) void {
 
             c.ImGui_SetCursorPos(cursor);
 
-            filterToggleButton("error", &EditorDatabase.storage().log_filters.err, Editor.error_icon_ds, Editor.error_mono_icon_ds);
+            filterToggleButton(
+                "error",
+                &EditorDatabase.storage().log_filters.err,
+                try Editor.getImGuiTexture("editor://icons/error.png"),
+                try Editor.getImGuiTexture("editor://icons/error-mono.png"),
+            );
             cursor.x = cursor.x + small_button_width;
             c.ImGui_SetCursorPos(cursor);
-            filterToggleButton("warning", &EditorDatabase.storage().log_filters.warn, Editor.warning_icon_ds, Editor.warning_mono_icon_ds);
+            filterToggleButton(
+                "warning",
+                &EditorDatabase.storage().log_filters.warn,
+                try Editor.getImGuiTexture("editor://icons/warning.png"),
+                try Editor.getImGuiTexture("editor://icons/warning-mono.png"),
+            );
             cursor.x = cursor.x + small_button_width;
             c.ImGui_SetCursorPos(cursor);
-            filterToggleButton("info", &EditorDatabase.storage().log_filters.info, Editor.info_icon_ds, Editor.info_mono_icon_ds);
+            filterToggleButton(
+                "info",
+                &EditorDatabase.storage().log_filters.info,
+                try Editor.getImGuiTexture("editor://icons/info.png"),
+                try Editor.getImGuiTexture("editor://icons/info-mono.png"),
+            );
             cursor.x = cursor.x + small_button_width;
             c.ImGui_SetCursorPos(cursor);
-            filterToggleButton("debug", &EditorDatabase.storage().log_filters.debug, Editor.debug_icon_ds, Editor.debug_mono_icon_ds);
+            filterToggleButton(
+                "debug",
+                &EditorDatabase.storage().log_filters.debug,
+                try Editor.getImGuiTexture("editor://icons/debug.png"),
+                try Editor.getImGuiTexture("editor://icons/debug-mono.png"),
+            );
         }
         c.ImGui_EndGroup();
 
@@ -98,10 +118,10 @@ pub fn draw(self: *Self) void {
                     continue;
                 }
                 const icon = switch (log.level) {
-                    .err => Editor.error_icon_ds,
-                    .warn => Editor.warning_icon_ds,
-                    .info => Editor.info_icon_ds,
-                    .debug => Editor.debug_icon_ds,
+                    .err => try Editor.getImGuiTexture("editor://icons/editor.png"),
+                    .warn => try Editor.getImGuiTexture("editor://icons/warning.png"),
+                    .info => try Editor.getImGuiTexture("editor://icons/info.png"),
+                    .debug => try Editor.getImGuiTexture("editor://icons/debug.png"),
                 };
                 c.ImGui_Image(icon, .{ .x = 28, .y = 28 });
                 c.ImGui_SameLine();

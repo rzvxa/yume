@@ -85,7 +85,11 @@ pub fn inputFilePath(
     const changed = c.ImGui_InputTextEx(label, path_buf, buf_size, flags | c.ImGuiInputTextFlags_ReadOnly, text_callback, text_user_data);
     c.ImGui_EndDisabled();
     c.ImGui_SameLine();
-    if (c.ImGui_ImageButton("browse", Editor.browse_icon_ds, c.ImVec2{ .x = browseButtonSize, .y = browseButtonSize })) {
+    if (c.ImGui_ImageButton(
+        "browse",
+        Editor.getImGuiTexture("editor://icons/browse.png") catch @panic("Failed to load browse icon"),
+        c.ImVec2{ .x = browseButtonSize, .y = browseButtonSize },
+    )) {
         const filters = [_]c.SDL_DialogFileFilter{.{
             .name = "Yume Project File",
             .pattern = "json",
@@ -117,7 +121,11 @@ pub fn inputDirPath(
     const changed = c.ImGui_InputTextEx(label, path_buf, buf_size, flags | c.ImGuiInputTextFlags_ReadOnly, text_callback, text_user_data);
     c.ImGui_EndDisabled();
     c.ImGui_SameLine();
-    if (c.ImGui_ImageButton("browse", Editor.browse_icon_ds, c.ImVec2{ .x = browseButtonSize, .y = browseButtonSize })) {
+    if (c.ImGui_ImageButton(
+        "browse",
+        Editor.getImGuiTexture("editor://icons/browse.png") catch @panic("Failed to load browse icon"),
+        c.ImVec2{ .x = browseButtonSize, .y = browseButtonSize },
+    )) {
         c.SDL_ShowOpenFolderDialog(fs_callback, fs_user_data, window, path_buf, allow_many);
     }
     c.ImGui_PopItemWidth();

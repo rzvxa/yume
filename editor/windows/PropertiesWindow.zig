@@ -11,7 +11,7 @@ const AssetsDatabase = @import("../AssetsDatabase.zig");
 
 const Self = @This();
 
-pub fn init(_: *GameApp) Self {
+pub fn init(_: std.mem.Allocator) Self {
     return .{};
 }
 
@@ -157,9 +157,9 @@ fn drawProperties(_: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
                     const label_pad_y = (btnsz.y - label_size.y) / 2;
 
                     const icon = if (def.icon) |icon_path|
-                        try Editor.getImGuiTexture(std.mem.span(icon_path), &ctx.engine)
+                        try Editor.getImGuiTexture(std.mem.span(icon_path))
                     else
-                        Editor.file_icon_ds;
+                        try Editor.getImGuiTexture("editor://icons/file.png");
 
                     const icon_pad_y = (btnsz.y - icon_size) / 2;
 

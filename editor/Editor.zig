@@ -65,14 +65,18 @@ const Selection = union(SelectionKind) {
     entity: ecs.Entity,
     many: []Selection,
 
-    pub fn is(self: *const Selection, comptime kind: SelectionKind, other: anytype) bool {
+    pub fn is(self: *const Selection, comptime kind: SelectionKind, other: switch (kind) {
+        .none => void,
+        .entity => ecs.Entity,
+        .many => []Selection,
+    }) bool {
         if (kind != std.meta.activeTag(self.*)) {
             return false;
         }
 
-        switch (self.*) {
+        switch (kind) {
             .none => return true,
-            .entity => |e| return e == other,
+            .entity => return self.entity == other,
             .many => return false,
         }
     }
@@ -164,11 +168,11 @@ pub fn init(ctx: *GameApp) *Self {
         .hello_modal = HelloModal.init() catch @panic("Failed to initialize `HelloModal`"),
         .new_project_modal = NewProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `NewProjectModal`"),
         .open_project_modal = OpenProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `OpenProjectModal`"),
-        .hierarchy_window = HierarchyWindow.init(ctx),
-        .project_explorer = ProjectExplorerWindow{},
-        .properties_window = PropertiesWindow.init(ctx),
+        .hierarchy_window = HierarchyWindow.init(ctx.allocator),
+        .project_explorer = ProjectExplorerWindow.init(ctx.allocator) catch @panic("Failed to initialize `ProjectExplorerWindow`"),
+        .properties_window = PropertiesWindow.init(ctx.allocator),
         .game_window = GameWindow.init(ctx),
-        .logs_windows = LogsWindow.init(ctx),
+        .logs_windows = LogsWindow.init(ctx.allocator),
         .scene_window = undefined,
     };
     singleton.scene_window = SceneWindow.init(ctx, @ptrCast(&Editors.onDrawGizmos), &singleton.editors);
@@ -210,6 +214,7 @@ pub fn deinit(self: *Self) void {
     self.logs_windows.deinit();
     self.hierarchy_window.deinit();
     self.properties_window.deinit();
+    self.project_explorer.deinit();
     if (Project.current()) |p| {
         p.unload();
     }
@@ -264,8 +269,30 @@ pub fn processEvent(self: *Self, event: *c.SDL_Event) bool {
 }
 
 pub fn update(self: *Self) !bool {
+    self.sanitizeSelection(&self.selection);
     try self.scene_window.update(self.ctx);
     return self.ctx.world.progress(self.ctx.delta);
+}
+
+pub fn sanitizeSelection(self: *Self, sel: *Selection) void {
+    switch (sel.*) {
+        .entity => |it| if (!self.ctx.world.isAlive(it)) {
+            sel.* = .{ .none = {} };
+        },
+        .many => |items| {
+            var tail: usize = 0;
+            for (0..items.len) |i| {
+                var it = items[i];
+                self.sanitizeSelection(&it);
+                if (!it.is(.none, {})) {
+                    items[tail] = it;
+                    tail += 1;
+                }
+            }
+            std.debug.assert(self.ctx.allocator.resize(items, tail));
+        },
+        .none => {},
+    }
 }
 
 pub fn draw(self: *Self) !void {
@@ -334,13 +361,17 @@ pub fn draw(self: *Self) !void {
             c.ImGui_EndMenu();
         }
         c.ImGui_SetCursorPosX((c.ImGui_GetCursorPosX() - (13 * 3)) + (GameApp.window_extent.width / 2) - c.ImGui_GetCursorPosX());
-        if (c.ImGui_ImageButton("Play", if (self.play) stop_icon_ds else play_icon_ds, c.ImVec2{ .x = 13, .y = 13 })) {
+        if (c.ImGui_ImageButton(
+            "Play",
+            try getImGuiTexture(if (self.play) "editor://icons/stop.png" else "editor://icons/play.png"),
+            c.ImVec2{ .x = 13, .y = 13 },
+        )) {
             self.play = !self.play;
             self.ctx.world.enable(ecs.typeId(Playing), self.play);
             self.bootstrapEditorPipeline(self.ctx.world);
         }
-        _ = c.ImGui_ImageButton("Pause", pause_icon_ds, c.ImVec2{ .x = 13, .y = 13 });
-        _ = c.ImGui_ImageButton("Next", fast_forward_icon_ds, c.ImVec2{ .x = 13, .y = 13 });
+        _ = c.ImGui_ImageButton("Pause", try getImGuiTexture("editor://icons/pause.png"), c.ImVec2{ .x = 13, .y = 13 });
+        _ = c.ImGui_ImageButton("Next", try getImGuiTexture("editor://icons/fast-forward.png"), c.ImVec2{ .x = 13, .y = 13 });
         c.ImGui_EndMainMenuBar();
     }
 
@@ -405,15 +436,15 @@ pub fn draw(self: *Self) !void {
     c.ImGui_End();
 
     self.hierarchy_window.draw(self.ctx);
-    self.properties_window.draw(self.ctx) catch @panic("err");
-    self.project_explorer.draw();
+    try self.properties_window.draw(self.ctx);
+    try self.project_explorer.draw();
     try self.scene_window.draw(cmd, self.ctx);
     self.game_window.draw(cmd, self.ctx);
-    self.logs_windows.draw();
+    try self.logs_windows.draw();
 
     self.hello_modal.show();
-    self.new_project_modal.show(self.ctx);
-    self.open_project_modal.show(self.ctx);
+    try self.new_project_modal.show(self.ctx);
+    try self.open_project_modal.show(self.ctx);
 
     c.ImGui_Render();
 
@@ -570,31 +601,7 @@ fn init_imgui(engine: *Engine) !void {
 
     loaded_imgui_images = std.StringHashMap(c.ImTextureID).init(engine.allocator);
 
-    play_icon_ds = try getImGuiTexture("editor://icons/play.png", engine);
-    pause_icon_ds = try getImGuiTexture("editor://icons/pause.png", engine);
-    stop_icon_ds = try getImGuiTexture("editor://icons/stop.png", engine);
-    fast_forward_icon_ds = try getImGuiTexture("editor://icons/fast-forward.png", engine);
-    folder_icon_ds = try getImGuiTexture("editor://icons/folder.png", engine);
-    file_icon_ds = try getImGuiTexture("editor://icons/file.png", engine);
-    object_icon_ds = try getImGuiTexture("editor://icons/object.png", engine);
-    move_tool_icon_ds = try getImGuiTexture("editor://icons/move-tool.png", engine);
-    rotate_tool_icon_ds = try getImGuiTexture("editor://icons/rotate-tool.png", engine);
-    scale_tool_icon_ds = try getImGuiTexture("editor://icons/scale-tool.png", engine);
-    transform_tool_icon_ds = try getImGuiTexture("editor://icons/transform-tool.png", engine);
-    close_icon_ds = try getImGuiTexture("editor://icons/close.png", engine);
-    browse_icon_ds = try getImGuiTexture("editor://icons/browse.png", engine);
-
-    error_icon_ds = try getImGuiTexture("editor://icons/error.png", engine);
-    warning_icon_ds = try getImGuiTexture("editor://icons/warning.png", engine);
-    info_icon_ds = try getImGuiTexture("editor://icons/info.png", engine);
-    debug_icon_ds = try getImGuiTexture("editor://icons/debug.png", engine);
-
-    error_mono_icon_ds = try getImGuiTexture("editor://icons/error-mono.png", engine);
-    warning_mono_icon_ds = try getImGuiTexture("editor://icons/warning-mono.png", engine);
-    info_mono_icon_ds = try getImGuiTexture("editor://icons/info-mono.png", engine);
-    debug_mono_icon_ds = try getImGuiTexture("editor://icons/debug-mono.png", engine);
-
-    yume_logo_ds = try getImGuiTexture("editor://icons/yume.png", engine);
+    yume_logo_ds = try getImGuiTexture("editor://icons/yume.png");
 
     engine.deletion_queue.append(VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool)) catch @panic("Out of memory");
 
@@ -751,7 +758,8 @@ pub fn messageBox(opts: struct {
     return @intCast(button);
 }
 
-pub fn getImGuiTexture(uri: []const u8, engine: *Engine) !c.ImTextureID {
+pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
+    var engine = &instance().ctx.engine;
     const entry = try loaded_imgui_images.getOrPut(uri);
     if (entry.found_existing) {
         return entry.value_ptr.*;
@@ -845,30 +853,6 @@ pub var roboto32: *c.ImFont = undefined;
 // assets
 
 pub var loaded_imgui_images: std.StringHashMap(c.ImTextureID) = undefined;
-
-pub var play_icon_ds: c.ImTextureID = undefined;
-pub var pause_icon_ds: c.ImTextureID = undefined;
-pub var stop_icon_ds: c.ImTextureID = undefined;
-pub var fast_forward_icon_ds: c.ImTextureID = undefined;
-pub var folder_icon_ds: c.ImTextureID = undefined;
-pub var file_icon_ds: c.ImTextureID = undefined;
-pub var object_icon_ds: c.ImTextureID = undefined;
-pub var move_tool_icon_ds: c.ImTextureID = undefined;
-pub var rotate_tool_icon_ds: c.ImTextureID = undefined;
-pub var scale_tool_icon_ds: c.ImTextureID = undefined;
-pub var transform_tool_icon_ds: c.ImTextureID = undefined;
-pub var close_icon_ds: c.ImTextureID = undefined;
-pub var browse_icon_ds: c.ImTextureID = undefined;
-
-pub var error_icon_ds: c.ImTextureID = undefined;
-pub var warning_icon_ds: c.ImTextureID = undefined;
-pub var info_icon_ds: c.ImTextureID = undefined;
-pub var debug_icon_ds: c.ImTextureID = undefined;
-
-pub var error_mono_icon_ds: c.ImTextureID = undefined;
-pub var warning_mono_icon_ds: c.ImTextureID = undefined;
-pub var info_mono_icon_ds: c.ImTextureID = undefined;
-pub var debug_mono_icon_ds: c.ImTextureID = undefined;
 
 pub var yume_logo_ds: c.ImTextureID = undefined;
 

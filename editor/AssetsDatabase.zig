@@ -2,6 +2,7 @@ const std = @import("std");
 
 const Uuid = @import("yume").Uuid;
 const utils = @import("yume").utils;
+
 const log = std.log.scoped(.AssetsDatabase);
 
 pub const Resource = struct {
@@ -20,11 +21,170 @@ resources: std.AutoHashMap(Uuid, Resource),
 resources_index: std.StringHashMap(Uuid),
 resources_builtins: std.AutoHashMap(Uuid, Resource),
 
-resource_tree: ResourceTree,
+resource_tree: ResourceNode,
 
-const ResourceTree = struct {
-    resource: ?Resource = null,
-    children: std.AutoArrayHashMap([]const u8, ResourceTree),
+pub const ResourceNode = struct {
+    pub const Node = union(enum) {
+        resource: Resource,
+        directory: []const u8,
+
+        pub fn path(self: *const Node) []const u8 {
+            return switch (self.*) {
+                .resource => |r| r.path,
+                .directory => |d| d,
+            };
+        }
+    };
+
+    pub const GetOrPutResult = struct {
+        value: *ResourceNode,
+        found_existing: bool,
+    };
+
+    pub const DfsPreOrder = struct {
+        pub const Result = struct {
+            key_ptr: ?*[]const u8,
+            event: DfsEvent,
+        };
+        pub const DfsEvent = union(enum) {
+            enter: *ResourceNode,
+            leave: *ResourceNode,
+        };
+
+        stack: std.ArrayList(Result),
+
+        pub fn init(allocator: std.mem.Allocator, root: *ResourceNode) !DfsPreOrder {
+            var self = DfsPreOrder{
+                .stack = try std.ArrayList(Result).initCapacity(allocator, 1),
+            };
+            self.stack.appendAssumeCapacity(.{ .key_ptr = null, .event = .{ .enter = root } });
+            return self;
+        }
+
+        pub fn deinit(self: *DfsPreOrder) void {
+            self.stack.deinit();
+        }
+
+        pub fn next(self: *DfsPreOrder) !?Result {
+            if (self.stack.items.len == 0) return null;
+
+            const res = self.stack.pop();
+            switch (res.event) {
+                .enter => |node| {
+                    var iter = node.children.iterator();
+                    while (iter.next()) |it| {
+                        try self.stack.append(.{ .key_ptr = it.key_ptr, .event = .{ .enter = it.value_ptr } });
+                    }
+                    try self.stack.append(.{ .key_ptr = res.key_ptr, .event = .{ .leave = node } });
+                },
+                else => {},
+            }
+            return res;
+        }
+    };
+
+    pub const DfsPostOrder = struct {
+        pub const Result = struct {
+            key_ptr: ?*[]const u8,
+            value_ptr: *ResourceNode,
+        };
+        stack: std.ArrayList(Result),
+
+        pub fn init(allocator: std.mem.Allocator, root: *ResourceNode) !DfsPostOrder {
+            var stack1 = std.ArrayList(Result).init(allocator);
+            defer stack1.deinit();
+            var stack2 = std.ArrayList(Result).init(allocator);
+            try stack1.append(.{ .key_ptr = null, .value_ptr = root });
+
+            while (stack1.items.len > 0) {
+                const res = stack1.pop();
+                try stack2.append(res);
+                var iter = res.value_ptr.children.iterator();
+                while (iter.next()) |child| {
+                    try stack1.append(.{ .key_ptr = child.key_ptr, .value_ptr = child.value_ptr });
+                }
+            }
+
+            return DfsPostOrder{
+                .stack = stack2,
+            };
+        }
+
+        pub fn deinit(self: *DfsPostOrder) void {
+            self.stack.deinit();
+        }
+
+        pub fn next(self: *DfsPostOrder) !?Result {
+            if (self.stack.items.len == 0) return null;
+
+            return self.stack.pop();
+        }
+    };
+
+    node: Node,
+    children: std.StringArrayHashMap(ResourceNode),
+
+    fn init(allocator: std.mem.Allocator, node: Node) ResourceNode {
+        return .{
+            .node = node,
+            .children = std.StringArrayHashMap(ResourceNode).init(allocator),
+        };
+    }
+
+    fn deinit(self: *ResourceNode) void {
+        switch (self.node) {
+            .directory => |d| self.children.allocator.free(d),
+            .resource => {},
+        }
+        self.children.deinit();
+    }
+
+    pub fn dfs(self: *ResourceNode, allocator: std.mem.Allocator, comptime order: enum { pre, post }) !switch (order) {
+        .pre => DfsPreOrder,
+        .post => DfsPostOrder,
+    } {
+        return switch (order) {
+            .pre => DfsPreOrder.init(allocator, self),
+            .post => DfsPostOrder.init(allocator, self),
+        };
+    }
+
+    pub fn find(self: *ResourceNode, relpath: []const u8) !?*ResourceNode {
+        var segments = try std.fs.path.componentIterator(relpath);
+
+        var node = self;
+
+        while (segments.next()) |seg| {
+            if (node.children.getPtr(seg.name)) |child| {
+                node = child;
+            } else {
+                return null;
+            }
+        }
+        return node;
+    }
+
+    pub fn getOrPut(self: *ResourceNode, relpath: []const u8) !GetOrPutResult {
+        var segments = try std.fs.path.componentIterator(relpath);
+        return self.getOrPutInternal(&segments);
+    }
+
+    fn getOrPutInternal(parent: *ResourceNode, segments: *std.fs.path.NativeComponentIterator) !GetOrPutResult {
+        const segment = segments.next() orelse unreachable;
+        const entry = try parent.children.getOrPut(segment.name);
+        const has_next = segments.peekNext() != null;
+        if (!entry.found_existing) {
+            entry.key_ptr.* = try parent.children.allocator.dupe(u8, segment.name);
+            if (has_next) {
+                entry.value_ptr.* = ResourceNode.init(parent.children.allocator, .{ .directory = try parent.children.allocator.dupe(u8, segment.path) });
+            }
+        }
+
+        return if (has_next)
+            try entry.value_ptr.getOrPutInternal(segments)
+        else
+            GetOrPutResult{ .value = entry.value_ptr, .found_existing = entry.found_existing };
+    }
 };
 
 fn instance() *Self {
@@ -39,10 +199,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
         .resources = std.AutoHashMap(Uuid, Resource).init(allocator),
         .resources_index = std.StringHashMap(Uuid).init(allocator),
         .resources_builtins = std.AutoHashMap(Uuid, Resource).init(allocator),
-        .resource_tree = .{
-            .resource = null,
-            .children = std.AutoArrayHashMap([]const u8, ResourceTree).init(allocator),
-        },
+        .resource_tree = ResourceNode.init(allocator, .{ .directory = try allocator.dupe(u8, "/") }),
     };
 
     {
@@ -81,6 +238,9 @@ pub fn init(allocator: std.mem.Allocator) !void {
         try register(.{ .urn = "4bf6d06c-2d96-4b12-8c20-f9a03a5152e1", .path = "icons/transform-tool.png", .category = "editor" });
         try register(.{ .urn = "eab7824b-f71c-4b90-a468-a5d91f4a3f7b", .path = "icons/close.png", .category = "editor" });
         try register(.{ .urn = "715b644d-f9a5-4aad-9cf9-6328cc849006", .path = "icons/browse.png", .category = "editor" });
+        try register(.{ .urn = "48d0e511-cdaf-4111-8ffa-f7e31fbe9636", .path = "icons/home.png", .category = "editor" });
+        try register(.{ .urn = "55cfea70-2c07-470f-a60c-7e8269ee2497", .path = "icons/editor.png", .category = "editor" });
+        try register(.{ .urn = "dd8f5337-cf79-489e-849c-5331a044a578", .path = "icons/library.png", .category = "editor" });
 
         try register(.{ .urn = "72bb403a-8624-4541-bbaa-a85668340db1", .path = "icons/camera.png", .category = "editor" });
         try register(.{ .urn = "1e2e7db3-8b27-45b9-adf1-05e808175043", .path = "icons/mesh.png", .category = "editor" });
@@ -104,13 +264,13 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
 pub fn reinit(new_allocator: std.mem.Allocator) !void {
     if (singleton != null) {
-        deinit();
+        try deinit();
         singleton = null;
     }
     try init(new_allocator);
 }
 
-pub fn deinit() void {
+pub fn deinit() !void {
     var self = instance();
     {
         var it = self.resources_index.iterator();
@@ -133,7 +293,15 @@ pub fn deinit() void {
         }
     }
     self.resources_builtins.deinit();
-    self.resource_tree.children.deinit();
+
+    {
+        var iter = try Self.dfsPostOrder(self.allocator);
+        defer iter.deinit();
+        while (try iter.next()) |res| {
+            if (res.key_ptr) |k| self.allocator.free(k.*);
+            res.value_ptr.deinit();
+        }
+    }
 }
 
 pub fn getResourceId(path: []const u8) !Uuid {
@@ -166,11 +334,42 @@ pub fn getResourcePath(id: Uuid) ![]const u8 {
     }
 }
 
+pub fn findResourceNode(path: []const u8) !?*ResourceNode {
+    const self = instance();
+    if (path.len == 1 and path[0] == '/') {
+        return &self.resource_tree;
+    }
+
+    return self.resource_tree.find(path);
+}
+
+pub fn findResourceNodeByUri(uri: []const u8) !?*ResourceNode {
+    const self = instance();
+    if (uri.len == 1 and uri[0] == '/') {
+        return &self.resource_tree;
+    }
+    var sfa = std.heap.stackFallback(2048, self.allocator);
+    const allocator = sfa.get();
+
+    const path = try parseUri(allocator, uri);
+    defer allocator.free(path);
+
+    return self.resource_tree.find(path);
+}
+
 pub fn readAssetAlloc(allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) ![]u8 {
     log.debug("readAssetAlloc ({s}) :: {s}\n", .{ id.urn(), try getResourcePath(id) });
     var file = std.fs.cwd().openFile(try getResourcePath(id), .{}) catch return error.FailedToOpenResource;
     defer file.close();
     return file.readToEndAlloc(allocator, max_bytes) catch return error.FailedToReadResource;
+}
+
+pub fn dfsPreOrder(allocator: std.mem.Allocator) !ResourceNode.DfsPreOrder {
+    return instance().*.resource_tree.dfs(allocator, .pre);
+}
+
+pub fn dfsPostOrder(allocator: std.mem.Allocator) !ResourceNode.DfsPostOrder {
+    return instance().*.resource_tree.dfs(allocator, .post);
 }
 
 pub fn register(opts: struct {
@@ -181,12 +380,12 @@ pub fn register(opts: struct {
     const is_builtin = std.mem.eql(u8, opts.category, "builtin") or std.mem.eql(u8, opts.category, "editor");
     var self = instance();
     const id = try Uuid.fromUrnSlice(opts.urn);
-    const gameRoot = try gameRootDirectory(self.allocator);
-    defer self.allocator.free(gameRoot);
+    const editor_root = try editorRootDir(self.allocator);
+    defer self.allocator.free(editor_root);
 
     var storage = if (is_builtin) &self.resources_builtins else &self.resources;
     const path = if (is_builtin)
-        try std.fs.path.join(self.allocator, &[_][]const u8{ gameRoot, "assets", opts.category, opts.path })
+        try std.fs.path.join(self.allocator, &[_][]const u8{ editor_root, "assets", opts.category, opts.path })
     else
         try self.allocator.dupe(u8, opts.path);
     errdefer self.allocator.free(path);
@@ -194,7 +393,7 @@ pub fn register(opts: struct {
     log.debug("path: {s}", .{path});
     log.debug("orig_path = {s}", .{opts.path});
     log.debug("cat = {s}", .{opts.category});
-    log.debug("gameRoot = {s}", .{gameRoot});
+    log.debug("editor_root = {s}", .{editor_root});
 
     if (!try utils.pathExists(path)) {
         return error.FileNotFound;
@@ -211,33 +410,56 @@ pub fn register(opts: struct {
         log.warn("Duplicate resource being registered to the Assets Database, Replacing the old asset. {s}:{s}", .{ index_entry.value_ptr.urn(), uri });
     }
 
-    var pseg_iter = try std.fs.path.componentIterator(opts.path);
-    while (pseg_iter.next()) |seg| {
-        log.debug("{?}", .{seg});
-    }
-
-    try storage.put(id, Resource{ .id = id, .path = path });
+    const parsed_path = try parseUri(self.allocator, uri);
+    defer self.allocator.free(parsed_path);
+    const res_ptr = try self.resource_tree.getOrPut(parsed_path);
+    std.debug.assert(!res_ptr.found_existing);
+    res_ptr.value.* = ResourceNode.init(self.allocator, .{ .resource = Resource{ .id = id, .path = path } });
+    try storage.put(id, res_ptr.value.node.resource);
     index_entry.value_ptr.* = id;
 }
 
 fn registerBuiltinShader(urn: []const u8, path: []const u8) !void {
     const self = instance();
     const id = try Uuid.fromUrnSlice(urn);
-    const gameRoot = try gameRootDirectory(self.allocator);
-    defer self.allocator.free(gameRoot);
+    const editor_root = try editorRootDir(self.allocator);
+    defer self.allocator.free(editor_root);
     const pathspv = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ path[0 .. path.len - ".glsl".len], "spv" });
     defer self.allocator.free(pathspv);
     try self.resources_builtins.put(id, Resource{
         .id = id,
-        .path = try std.fs.path.join(self.allocator, &[_][]const u8{ gameRoot, "shaders", pathspv }),
+        .path = try std.fs.path.join(self.allocator, &[_][]const u8{ editor_root, "shaders", pathspv }),
     });
     const uri = try std.fmt.allocPrint(self.allocator, "builtin://{s}", .{path});
     try self.resources_index.put(uri, id);
 }
 
-inline fn gameRootDirectory(allocator: std.mem.Allocator) ![]const u8 {
+inline fn editorRootDir(allocator: std.mem.Allocator) ![]const u8 {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const exe_path = try std.fs.selfExeDirPath(&buf);
     const dirname = std.fs.path.dirname(exe_path) orelse return error.InvalidPath;
     return allocator.dupe(u8, dirname);
+}
+
+pub fn parseUri(allocator: std.mem.Allocator, uri: []const u8) ![:0]const u8 {
+    var end_of_protocol: usize = 0;
+    for (0..uri.len) |i| {
+        if (uri[i] == ':') {
+            if (uri.len > i + 2 and uri[i + 1] == '/' and uri[i + 2] == '/') {
+                end_of_protocol = i;
+                break;
+            }
+        }
+    }
+
+    if (end_of_protocol == 0) {
+        log.err("Invalid Uri: {s}", .{uri});
+        return error.InvalidUri;
+    }
+
+    if (end_of_protocol + 3 >= uri.len) {
+        return try std.fmt.allocPrintZ(allocator, "/{s}", .{uri[0..end_of_protocol]});
+    } else {
+        return try std.fmt.allocPrintZ(allocator, "/{s}/{s}", .{ uri[0..end_of_protocol], uri[end_of_protocol + 3 ..] });
+    }
 }

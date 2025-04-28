@@ -22,7 +22,7 @@ pub fn main() !void {
     std.log.info("Running from: {s}", .{cwd});
 
     try AssetsDatabase.init(allocator);
-    defer AssetsDatabase.deinit();
+    defer AssetsDatabase.deinit() catch {};
 
     var app = GameApp.init(allocator, AssetsDatabase.readAssetAlloc, "Yume Editor");
     defer app.deinit();

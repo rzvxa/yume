@@ -13,7 +13,7 @@ const Editor = @import("../Editor.zig");
 
 const Self = @This();
 
-pub fn init(_: *GameApp) Self {
+pub fn init(_: std.mem.Allocator) Self {
     return .{};
 }
 
@@ -163,7 +163,10 @@ fn drawHierarchyNode(self: *Self, world: ecs.World, entity: ecs.Entity, level: u
     }
 
     c.ImGui_SameLine();
-    c.ImGui_Image(Editor.object_icon_ds, c.ImVec2{ .x = c.ImGui_GetFontSize(), .y = c.ImGui_GetFontSize() });
+    c.ImGui_Image(try Editor.getImGuiTexture("editor://icons/object.png"), c.ImVec2{
+        .x = c.ImGui_GetFontSize(),
+        .y = c.ImGui_GetFontSize(),
+    });
     c.ImGui_SameLine();
     c.ImGui_Text(name);
     if (open) {

@@ -68,7 +68,7 @@ pub fn close(self: *Self) void {
     self.is_open = false;
 }
 
-pub fn show(self: *Self, ctx: *GameApp) void {
+pub fn show(self: *Self, ctx: *GameApp) !void {
     if (!self.is_open) return;
     c.ImGui_PushID("new-project-modal");
     defer c.ImGui_PopID();
@@ -89,7 +89,11 @@ pub fn show(self: *Self, ctx: *GameApp) void {
         const close_btn_size = 32;
         c.ImGui_SetCursorPosX(avail.x - (padding_x + close_btn_size));
         c.ImGui_SetCursorPosY(cursor.y + (padding_y + close_btn_size));
-        if (c.ImGui_ImageButton("##close-btn", Editor.close_icon_ds, c.ImVec2{ .x = close_btn_size, .y = close_btn_size })) {
+        if (c.ImGui_ImageButton(
+            "##close-btn",
+            try Editor.getImGuiTexture("editor://icons/close.png"),
+            c.ImVec2{ .x = close_btn_size, .y = close_btn_size },
+        )) {
             self.close();
         }
 
@@ -126,9 +130,9 @@ pub fn show(self: *Self, ctx: *GameApp) void {
         c.ImGui_SetCursorPosX(avail.x - (padding_x + open_label_size.x));
         c.ImGui_SetCursorPosY(end_y);
         if (c.ImGui_Button(open_label)) {
-            Project.load(self.allocator, self.project_path.span()) catch @panic("Failed to load project");
+            try Project.load(self.allocator, self.project_path.span());
             const default_scene = Project.current().?.default_scene;
-            ctx.loadScene(default_scene) catch @panic("Failed to load the default scene");
+            try ctx.loadScene(default_scene);
             EditorDatabase.storage().last_open_scene = default_scene;
             self.close();
         }

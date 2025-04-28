@@ -67,7 +67,7 @@ pub fn close(self: *Self) void {
     self.is_open = false;
 }
 
-pub fn show(self: *Self, ctx: *GameApp) void {
+pub fn show(self: *Self, ctx: *GameApp) !void {
     if (!self.is_open) return;
     c.ImGui_PushID("new-project-modal");
     defer c.ImGui_PopID();
@@ -88,7 +88,11 @@ pub fn show(self: *Self, ctx: *GameApp) void {
         const close_btn_size = 32;
         c.ImGui_SetCursorPosX(avail.x - (padding_x + close_btn_size));
         c.ImGui_SetCursorPosY(cursor.y + (padding_y + close_btn_size));
-        if (c.ImGui_ImageButton("##close-btn", Editor.close_icon_ds, c.ImVec2{ .x = close_btn_size, .y = close_btn_size })) {
+        if (c.ImGui_ImageButton(
+            "##close-btn",
+            try Editor.getImGuiTexture("editor://icons/close.png"),
+            c.ImVec2{ .x = close_btn_size, .y = close_btn_size },
+        )) {
             self.close();
         }
 
@@ -141,7 +145,7 @@ pub fn show(self: *Self, ctx: *GameApp) void {
         c.ImGui_SetCursorPosX(avail.x - (padding_x + create_label_size.x));
         c.ImGui_SetCursorPosY(end_y);
         if (c.ImGui_Button(create_label)) {
-            self.onCreateClick(ctx) catch @panic("failed to create the template project");
+            try self.onCreateClick(ctx);
         }
         c.ImGui_PopFont();
         for (0..3) |_| c.ImGui_Unindent();

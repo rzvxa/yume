@@ -93,6 +93,7 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) !void {
     var quit = false;
     var event: c.SDL_Event = undefined;
     var d = Dispatcher.init(self);
+    defer d.deinit();
     while (!quit) {
         self.newFrame();
         if (comptime std.meta.hasMethod(Dispatcher, "newFrame")) {
@@ -147,8 +148,6 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) !void {
             d.endFrame();
         }
     }
-
-    d.deinit();
 }
 
 pub fn deinit(self: *Self) void {

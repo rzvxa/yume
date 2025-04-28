@@ -34,7 +34,7 @@ pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
 
     self.name_str.set(pathName orelse metaName) catch @panic("OOM");
 
-    const icon = Editor.object_icon_ds;
+    const icon = Editor.getImGuiTexture("editor://icons/object.png") catch @panic("Unknown error");
     const avail = c.ImGui_GetContentRegionAvail();
     const old_pad_y = c.ImGui_GetStyle().*.FramePadding.y;
     c.ImGui_GetStyle().*.FramePadding.y = 0;
