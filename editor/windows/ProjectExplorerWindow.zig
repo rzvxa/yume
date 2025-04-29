@@ -2,6 +2,8 @@ const c = @import("clibs");
 
 const std = @import("std");
 
+const utils = @import("yume").utils;
+
 const Editor = @import("../Editor.zig");
 const Project = @import("../Project.zig");
 const AssetsDatabase = @import("../AssetsDatabase.zig");
@@ -15,7 +17,7 @@ selected_file: ?[:0]const u8 = null,
 sort_by_name: bool = true,
 
 pub fn init(allocator: std.mem.Allocator) !Self {
-    return .{ .allocator = allocator, .project_explorer_path = try allocator.dupeZ(u8, "/") };
+    return .{ .allocator = allocator, .project_explorer_path = try allocator.dupeZ(u8, "/assets") };
 }
 
 pub fn deinit(self: *Self) void {
@@ -48,6 +50,7 @@ pub fn draw(self: *Self) !void {
     var sfa_heap = std.heap.stackFallback(2048, self.allocator);
     const allocator = sfa_heap.get();
     const window_open = c.ImGui_Begin("Project", null, c.ImGuiWindowFlags_NoCollapse);
+    const window_active = c.ImGui_IsWindowFocused(0);
     defer c.ImGui_End();
     if (!window_open) return;
     if (Project.current() == null) {
@@ -63,7 +66,7 @@ pub fn draw(self: *Self) !void {
     const grid_size = c.ImVec2{ .x = avail.x, .y = avail.y - bread_crumb_height };
 
     const resource_node = (try AssetsDatabase.findResourceNode(self.project_explorer_path)) orelse {
-        try self.setProjectExplorerPath("/");
+        try self.setProjectExplorerPath("/assets");
         return;
     };
 
@@ -76,11 +79,17 @@ pub fn draw(self: *Self) !void {
             .res = entry.value_ptr,
         });
     }
-    if (self.sort_by_name)
+    if (self.sort_by_name) {
         std.mem.sort(OrderedItem, items.items, {}, OrderedItem.compare);
-    if (c.ImGui_BeginChildFrameEx(c.ImGui_GetID("files grid"), grid_size, c.ImGuiWindowFlags_NoBackground)) {
+    }
+
+    const draw_frame = c.ImGui_BeginChildFrameEx(c.ImGui_GetID("files grid"), grid_size, c.ImGuiWindowFlags_NoBackground);
+    defer c.ImGui_EndChildFrame();
+    if (draw_frame) {
         const table_flags = c.ImGuiTableFlags_SizingStretchSame;
-        if (c.ImGui_BeginTableEx("node", @intFromFloat(col_count), table_flags, grid_size, 0)) {
+        const draw_table = c.ImGui_BeginTableEx("node", @intFromFloat(col_count), table_flags, grid_size, 0);
+        defer c.ImGui_EndTable();
+        if (draw_table) {
             var index: usize = 0;
             for (items.items) |item| {
                 if (index % @as(usize, @intFromFloat(col_count)) == 0) {
@@ -109,18 +118,21 @@ pub fn draw(self: *Self) !void {
                     },
                 );
 
-                const result = try drawItem(allocator, icon, item.key, item_sz, style, self.selected_file);
+                const result = try drawItem(allocator, icon, item.key, item_sz, style, self.selected_file, window_active);
                 if (result == .click) {
-                    try self.setSelectedFile(item.key);
+                    try self.setSelected(item);
                 } else if (result == .double_click) {
-                    try self.setProjectExplorerPath(item.res.node.path());
+                    switch (item.res.node) {
+                        .resource => |r| {
+                            try utils.tryOpenWithOsDefaultApplication(self.allocator, try AssetsDatabase.getResourcePath(r.id));
+                        },
+                        .directory => |d| try self.setProjectExplorerPath(d),
+                    }
                     std.log.debug("double click {s}", .{item.res.node.path()});
                 }
                 index += 1;
             }
-            c.ImGui_EndTable();
         }
-        c.ImGui_EndChildFrame();
     }
 
     const home_height = c.ImGui_GetTextLineHeight();
@@ -159,7 +171,10 @@ fn drawItem(
     item_sz: f32,
     style: c.ImGuiStyle,
     selected_file: ?[]const u8,
+    active: bool,
 ) !ItemResult {
+    const col_selected_active = c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0, .y = 0.478, .z = 0.8, .w = 1 });
+    const col_selected_inactive = c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0.2, .y = 0.478, .z = 0.8, .w = 1 });
     const name = try allocator.dupeZ(u8, key);
     var is_selected = false;
     if (selected_file) |sel| {
@@ -175,7 +190,7 @@ fn drawItem(
     if (is_selected)
         c.ImGui_PushStyleColor(
             c.ImGuiCol_Button,
-            c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0, .y = 0.478, .z = 0.8, .w = 1 }),
+            if (active) col_selected_active else col_selected_inactive,
         );
     const clicked = c.ImGui_ButtonEx("##name", btn_size);
     if (is_selected)
@@ -206,11 +221,21 @@ fn setProjectExplorerPath(self: *Self, path: []const u8) !void {
     self.allocator.free(old_mem);
 }
 
-fn setSelectedFile(self: *Self, path: ?[]const u8) !void {
+fn setSelected(self: *Self, item: ?OrderedItem) !void {
+    var ed = Editor.instance();
     if (self.selected_file) |it| {
+        if (AssetsDatabase.getResourceId(it)) |u| {
+            _ = ed.selection.remove(.resource, u);
+        } else |_| {}
         self.allocator.free(it);
     }
-    if (path) |it| {
-        self.selected_file = try self.allocator.dupeZ(u8, it);
+    if (item) |it| {
+        const path = it.key;
+        if (it.res.node == .resource) {
+            if (AssetsDatabase.getResourceId(it.res.node.path())) |u| {
+                ed.selection = .{ .resource = u };
+            } else |_| {}
+        }
+        self.selected_file = try self.allocator.dupeZ(u8, path);
     }
 }

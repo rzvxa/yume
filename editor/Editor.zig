@@ -59,15 +59,17 @@ const ManipulationTool = enum {
     scale,
 };
 
-const SelectionKind = enum { none, entity, many };
+const SelectionKind = enum { none, entity, resource, many };
 const Selection = union(SelectionKind) {
-    none: void,
+    none,
     entity: ecs.Entity,
+    resource: Uuid,
     many: []Selection,
 
     pub fn is(self: *const Selection, comptime kind: SelectionKind, other: switch (kind) {
         .none => void,
         .entity => ecs.Entity,
+        .resource => Uuid,
         .many => []Selection,
     }) bool {
         if (kind != std.meta.activeTag(self.*)) {
@@ -77,16 +79,37 @@ const Selection = union(SelectionKind) {
         switch (kind) {
             .none => return true,
             .entity => return self.entity == other,
+            .resource => return self.resource.raw == other.raw,
             .many => return false,
         }
     }
 
     pub fn contains(self: *const Selection, comptime kind: SelectionKind, other: anytype) bool {
         switch (self.*) {
-            .none, .entity => return self.is(kind, other),
+            .none, .entity, .resource => return self.is(kind, other),
             .many => |ms| return ms.len > 0 and blk: {
                 for (ms) |m| {
                     if (m.is(kind, other)) {
+                        break :blk true;
+                    }
+                }
+                break :blk false;
+            },
+        }
+    }
+
+    pub fn remove(self: *Selection, comptime kind: SelectionKind, other: anytype) bool {
+        switch (self.*) {
+            .none, .entity, .resource => if (self.is(kind, other)) {
+                self.* = .none;
+                return true;
+            } else {
+                return false;
+            },
+            .many => |ms| return ms.len > 0 and blk: {
+                for (ms) |*m| {
+                    if (m.is(kind, other)) {
+                        m.* = .{ .none = {} };
                         break :blk true;
                     }
                 }
@@ -278,6 +301,11 @@ pub fn sanitizeSelection(self: *Self, sel: *Selection) void {
     switch (sel.*) {
         .entity => |it| if (!self.ctx.world.isAlive(it)) {
             sel.* = .{ .none = {} };
+        },
+        .resource => |it| {
+            _ = AssetsDatabase.getResourcePath(it) catch {
+                sel.* = .{ .none = {} };
+            };
         },
         .many => |items| {
             var tail: usize = 0;

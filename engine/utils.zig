@@ -116,3 +116,18 @@ pub fn levenshtein(a: []const u8, b: []const u8, allocator: std.mem.Allocator) u
 
     return result;
 }
+
+pub fn tryOpenWithOsDefaultApplication(allocator: std.mem.Allocator, path: []const u8) !void {
+    _ = switch (builtin.os.tag) {
+        .windows => std.process.Child.run(.{ .allocator = allocator, .argv = &.{
+            "cmd",
+            "/c",
+            "start",
+            "\"\"",
+            path,
+        } }) catch return error.FailedToOpen,
+        .linux => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "xdg-open", path } }) catch return error.LauncherNotFound,
+        .macos => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "open", path } }) catch return error.LauncherNotFound,
+        else => |p| @compileError("Unsupported platform: " ++ p),
+    };
+}

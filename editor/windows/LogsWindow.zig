@@ -118,7 +118,7 @@ pub fn draw(self: *Self) !void {
                     continue;
                 }
                 const icon = switch (log.level) {
-                    .err => try Editor.getImGuiTexture("editor://icons/editor.png"),
+                    .err => try Editor.getImGuiTexture("editor://icons/error.png"),
                     .warn => try Editor.getImGuiTexture("editor://icons/warning.png"),
                     .info => try Editor.getImGuiTexture("editor://icons/info.png"),
                     .debug => try Editor.getImGuiTexture("editor://icons/debug.png"),

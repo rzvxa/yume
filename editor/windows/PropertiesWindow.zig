@@ -20,14 +20,15 @@ pub fn deinit(_: *Self) void {}
 pub fn draw(self: *Self, ctx: *GameApp) !void {
     if (c.ImGui_Begin("Properties", null, c.ImGuiWindowFlags_NoCollapse)) {
         switch (Editor.instance().selection) {
-            .entity => |e| try self.drawProperties(e, ctx),
+            .entity => |e| try self.drawEntityProperties(e, ctx),
+            .resource => |r| try self.drawResourceProperties(r),
             else => {},
         }
     }
     c.ImGui_End();
 }
 
-fn drawProperties(_: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
+fn drawEntityProperties(_: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
     var buf: [256]u8 = undefined;
     const gui_id = try std.fmt.bufPrint(&buf, "{}", .{entity});
     c.ImGui_PushID(gui_id.ptr);
@@ -219,4 +220,16 @@ fn drawProperties(_: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
         }
         c.ImGui_EndPopup();
     }
+}
+
+fn drawResourceProperties(_: *Self, resource_id: Uuid) !void {
+    var buf: [256]u8 = undefined;
+    const gui_id = try std.fmt.bufPrint(&buf, "{s}", .{resource_id.urn()});
+    c.ImGui_PushID(gui_id.ptr);
+    defer c.ImGui_PopID();
+
+    c.ImGui_Text("Hi");
+    c.ImGui_Separator();
+
+    for (0..2) |_| c.ImGui_Spacing();
 }
