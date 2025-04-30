@@ -5,7 +5,7 @@ const Uuid = @import("yume").Uuid;
 
 const AssetLoader = @import("yume").assets.AssetLoader;
 const EditorDatabase = @import("EditorDatabase.zig");
-const AssetsDatabase = @import("AssetsDatabase.zig");
+const Resources = @import("Resources.zig");
 
 const Self = @This();
 
@@ -32,8 +32,8 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     defer project_root.close();
     try project_root.setAsCwd();
 
-    try AssetsDatabase.reinit(allocator);
-    try AssetsDatabase.indexCwd();
+    try Resources.reinit(allocator);
+    try Resources.indexCwd();
 
     try EditorDatabase.setLastOpenProject(path);
 }

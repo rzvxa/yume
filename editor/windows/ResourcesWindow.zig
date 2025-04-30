@@ -7,8 +7,8 @@ const utils = @import("yume").utils;
 const imutils = @import("../imutils.zig");
 const Editor = @import("../Editor.zig");
 const Project = @import("../Project.zig");
-const AssetsDatabase = @import("../AssetsDatabase.zig");
-const ResourceNode = @import("../AssetsDatabase.zig").ResourceNode;
+const Resources = @import("../Resources.zig");
+const ResourceNode = @import("../Resources.zig").ResourceNode;
 
 const Self = @This();
 
@@ -79,7 +79,7 @@ pub fn draw(self: *Self) !void {
     const col_count = @max(1, avail.x / (item_sz + 32));
     const view_size = c.ImVec2{ .x = avail.x, .y = avail.y - bread_crumb_height - 1 };
 
-    const resource_node = (try AssetsDatabase.findResourceNode(self.explorer_path)) orelse {
+    const resource_node = (try Resources.findResourceNode(self.explorer_path)) orelse {
         try self.setExplorerPath("/assets");
         return;
     };
@@ -228,7 +228,7 @@ fn drawItem(
         if (c.ImGui_IsItemDeactivated()) {
             if (c.ImGui_IsItemDeactivatedAfterEdit() and !c.ImGui_IsKeyPressed(c.ImGuiKey_Escape)) {
                 std.log.info("new name: {s}", .{self.renaming_str.buf});
-                // AssetsDatabase.move(item.)
+                // Resources.move(item.)
             }
             try self.setRenaming(null);
         }
@@ -250,7 +250,7 @@ fn drawItem(
         .double_click => {
             switch (item.res.node) {
                 .resource => |r| {
-                    try utils.tryOpenWithOsDefaultApplication(self.allocator, try AssetsDatabase.getResourcePath(r));
+                    try utils.tryOpenWithOsDefaultApplication(self.allocator, try Resources.getResourcePath(r));
                 },
                 .directory => |d| try self.setExplorerPath(d),
             }
@@ -282,7 +282,7 @@ fn setSelected(self: *Self, item: ?OrderedItem) !void {
     }
     if (item) |it| {
         if (it.res.node == .resource) {
-            if (AssetsDatabase.getResourceId(try it.res.node.path())) |u| {
+            if (Resources.getResourceId(try it.res.node.path())) |u| {
                 ed.selection = .{ .resource = u };
             } else |_| {}
         }

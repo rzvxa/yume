@@ -21,7 +21,7 @@ const utils = @import("yume").utils;
 const imutils = @import("imutils.zig");
 const Editor = @import("Editor.zig");
 const Project = @import("Project.zig");
-const AssetsDatabase = @import("AssetsDatabase.zig");
+const Resources = @import("Resources.zig");
 const EditorDatabase = @import("EditorDatabase.zig");
 
 const Self = @This();
@@ -175,7 +175,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
 
     const project_id = Uuid.new();
 
-    var resources = std.AutoHashMap(Uuid, AssetsDatabase.Resource).init(allocator);
+    var resources = std.AutoHashMap(Uuid, Resources.Resource).init(allocator);
     var project = Project{
         .allocator = self.allocator,
 
@@ -187,7 +187,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
 
     try resources.put(
         project.default_scene,
-        AssetsDatabase.Resource{
+        Resources.Resource{
             .id = project.default_scene,
             .path = try allocator.dupeZ(u8, "scenes/Default.scene"),
             .type = .scene,
@@ -195,7 +195,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
     );
     try resources.put(
         project_id,
-        AssetsDatabase.Resource{
+        Resources.Resource{
             .id = project_id,
             .path = try allocator.dupeZ(u8, "yume.json"),
             .type = .project,
@@ -222,7 +222,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
     {
         var iter = resources.valueIterator();
         while (iter.next()) |it| {
-            const filename = try std.fmt.allocPrint(allocator, "{s}/{s}{s}", .{ fullpath, it.path, AssetsDatabase.yume_meta_extension_name });
+            const filename = try std.fmt.allocPrint(allocator, "{s}/{s}{s}", .{ fullpath, it.path, Resources.yume_meta_extension_name });
 
             const content = try std.json.stringifyAlloc(allocator, it.*, .{ .whitespace = .indent_4 });
             var file = try std.fs.cwd().createFile(filename, .{});

@@ -7,7 +7,7 @@ const ecs = @import("yume").ecs;
 const utils = @import("yume").utils;
 
 const Editor = @import("../Editor.zig");
-const AssetsDatabase = @import("../AssetsDatabase.zig");
+const Resources = @import("../Resources.zig");
 
 const Self = @This();
 
@@ -199,7 +199,7 @@ fn drawEntityProperties(_: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
                             const ref = c.ecs_get_mut_id(ctx.world.inner, e, def.id);
                             std.debug.assert(def.default.?(ref.?, e, ctx, extern struct {
                                 fn f(path: [*:0]const u8) callconv(.C) ecs.ResourceResolverResult {
-                                    const uuid = AssetsDatabase.getResourceId(std.mem.span(path)) catch return .{
+                                    const uuid = Resources.getResourceId(std.mem.span(path)) catch return .{
                                         .found = false,
                                         .uuid = .{ .raw = 0 },
                                     };
@@ -233,7 +233,7 @@ fn drawResourceProperties(self: *Self, resource_id: Uuid) !void {
     var sfa = std.heap.stackFallback(2048, self.allocator);
     const allocator = sfa.get();
 
-    const resource = try AssetsDatabase.getResource(allocator, resource_id) orelse {
+    const resource = try Resources.getResource(allocator, resource_id) orelse {
         std.log.err("Invalid resource selection, resource \"{s}\" is not registered.", .{resource_id.urn()});
         return;
     };

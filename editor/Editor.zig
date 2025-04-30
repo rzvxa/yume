@@ -10,7 +10,7 @@ const check_vk = @import("yume").vki.check_vk;
 const Uuid = @import("yume").Uuid;
 const EditorDatabase = @import("EditorDatabase.zig");
 const Editors = @import("editors/editors.zig");
-const AssetsDatabase = @import("AssetsDatabase.zig");
+const Resources = @import("Resources.zig");
 const Project = @import("Project.zig");
 const Assets = @import("yume").Assets;
 
@@ -260,7 +260,7 @@ pub fn windowTitle(self: *Self) ![]u8 {
         if (self.ctx.scene_handle) |scene| {
             return try std.fmt.allocPrint(self.ctx.allocator, "{s} - {s} - {s}", .{
                 proj.project_name,
-                try AssetsDatabase.getResourcePath(scene.uuid),
+                try Resources.getResourcePath(scene.uuid),
                 title,
             });
         } else {
@@ -309,7 +309,7 @@ pub fn sanitizeSelection(self: *Self, sel: *Selection) void {
             sel.* = .{ .none = {} };
         },
         .resource => |it| {
-            _ = AssetsDatabase.getResourcePath(it) catch {
+            _ = Resources.getResourcePath(it) catch {
                 sel.* = .{ .none = {} };
             };
         },
@@ -364,7 +364,7 @@ pub fn draw(self: *Self) !void {
                 if (self.ctx.scene_handle) |hndl| {
                     const scene = self.ctx.snapshotLiveScene() catch @panic("Faield to serialize scene");
                     defer scene.deinit();
-                    const path = AssetsDatabase.getResourcePath(hndl.uuid) catch @panic("Scene not found!");
+                    const path = Resources.getResourcePath(hndl.uuid) catch @panic("Scene not found!");
                     const json = std.json.stringifyAlloc(self.ctx.allocator, scene, .{ .whitespace = .indent_4 }) catch @panic("Failed to serialize the scene");
                     defer self.ctx.allocator.free(json);
                     log.info("saving scene \"{s}\" to save to \"{s}\"\n", .{ hndl.uuid.urn(), path });
@@ -802,7 +802,7 @@ pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
     if (entry.found_existing) {
         return entry.value_ptr.*;
     }
-    const image = try Assets.getOrLoadImage(try AssetsDatabase.getResourceId(uri));
+    const image = try Assets.getOrLoadImage(try Resources.getResourceId(uri));
 
     // Create the Image View
     var image_view: c.VkImageView = undefined;
