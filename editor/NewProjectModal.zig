@@ -189,7 +189,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
         project.default_scene,
         AssetsDatabase.Resource{
             .id = project.default_scene,
-            .path = try allocator.dupe(u8, "scenes/Default.scene"),
+            .path = try allocator.dupeZ(u8, "scenes/Default.scene"),
             .type = .scene,
         },
     );
@@ -197,7 +197,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
         project_id,
         AssetsDatabase.Resource{
             .id = project_id,
-            .path = try allocator.dupe(u8, "yume.json"),
+            .path = try allocator.dupeZ(u8, "yume.json"),
             .type = .project,
         },
     );

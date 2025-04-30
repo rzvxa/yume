@@ -39,7 +39,7 @@ pub const Resource = struct {
     };
 
     id: Uuid,
-    path: []u8,
+    path: [:0]u8,
     type: Type,
 };
 
@@ -59,9 +59,9 @@ resource_tree: ResourceNode,
 pub const ResourceNode = struct {
     pub const Node = union(enum) {
         resource: Uuid,
-        directory: []const u8,
+        directory: [:0]const u8,
 
-        pub fn path(self: *const Node) ![]const u8 {
+        pub fn path(self: *const Node) ![:0]const u8 {
             return switch (self.*) {
                 .resource => |id| getResourcePath(id),
                 .directory => |d| d,
@@ -89,7 +89,7 @@ pub const ResourceNode = struct {
         pub fn clone(self: *Node, allocator: std.mem.Allocator) !Node {
             return switch (self.*) {
                 .resource => |it| .{ .resource = it },
-                .directory => |d| .{ .directory = try allocator.dupe(u8, d) },
+                .directory => |d| .{ .directory = try allocator.dupeZ(u8, d) },
             };
         }
 
@@ -238,7 +238,7 @@ pub const ResourceNode = struct {
         if (!entry.found_existing) {
             entry.key_ptr.* = try parent.children.allocator.dupe(u8, segment.name);
             if (has_next) {
-                entry.value_ptr.* = ResourceNode.init(parent.children.allocator, .{ .directory = try parent.children.allocator.dupe(u8, segment.path) });
+                entry.value_ptr.* = ResourceNode.init(parent.children.allocator, .{ .directory = try parent.children.allocator.dupeZ(u8, segment.path) });
             }
         }
 
@@ -260,7 +260,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
         .allocator = allocator,
         .resources = ResourceStorage.init(allocator),
         .resources_index = std.StringHashMap(Uuid).init(allocator),
-        .resource_tree = ResourceNode.init(allocator, .{ .directory = try allocator.dupe(u8, "/") }),
+        .resource_tree = ResourceNode.init(allocator, .{ .directory = try allocator.dupeZ(u8, "/") }),
     };
 
     {
@@ -358,6 +358,19 @@ pub fn deinit() !void {
     }
 }
 
+// clones the resource meta data using the provided allocator
+pub fn getResource(allocator: std.mem.Allocator, id: Uuid) !?Resource {
+    if (instance().resources.get(id)) |r| {
+        return .{
+            .id = r.id,
+            .type = r.type,
+            .path = try allocator.dupeZ(u8, r.path),
+        };
+    } else {
+        return error.ResourceNotFound;
+    }
+}
+
 pub fn getResourceId(path: []const u8) !Uuid {
     const self = instance();
     if (self.resources_index.get(path)) |id| {
@@ -373,7 +386,7 @@ pub fn getResourceId(path: []const u8) !Uuid {
     return error.ResourceNotFound;
 }
 
-pub fn getResourcePath(id: Uuid) ![]const u8 {
+pub fn getResourcePath(id: Uuid) ![:0]const u8 {
     if (instance().resources.get(id)) |r| {
         return r.path;
     } else {
@@ -478,9 +491,9 @@ pub fn register(opts: struct {
     defer self.allocator.free(editor_root);
 
     const path = if (is_builtin)
-        try std.fs.path.join(self.allocator, &[_][]const u8{ editor_root, "assets", opts.category, opts.path })
+        try std.fs.path.joinZ(self.allocator, &[_][]const u8{ editor_root, "assets", opts.category, opts.path })
     else
-        try self.allocator.dupe(u8, opts.path);
+        try self.allocator.dupeZ(u8, opts.path);
     errdefer self.allocator.free(path);
 
     if (!try utils.pathExists(path)) {
@@ -521,7 +534,7 @@ fn registerBuiltinShader(urn: []const u8, path: []const u8) !void {
     defer self.allocator.free(pathspv);
     try self.resources.put(id, Resource{
         .id = id,
-        .path = try std.fs.path.join(self.allocator, &[_][]const u8{ editor_root, "shaders", pathspv }),
+        .path = try std.fs.path.joinZ(self.allocator, &[_][]const u8{ editor_root, "shaders", pathspv }),
         .type = .shader,
     });
     const uri = try std.fmt.allocPrint(self.allocator, "builtin://{s}", .{path});

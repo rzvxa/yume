@@ -11,8 +11,10 @@ const AssetsDatabase = @import("../AssetsDatabase.zig");
 
 const Self = @This();
 
-pub fn init(_: std.mem.Allocator) Self {
-    return .{};
+allocator: std.mem.Allocator,
+
+pub fn init(allocator: std.mem.Allocator) Self {
+    return .{ .allocator = allocator };
 }
 
 pub fn deinit(_: *Self) void {}
@@ -222,13 +224,21 @@ fn drawEntityProperties(_: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
     }
 }
 
-fn drawResourceProperties(_: *Self, resource_id: Uuid) !void {
+fn drawResourceProperties(self: *Self, resource_id: Uuid) !void {
     var buf: [256]u8 = undefined;
     const gui_id = try std.fmt.bufPrint(&buf, "{s}", .{resource_id.urn()});
     c.ImGui_PushID(gui_id.ptr);
     defer c.ImGui_PopID();
 
-    c.ImGui_Text("Hi");
+    var sfa = std.heap.stackFallback(2048, self.allocator);
+    const allocator = sfa.get();
+
+    const resource = try AssetsDatabase.getResource(allocator, resource_id) orelse {
+        std.log.err("Invalid resource selection, resource \"{s}\" is not registered.", .{resource_id.urn()});
+        return;
+    };
+
+    c.ImGui_Text(try std.fmt.allocPrintZ(allocator, "{s}", .{std.fs.path.basename(resource.path)}));
     c.ImGui_Separator();
 
     for (0..2) |_| c.ImGui_Spacing();
