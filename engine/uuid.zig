@@ -25,12 +25,16 @@ pub const Uuid = extern struct {
         return uuid_zig.urn.serialize(self.raw);
     }
 
-    pub inline fn urnZ(self: Self) [37]u8 {
-        var buf = std.mem.zeroes([37]u8);
+    pub inline fn urnZ(self: Self) [36:0]u8 {
+        var buf = std.mem.zeroes([36:0]u8);
         const u = uuid_zig.urn.serialize(self.raw);
-        @memcpy(buf[0..36], &u);
+        @memcpy(&buf, &u);
         buf[36] = 0;
         return buf;
+    }
+
+    pub inline fn eql(lhs: Self, rhs: Self) bool {
+        return lhs.raw == rhs.raw;
     }
 
     pub fn jsonStringify(self: Self, jws: anytype) !void {

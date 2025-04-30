@@ -20,10 +20,6 @@ default_scene: Uuid,
 
 resources: std.AutoHashMap(Uuid, AssetsDatabase.Resource),
 
-// unserialized data
-resources_index: std.StringHashMap(Uuid),
-resources_builtins: std.AutoHashMap(Uuid, AssetsDatabase.Resource),
-
 pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     if (instance) |*ins| {
         ins.unload();
@@ -33,19 +29,13 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     const s = try file.readToEndAlloc(allocator, 30_000_000);
     defer allocator.free(s);
     instance = (try std.json.parseFromSliceLeaky(Self, allocator, s, .{}));
-    instance.?.resources_index = std.StringHashMap(Uuid).init(allocator);
-    instance.?.resources_builtins = std.AutoHashMap(Uuid, AssetsDatabase.Resource).init(allocator);
 
     var project_root = try std.fs.openDirAbsolute(std.fs.path.dirname(path) orelse return error.InvalidPath, .{});
     defer project_root.close();
     try project_root.setAsCwd();
 
-    // we can also unload assets one by one based on the resources
     try AssetsDatabase.reinit(allocator);
-    var iter = instance.?.resources.iterator();
-    while (iter.next()) |it| {
-        try AssetsDatabase.register(.{ .urn = &it.key_ptr.urn(), .path = it.value_ptr.path });
-    }
+    try AssetsDatabase.indexCwd();
 
     try EditorDatabase.setLastOpenProject(path);
 }
@@ -53,26 +43,12 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
 pub fn unload(self: *Self) void {
     self.scenes.deinit();
     {
-        var it = self.resources_index.iterator();
-        while (it.next()) |kv| {
-            self.allocator.free(kv.key_ptr.*);
-        }
-    }
-    self.resources_index.deinit();
-    {
         var it = self.resources.iterator();
         while (it.next()) |kv| {
             self.allocator.free(kv.value_ptr.path);
         }
     }
     self.resources.deinit();
-    {
-        var it = self.resources_builtins.iterator();
-        while (it.next()) |kv| {
-            self.allocator.free(kv.value_ptr.path);
-        }
-    }
-    self.resources_builtins.deinit();
     self.allocator.free(self.project_name);
 }
 
@@ -127,8 +103,6 @@ pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, o: anytype) !Self {
         .scenes = undefined,
         .default_scene = undefined,
         .resources = undefined,
-        .resources_index = undefined,
-        .resources_builtins = undefined,
     };
 
     while (true) {
@@ -213,6 +187,7 @@ fn parseResources(a: std.mem.Allocator, jrs: *std.json.Scanner) !std.AutoHashMap
         var resource = AssetsDatabase.Resource{
             .id = undefined,
             .path = undefined,
+            .type = undefined,
         };
 
         var uuid: ?Uuid = null;
@@ -241,41 +216,11 @@ fn parseResources(a: std.mem.Allocator, jrs: *std.json.Scanner) !std.AutoHashMap
         }
 
         if (uuid == null) return error.MissingField;
+        resource.type = AssetsDatabase.Resource.Type.fromExt(
+            std.fs.path.extension(resource.path),
+        );
         try resources.put(uuid.?, resource);
     }
 
     return resources;
-}
-
-fn addBuiltin(opts: struct { urn: []const u8, path: []const u8, category: []const u8 = "builtin" }) !void {
-    const id = try Uuid.fromUrnSlice(opts.urn);
-    const gameRoot = try gameRootDirectory(instance.?.allocator);
-    defer instance.?.allocator.free(gameRoot);
-    try instance.?.resources_builtins.put(id, AssetsDatabase.Resource{
-        .id = id,
-        .path = try std.fs.path.join(instance.?.allocator, &[_][]const u8{ gameRoot, "assets", opts.category, opts.path }),
-    });
-    const uri = try std.fmt.allocPrint(instance.?.allocator, "{s}://{s}", .{ opts.category, opts.path });
-    try instance.?.resources_index.put(uri, id);
-}
-
-fn addBuiltinShader(urn: []const u8, path: []const u8) !void {
-    const id = try Uuid.fromUrnSlice(urn);
-    const gameRoot = try gameRootDirectory(instance.?.allocator);
-    defer instance.?.allocator.free(gameRoot);
-    const pathspv = try std.fmt.allocPrint(instance.?.allocator, "{s}.{s}", .{ path[0 .. path.len - ".glsl".len], "spv" });
-    defer instance.?.allocator.free(pathspv);
-    try instance.?.resources_builtins.put(id, AssetsDatabase.Resource{
-        .id = id,
-        .path = try std.fs.path.join(instance.?.allocator, &[_][]const u8{ gameRoot, "shaders", pathspv }),
-    });
-    const uri = try std.fmt.allocPrint(instance.?.allocator, "builtin://{s}", .{path});
-    try instance.?.resources_index.put(uri, id);
-}
-
-inline fn gameRootDirectory(allocator: std.mem.Allocator) ![]const u8 {
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const exe_path = try std.fs.selfExeDirPath(&buf);
-    const dirname = std.fs.path.dirname(exe_path) orelse return error.InvalidPath;
-    return allocator.dupe(u8, dirname);
 }

@@ -15,7 +15,7 @@ const Project = @import("Project.zig");
 const Assets = @import("yume").Assets;
 
 const HierarchyWindow = @import("windows/HierarchyWindow.zig");
-const ProjectExplorerWindow = @import("windows/ProjectExplorerWindow.zig");
+const ResourcesWindow = @import("windows/ResourcesWindow.zig");
 const PropertiesWindow = @import("windows/PropertiesWindow.zig");
 const SceneWindow = @import("windows/SceneWindow.zig");
 const GameWindow = @import("windows/GameWindow.zig");
@@ -139,7 +139,7 @@ new_project_modal: NewProjectModal,
 open_project_modal: OpenProjectModal,
 
 hierarchy_window: HierarchyWindow,
-project_explorer: ProjectExplorerWindow,
+resources_window: ResourcesWindow,
 properties_window: PropertiesWindow,
 scene_window: SceneWindow,
 game_window: GameWindow,
@@ -180,6 +180,11 @@ pub fn init(ctx: *GameApp) *Self {
 
     const home_dir = std.fs.selfExeDirPathAlloc(ctx.allocator) catch @panic("OOM");
     defer ctx.allocator.free(home_dir);
+    std.debug.print("{s}\n", .{home_dir});
+    std.debug.print("{s}\n", .{home_dir});
+    std.debug.print("{s}\n", .{home_dir});
+    std.debug.print("{s}\n", .{home_dir});
+    std.debug.print("{s}\n", .{home_dir});
     const db_path = std.fs.path.join(ctx.allocator, &[_][]const u8{ home_dir, ".user-data", "db.json" }) catch @panic("OOM");
     defer ctx.allocator.free(db_path);
 
@@ -192,7 +197,7 @@ pub fn init(ctx: *GameApp) *Self {
         .new_project_modal = NewProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `NewProjectModal`"),
         .open_project_modal = OpenProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `OpenProjectModal`"),
         .hierarchy_window = HierarchyWindow.init(ctx.allocator),
-        .project_explorer = ProjectExplorerWindow.init(ctx.allocator) catch @panic("Failed to initialize `ProjectExplorerWindow`"),
+        .resources_window = ResourcesWindow.init(ctx.allocator) catch @panic("Failed to initialize `ResourcesWindow`"),
         .properties_window = PropertiesWindow.init(ctx.allocator),
         .game_window = GameWindow.init(ctx),
         .logs_windows = LogsWindow.init(ctx.allocator),
@@ -200,8 +205,8 @@ pub fn init(ctx: *GameApp) *Self {
     };
     singleton.scene_window = SceneWindow.init(ctx, @ptrCast(&Editors.onDrawGizmos), &singleton.editors);
     singleton.bootstrapEditorPipeline(ctx.world);
-    singleton.init_descriptors(&ctx.engine);
-    init_imgui(&ctx.engine) catch @panic("failed to init imgui");
+    singleton.initDescriptors(&ctx.engine);
+    initImGui(&ctx.engine) catch @panic("failed to init imgui");
 
     if (EditorDatabase.storage().last_open_project) |lop| {
         Project.load(ctx.allocator, lop) catch {
@@ -237,10 +242,11 @@ pub fn deinit(self: *Self) void {
     self.logs_windows.deinit();
     self.hierarchy_window.deinit();
     self.properties_window.deinit();
-    self.project_explorer.deinit();
+    self.resources_window.deinit();
     if (Project.current()) |p| {
         p.unload();
     }
+    self.ctx.allocator.free(std.mem.span(c.ImGui_GetIO().*.IniFilename));
     loaded_imgui_images.deinit();
     check_vk(c.vkDeviceWaitIdle(self.ctx.engine.device)) catch @panic("Failed to wait for device idle");
     c.cImGui_ImplVulkan_Shutdown();
@@ -452,7 +458,7 @@ pub fn draw(self: *Self) !void {
 
             // we now dock our windows into the docking node we made above
             c.ImGui_DockBuilderDockWindow("Logs", dock_id_down);
-            c.ImGui_DockBuilderDockWindow("Project", dock_id_down);
+            c.ImGui_DockBuilderDockWindow("Resources", dock_id_down);
             c.ImGui_DockBuilderDockWindow("Hierarchy", dock_id_left);
             c.ImGui_DockBuilderDockWindow("Properties", dock_id_right);
             c.ImGui_DockBuilderDockWindow("Game", dockspace_id);
@@ -465,7 +471,7 @@ pub fn draw(self: *Self) !void {
 
     self.hierarchy_window.draw(self.ctx);
     try self.properties_window.draw(self.ctx);
-    try self.project_explorer.draw();
+    try self.resources_window.draw();
     try self.scene_window.draw(cmd, self.ctx);
     self.game_window.draw(cmd, self.ctx);
     try self.logs_windows.draw();
@@ -484,7 +490,7 @@ pub fn draw(self: *Self) !void {
     self.ctx.engine.endFrame(cmd);
 }
 
-fn init_descriptors(self: *Self, engine: *Engine) void {
+fn initDescriptors(self: *Self, engine: *Engine) void {
     const camera_and_scene_buffer_size =
         FRAME_OVERLAP * engine.padUniformBufferSize(@sizeOf(GPUCameraData)) +
         FRAME_OVERLAP * engine.padUniformBufferSize(@sizeOf(GPUSceneData));
@@ -544,7 +550,7 @@ fn init_descriptors(self: *Self, engine: *Engine) void {
     c.vkUpdateDescriptorSets(engine.device, @as(u32, @intCast(editor_camera_and_scene_writes.len)), &editor_camera_and_scene_writes[0], 0, null);
 }
 
-fn init_imgui(engine: *Engine) !void {
+fn initImGui(engine: *Engine) !void {
     const pool_sizes = [_]c.VkDescriptorPoolSize{
         .{
             .type = c.VK_DESCRIPTOR_TYPE_SAMPLER,
@@ -635,6 +641,10 @@ fn init_imgui(engine: *Engine) !void {
 
     io.*.ConfigFlags |= c.ImGuiConfigFlags_DockingEnable;
     io.*.ConfigWindowsMoveFromTitleBarOnly = true;
+
+    const root_dir = try rootDir(engine.allocator);
+    defer engine.allocator.free(root_dir);
+    io.*.IniFilename = try std.fs.path.joinZ(engine.allocator, &[_][]const u8{ root_dir, "imgui.ini" });
 
     styles.visualStudioStyles();
 }
@@ -919,4 +929,11 @@ fn getForwardDirection(transformMatrix: Mat4) Vec3 {
         -transformMatrix.unnamed[2][1], -transformMatrix.unnamed[2][2]);
 
     return forward.normalized(); // Normalize the vector to ensure unit length
+}
+
+pub fn rootDir(allocator: std.mem.Allocator) ![]const u8 {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const exe_path = try std.fs.selfExeDirPath(&buf);
+    const dirname = std.fs.path.dirname(exe_path) orelse return error.InvalidPath;
+    return allocator.dupe(u8, dirname);
 }

@@ -3,12 +3,47 @@ const std = @import("std");
 const Uuid = @import("yume").Uuid;
 const utils = @import("yume").utils;
 
+const Editor = @import("Editor.zig");
+
 const log = std.log.scoped(.AssetsDatabase);
 
+const yume_meta_extension_name = ".ym";
+
 pub const Resource = struct {
+    pub const Type = enum {
+        unknown,
+        // yume.json project file used to load the project,
+        // if a project structure contains multiple yume.json files - for example in the subdirectories -
+        // only the file used to load the project is marked with this tag and all others are
+        // registered as normal json files.
+        project,
+        scene,
+        shader,
+        mat,
+        obj,
+        fbx,
+
+        pub fn fromExt(ext: []const u8) Type {
+            const eql = std.mem.eql;
+            return if (eql(u8, ext, ".scene"))
+                .scene
+            else if (eql(u8, ext, ".mat"))
+                .mat
+            else if (eql(u8, ext, ".obj"))
+                .obj
+            else if (eql(u8, ext, ".fbx"))
+                .fbx
+            else
+                .unknown;
+        }
+    };
+
     id: Uuid,
     path: []u8,
+    type: Type,
 };
+
+const ResourceStorage = std.AutoHashMap(Uuid, Resource);
 
 const Self = @This();
 
@@ -16,23 +51,53 @@ var singleton: ?Self = null;
 
 allocator: std.mem.Allocator,
 
-resources: std.AutoHashMap(Uuid, Resource),
-
+resources: ResourceStorage,
 resources_index: std.StringHashMap(Uuid),
-resources_builtins: std.AutoHashMap(Uuid, Resource),
 
 resource_tree: ResourceNode,
 
 pub const ResourceNode = struct {
     pub const Node = union(enum) {
-        resource: Resource,
+        resource: Uuid,
         directory: []const u8,
 
-        pub fn path(self: *const Node) []const u8 {
+        pub fn path(self: *const Node) ![]const u8 {
             return switch (self.*) {
-                .resource => |r| r.path,
+                .resource => |id| getResourcePath(id),
                 .directory => |d| d,
             };
+        }
+
+        pub fn uuid(self: *const Node) ?Uuid {
+            return switch (self.*) {
+                .resource => |id| id,
+                .directory => null,
+            };
+        }
+
+        pub fn eql(lhs: *const Node, rhs: *const Node) bool {
+            if (std.meta.activeTag(lhs.*) != std.meta.activeTag(rhs.*)) {
+                return false;
+            }
+
+            return switch (lhs.*) {
+                .resource => |it| it.eql(rhs.resource),
+                .directory => |it| std.mem.eql(u8, it, rhs.directory),
+            };
+        }
+
+        pub fn clone(self: *Node, allocator: std.mem.Allocator) !Node {
+            return switch (self.*) {
+                .resource => |it| .{ .resource = it },
+                .directory => |d| .{ .directory = try allocator.dupe(u8, d) },
+            };
+        }
+
+        pub fn deinit(self: *Node, allocator: std.mem.Allocator) void {
+            switch (self.*) {
+                .resource => {},
+                .directory => |d| allocator.free(d),
+            }
         }
     };
 
@@ -132,10 +197,7 @@ pub const ResourceNode = struct {
     }
 
     fn deinit(self: *ResourceNode) void {
-        switch (self.node) {
-            .directory => |d| self.children.allocator.free(d),
-            .resource => {},
-        }
+        self.node.deinit(self.children.allocator);
         self.children.deinit();
     }
 
@@ -196,9 +258,8 @@ pub fn init(allocator: std.mem.Allocator) !void {
     std.debug.assert(singleton == null);
     singleton = Self{
         .allocator = allocator,
-        .resources = std.AutoHashMap(Uuid, Resource).init(allocator),
+        .resources = ResourceStorage.init(allocator),
         .resources_index = std.StringHashMap(Uuid).init(allocator),
-        .resources_builtins = std.AutoHashMap(Uuid, Resource).init(allocator),
         .resource_tree = ResourceNode.init(allocator, .{ .directory = try allocator.dupe(u8, "/") }),
     };
 
@@ -286,13 +347,6 @@ pub fn deinit() !void {
         }
     }
     self.resources.deinit();
-    {
-        var it = self.resources_builtins.iterator();
-        while (it.next()) |kv| {
-            self.allocator.free(kv.value_ptr.path);
-        }
-    }
-    self.resources_builtins.deinit();
 
     {
         var iter = try Self.dfsPostOrder(self.allocator);
@@ -316,18 +370,11 @@ pub fn getResourceId(path: []const u8) !Uuid {
             return next.key_ptr.*;
         }
     }
-    log.err("resource not found {s}\n", .{path});
     return error.ResourceNotFound;
 }
 
 pub fn getResourcePath(id: Uuid) ![]const u8 {
-    const self = instance();
-    if (self.resources_builtins.get(id)) |b| {
-        return b.path;
-    }
-
-    const res = self.resources.get(id);
-    if (res) |r| {
+    if (instance().resources.get(id)) |r| {
         return r.path;
     } else {
         return error.ResourceNotFound;
@@ -357,6 +404,26 @@ pub fn findResourceNodeByUri(uri: []const u8) !?*ResourceNode {
     return self.resource_tree.find(path);
 }
 
+// new path can be either relative to the root of the project or an absolute one
+// results in the resource node getting moved and therefore invalidating the pointer,
+// it returns the new pointer to the resource
+pub fn move(id: Uuid, new_path: []const u8) !*ResourceNode {
+    if (try utils.pathExists(new_path)) {
+        return error.DestinationAlreadyExists;
+    }
+    const old_path = try getResourcePath(id);
+    const old_dir = try std.fs.cwd().openDir(try std.fs.path.dirname(old_path));
+    defer old_dir.close();
+    const new_dir = try std.fs.cwd().openDir(try std.fs.path.dirname(new_path));
+    defer new_dir.close();
+
+    const old_basename = std.fs.path.basename(old_path);
+    const new_basename = std.fs.path.basename(new_path);
+
+    try std.fs.rename(old_dir, old_basename, new_dir, new_basename);
+    @compileError("TODO");
+}
+
 pub fn readAssetAlloc(allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) ![]u8 {
     log.debug("readAssetAlloc ({s}) :: {s}\n", .{ id.urn(), try getResourcePath(id) });
     var file = std.fs.cwd().openFile(try getResourcePath(id), .{}) catch return error.FailedToOpenResource;
@@ -372,6 +439,33 @@ pub fn dfsPostOrder(allocator: std.mem.Allocator) !ResourceNode.DfsPostOrder {
     return instance().*.resource_tree.dfs(allocator, .post);
 }
 
+fn registerFromMeta(opts: struct {
+    path: []const u8,
+    category: []const u8 = "assets",
+}) !void {
+    const buf_size = 4096;
+    var buf: [buf_size]u8 = undefined;
+
+    const self = instance();
+    var file = try std.fs.cwd().openFile(
+        try std.fmt.bufPrint(&buf, "{s}{s}", .{ opts.path, yume_meta_extension_name }),
+        .{},
+    );
+    defer file.close();
+    const stats = try file.stat();
+    if (stats.size > buf_size) return error.MetaFileIsTooBig;
+    const len = try file.readAll(&buf);
+    const content = buf[0..len];
+    const meta = try std.json.parseFromSlice(Resource, self.allocator, content, .{});
+    defer meta.deinit();
+
+    try register(.{
+        .urn = &meta.value.id.urn(),
+        .path = meta.value.path,
+        .category = opts.category,
+    });
+}
+
 pub fn register(opts: struct {
     urn: []const u8,
     path: []const u8,
@@ -380,20 +474,14 @@ pub fn register(opts: struct {
     const is_builtin = std.mem.eql(u8, opts.category, "builtin") or std.mem.eql(u8, opts.category, "editor");
     var self = instance();
     const id = try Uuid.fromUrnSlice(opts.urn);
-    const editor_root = try editorRootDir(self.allocator);
+    const editor_root = try Editor.rootDir(self.allocator);
     defer self.allocator.free(editor_root);
 
-    var storage = if (is_builtin) &self.resources_builtins else &self.resources;
     const path = if (is_builtin)
         try std.fs.path.join(self.allocator, &[_][]const u8{ editor_root, "assets", opts.category, opts.path })
     else
         try self.allocator.dupe(u8, opts.path);
     errdefer self.allocator.free(path);
-
-    log.debug("path: {s}", .{path});
-    log.debug("orig_path = {s}", .{opts.path});
-    log.debug("cat = {s}", .{opts.category});
-    log.debug("editor_root = {s}", .{editor_root});
 
     if (!try utils.pathExists(path)) {
         return error.FileNotFound;
@@ -403,7 +491,7 @@ pub fn register(opts: struct {
     if (index_entry.found_existing) {
         self.allocator.free(uri);
         uri = index_entry.key_ptr.*;
-        if (storage.fetchRemove(index_entry.value_ptr.*)) |it| {
+        if (self.resources.fetchRemove(index_entry.value_ptr.*)) |it| {
             self.allocator.free(it.value.path);
         }
 
@@ -414,31 +502,82 @@ pub fn register(opts: struct {
     defer self.allocator.free(parsed_path);
     const res_ptr = try self.resource_tree.getOrPut(parsed_path);
     std.debug.assert(!res_ptr.found_existing);
-    res_ptr.value.* = ResourceNode.init(self.allocator, .{ .resource = Resource{ .id = id, .path = path } });
-    try storage.put(id, res_ptr.value.node.resource);
+    try self.resources.put(id, Resource{
+        .id = id,
+        .path = path,
+        .type = Resource.Type.fromExt(std.fs.path.extension(path)),
+    });
+    res_ptr.value.* = ResourceNode.init(self.allocator, .{ .resource = id });
     index_entry.value_ptr.* = id;
 }
 
+// TODO: shaders should register like any other resource
 fn registerBuiltinShader(urn: []const u8, path: []const u8) !void {
     const self = instance();
     const id = try Uuid.fromUrnSlice(urn);
-    const editor_root = try editorRootDir(self.allocator);
+    const editor_root = try Editor.rootDir(self.allocator);
     defer self.allocator.free(editor_root);
     const pathspv = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ path[0 .. path.len - ".glsl".len], "spv" });
     defer self.allocator.free(pathspv);
-    try self.resources_builtins.put(id, Resource{
+    try self.resources.put(id, Resource{
         .id = id,
         .path = try std.fs.path.join(self.allocator, &[_][]const u8{ editor_root, "shaders", pathspv }),
+        .type = .shader,
     });
     const uri = try std.fmt.allocPrint(self.allocator, "builtin://{s}", .{path});
     try self.resources_index.put(uri, id);
 }
 
-inline fn editorRootDir(allocator: std.mem.Allocator) ![]const u8 {
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const exe_path = try std.fs.selfExeDirPath(&buf);
-    const dirname = std.fs.path.dirname(exe_path) orelse return error.InvalidPath;
-    return allocator.dupe(u8, dirname);
+pub fn indexCwd() !void {
+    const self = instance();
+    var arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var dir = try std.fs.cwd().openDir(".", .{ .iterate = true });
+    defer dir.close();
+    var iter = try dir.walk(allocator);
+    defer iter.deinit();
+    var files = std.StringHashMap(void).init(allocator);
+    defer files.deinit();
+    var metas = std.StringHashMap(void).init(allocator);
+    defer metas.deinit();
+    while (try iter.next()) |entry| {
+        if (entry.kind != .file) {
+            continue;
+        }
+        const fullpath = try allocator.dupe(u8, entry.path);
+        const baseext = utils.baseExtensionSplit(fullpath);
+        if (std.mem.eql(u8, baseext.ext, yume_meta_extension_name)) {
+            if (files.fetchRemove(baseext.base)) |_| {
+                try registerFromMeta(.{ .path = baseext.base });
+            } else {
+                try metas.put(baseext.base, {});
+            }
+        } else if (metas.fetchRemove(entry.path)) |_| {
+            try registerFromMeta(.{ .path = baseext.base });
+        } else {
+            try files.put(entry.path, {});
+        }
+    }
+
+    if (files.count() > 0) {
+        log.err("some files are not marked with meta files TODO", .{});
+    }
+
+    if (metas.count() > 0) {
+        var buf: [256]u8 = undefined;
+        const result = try Editor.messageBox(.{
+            .title = "Notice",
+            .message = try std.fmt.bufPrintZ(
+                &buf,
+                "Found {d} meta files without the actual files, Do you want to delete them?",
+                .{metas.count()},
+            ),
+        });
+        if (result == 0) {
+            log.err("TODO", .{});
+        }
+    }
 }
 
 pub fn parseUri(allocator: std.mem.Allocator, uri: []const u8) ![:0]const u8 {

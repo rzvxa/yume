@@ -182,9 +182,6 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
         .default_scene = Uuid.new(),
 
         .resources = std.AutoHashMap(Uuid, AssetsDatabase.Resource).init(self.allocator),
-
-        .resources_index = undefined,
-        .resources_builtins = undefined,
     };
     defer project.unload();
 
@@ -193,6 +190,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
         AssetsDatabase.Resource{
             .id = project.default_scene,
             .path = try self.allocator.dupe(u8, "scenes/Default.scene"),
+            .type = .scene,
         },
     );
 

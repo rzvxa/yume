@@ -131,3 +131,32 @@ pub fn tryOpenWithOsDefaultApplication(allocator: std.mem.Allocator, path: []con
         else => |p| @compileError("Unsupported platform: " ++ p),
     };
 }
+
+pub const BaseExtensionSplitResult = struct {
+    base: []const u8,
+    ext: []const u8,
+    index_of_dot: ?usize, // if null, path has no extension part
+};
+
+// splits the path into extension and everything but the extension
+// both slices are always guaranteed to be in valid range of the path
+// similar to the standard library's extension method,
+// the extension includes the preceding dot.
+// Example: 'a/b/c/d.zig' => { base: 'a/b/c/d', ext: '.zig' }
+// Example: 'a/b/c/d.zig.zag' => { base: 'a/b/c/d.zig', ext: '.zag' }
+pub fn baseExtensionSplit(path: []const u8) BaseExtensionSplitResult {
+    const index = std.mem.lastIndexOfScalar(u8, path, '.') orelse return .{
+        .base = path,
+        .ext = path[path.len..],
+        .index_of_dot = null,
+    };
+    return if (index == 0) .{ // dot file (e.g. `.bashrc`)
+        .base = path[0..],
+        .ext = path[path.len..],
+        .index_of_dot = null,
+    } else .{
+        .ext = path[index..],
+        .base = path[0..index],
+        .index_of_dot = index,
+    };
+}

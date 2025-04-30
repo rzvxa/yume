@@ -70,13 +70,13 @@ pub fn close(self: *Self) void {
 
 pub fn show(self: *Self, ctx: *GameApp) !void {
     if (!self.is_open) return;
-    c.ImGui_PushID("new-project-modal");
+    c.ImGui_PushID("open-project-modal");
     defer c.ImGui_PopID();
     const viewport = c.ImGui_GetMainViewport();
     c.ImGui_SetNextWindowPos(viewport.*.Pos, c.ImGuiCond_Always);
     c.ImGui_SetNextWindowSize(viewport.*.Size, c.ImGuiCond_Always);
 
-    const title = "New Project";
+    const title = "Open Project";
     const flags = c.ImGuiWindowFlags_NoDecoration | c.ImGuiWindowFlags_NoMove | c.ImGuiWindowFlags_NoSavedSettings;
     self.id = c.ImGui_GetID(title);
     if (c.ImGui_Begin(title, &self.is_open, flags)) {
