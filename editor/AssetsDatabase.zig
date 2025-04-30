@@ -7,7 +7,7 @@ const Editor = @import("Editor.zig");
 
 const log = std.log.scoped(.AssetsDatabase);
 
-const yume_meta_extension_name = ".ym";
+pub const yume_meta_extension_name = ".ym";
 
 pub const Resource = struct {
     pub const Type = enum {

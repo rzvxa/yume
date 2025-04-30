@@ -18,8 +18,6 @@ project_name: []const u8,
 scenes: std.ArrayList(Uuid),
 default_scene: Uuid,
 
-resources: std.AutoHashMap(Uuid, AssetsDatabase.Resource),
-
 pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     if (instance) |*ins| {
         ins.unload();
@@ -42,13 +40,6 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
 
 pub fn unload(self: *Self) void {
     self.scenes.deinit();
-    {
-        var it = self.resources.iterator();
-        while (it.next()) |kv| {
-            self.allocator.free(kv.value_ptr.path);
-        }
-    }
-    self.resources.deinit();
     self.allocator.free(self.project_name);
 }
 
@@ -80,15 +71,6 @@ pub fn jsonStringify(self: Self, jws: anytype) !void {
     try jws.objectField("default_scene");
     try jws.write(self.default_scene);
 
-    try jws.objectField("resources");
-    {
-        try jws.beginArray();
-        var it = self.resources.iterator();
-        while (it.next()) |kv| {
-            try jws.write(kv.value_ptr.*);
-        }
-        try jws.endArray();
-    }
     try jws.endObject();
 }
 
@@ -102,7 +84,6 @@ pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, o: anytype) !Self {
         .project_name = "UNNAMED PROJECT",
         .scenes = undefined,
         .default_scene = undefined,
-        .resources = undefined,
     };
 
     while (true) {
@@ -131,8 +112,6 @@ pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, o: anytype) !Self {
             result.scenes = try parseScenes(a, jrs);
         } else if (std.mem.eql(u8, field_name, "default_scene")) {
             result.default_scene = try Uuid.jsonParse(a, jrs, o);
-        } else if (std.mem.eql(u8, field_name, "resources")) {
-            result.resources = try parseResources(a, jrs);
         } else {
             try jrs.skipValue();
         }
@@ -170,57 +149,4 @@ fn parseScenes(a: std.mem.Allocator, jrs: *std.json.Scanner) !std.ArrayList(Uuid
     }
 
     return scenes;
-}
-
-fn parseResources(a: std.mem.Allocator, jrs: *std.json.Scanner) !std.AutoHashMap(Uuid, AssetsDatabase.Resource) {
-    var tk = try jrs.next();
-    if (tk != .array_begin) return error.UnexpectedToken;
-
-    var resources = std.AutoHashMap(Uuid, AssetsDatabase.Resource).init(a);
-
-    while (true) {
-        tk = try jrs.next();
-        if (tk == .array_end) break;
-
-        if (tk != .object_begin) return error.UnexpectedToken;
-
-        var resource = AssetsDatabase.Resource{
-            .id = undefined,
-            .path = undefined,
-            .type = undefined,
-        };
-
-        var uuid: ?Uuid = null;
-
-        while (true) {
-            tk = try jrs.nextAlloc(a, .alloc_if_needed);
-            if (tk == .object_end) break;
-
-            const field_name = switch (tk) {
-                inline .string, .allocated_string => |slice| slice,
-                else => return error.UnexpectedToken,
-            };
-
-            if (std.mem.eql(u8, field_name, "id")) {
-                resource.id = try Uuid.jsonParse(a, jrs, null);
-                uuid = resource.id;
-            } else if (std.mem.eql(u8, field_name, "path")) {
-                tk = try jrs.nextAlloc(a, .alloc_always);
-                resource.path = switch (tk) {
-                    inline .allocated_string => |slice| slice,
-                    else => return error.UnexpectedToken,
-                };
-            } else {
-                try jrs.skipValue();
-            }
-        }
-
-        if (uuid == null) return error.MissingField;
-        resource.type = AssetsDatabase.Resource.Type.fromExt(
-            std.fs.path.extension(resource.path),
-        );
-        try resources.put(uuid.?, resource);
-    }
-
-    return resources;
 }
