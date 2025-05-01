@@ -156,31 +156,37 @@ fn drawItem(
 ) !void {
     const is_root = std.mem.eql(u8, self.explorer_path, "/");
     const is_dir = item.res.node == .directory;
-    const icon =
-        try Editor.getImGuiTexture(
-        blk: {
-            if (is_root) {
-                if (std.mem.eql(u8, item.key, "builtin")) {
-                    break :blk "editor://icons/yume.png";
-                } else if (std.mem.eql(u8, item.key, "assets")) {
-                    break :blk "editor://icons/library.png";
-                } else if (std.mem.eql(u8, item.key, "editor")) {
-                    break :blk "editor://icons/editor.png";
-                } else {
-                    break :blk "editor://icons/folder.png";
-                }
-            } else if (is_dir) {
-                break :blk "editor://icons/folder.png";
+    const resource_type: Resources.Resource.Type = blk: {
+        if (is_dir) {
+            break :blk .unknown;
+        }
+        break :blk try Resources.getResourceType(item.res.node.resource);
+    };
+    const icon = blk: {
+        if (is_root) {
+            if (std.mem.eql(u8, item.key, "builtin")) {
+                break :blk try Editor.getImGuiTexture("editor://icons/yume.png");
+            } else if (std.mem.eql(u8, item.key, "assets")) {
+                break :blk try Editor.getImGuiTexture("editor://icons/library.png");
+            } else if (std.mem.eql(u8, item.key, "editor")) {
+                break :blk try Editor.getImGuiTexture("editor://icons/editor.png");
             } else {
-                break :blk "editor://icons/file.png";
+                break :blk try Editor.getImGuiTexture("editor://icons/folder.png");
             }
-        },
-    );
+        } else if (is_dir) {
+            break :blk try Editor.getImGuiTexture("editor://icons/folder.png");
+        } else if (resource_type != .unknown) {
+            const possible_icon_path = resource_type.fileIconUri();
+            break :blk Editor.getImGuiTexture(possible_icon_path) catch try Editor.getImGuiTexture("editor://icons/file.png");
+        } else {
+            break :blk try Editor.getImGuiTexture("editor://icons/file.png");
+        }
+    };
 
     const allocator = self.allocator;
     const col_selected_active = c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0, .y = 0.478, .z = 0.8, .w = 1 });
     const col_selected_inactive = c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0.2, .y = 0.478, .z = 0.8, .w = 1 });
-    const name = try allocator.dupeZ(u8, item.key);
+    const name = try if (resource_type == .unknown) allocator.dupeZ(u8, item.key) else allocator.dupeZ(u8, std.fs.path.stem(item.key));
     defer allocator.free(name);
     const is_selected = if (self.selected_file) |sel| sel.eql(&item.res.node) else false;
     const is_renaming = if (self.renaming_file) |ren| ren.eql(&item.res.node) else false;
@@ -228,7 +234,14 @@ fn drawItem(
         if (c.ImGui_IsItemDeactivated()) {
             if (c.ImGui_IsItemDeactivatedAfterEdit() and !c.ImGui_IsKeyPressed(c.ImGuiKey_Escape)) {
                 std.log.info("new name: {s}", .{self.renaming_str.buf});
-                // Resources.move(item.)
+                const old_path = try item.res.node.path();
+                var new_name_buf: [256]u8 = undefined;
+                const new_path = std.fmt.bufPrint(&new_name_buf, "{s}/{s}{s}", .{
+                    std.fs.path.dirname(old_path),
+                    self.renaming_str.span(),
+                    Resources.yume_meta_extension_name,
+                });
+                item.res = try Resources.move(old_path, new_path);
             }
             try self.setRenaming(null);
         }
@@ -254,12 +267,15 @@ fn drawItem(
                 },
                 .directory => |d| try self.setExplorerPath(d),
             }
-            std.log.debug("double click {s}", .{try item.res.node.path()});
         },
         .name_double_click => {
-            try self.setSelected(item);
-            try self.renaming_str.set(name);
-            try self.setRenaming(item);
+            if (resource_type != .project) {
+                try self.setSelected(item);
+                try self.renaming_str.set(std.fs.path.stem(name));
+                try self.setRenaming(item);
+            } else {
+                std.log.info("Can't rename the project file", .{});
+            }
         },
     }
 }

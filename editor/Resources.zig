@@ -22,6 +22,7 @@ pub const Resource = struct {
         mat,
         obj,
         fbx,
+        png,
 
         pub fn fromExt(ext: []const u8) Type {
             const eql = std.mem.eql;
@@ -33,8 +34,16 @@ pub const Resource = struct {
                 .obj
             else if (eql(u8, ext, ".fbx"))
                 .fbx
+            else if (eql(u8, ext, ".png"))
+                .png
             else
                 .unknown;
+        }
+
+        pub fn fileIconUri(self: Type) [:0]const u8 {
+            return switch (self) {
+                inline else => |t| "editor://icons/filetypes/" ++ @tagName(t) ++ ".png",
+            };
         }
     };
 
@@ -309,6 +318,14 @@ pub fn init(allocator: std.mem.Allocator) !void {
         try register(.{ .urn = "e54f4382-dc55-4380-89db-0475bc02dd03", .path = "icons/point-light.png", .category = "editor" });
         try register(.{ .urn = "e17a74c7-cb8e-4cd3-90f2-d76ee499a13e", .path = "icons/sun.png", .category = "editor" });
 
+        try register(.{ .urn = "d16bc474-c896-4aec-b35d-fcdfac790fbb", .path = "icons/filetypes/fbx.png", .category = "editor" });
+        try register(.{ .urn = "825643b1-6054-49a8-8ec1-fce29767e512", .path = "icons/filetypes/mat.png", .category = "editor" });
+        try register(.{ .urn = "38d6820e-c8e5-4374-9e8a-4196c5ab0802", .path = "icons/filetypes/obj.png", .category = "editor" });
+        try register(.{ .urn = "6a6ef862-387e-41f9-864f-6e764213f60b", .path = "icons/filetypes/png.png", .category = "editor" });
+        try register(.{ .urn = "88bbd334-c48e-489f-b5e7-a9c035220db5", .path = "icons/filetypes/project.png", .category = "editor" });
+        try register(.{ .urn = "8467cf1a-51fa-416f-8fd8-e5f3adc5e18c", .path = "icons/filetypes/scene.png", .category = "editor" });
+        try register(.{ .urn = "c77e42f5-0c63-4046-b99f-220e270bd7bd", .path = "icons/filetypes/shader.png", .category = "editor" });
+
         try register(.{ .urn = "682be1c4-a465-40ed-a4f0-31a07f2b1a20", .path = "icons/error.png", .category = "editor" });
         try register(.{ .urn = "a330bc08-999b-46df-a49b-f959a3b75b65", .path = "icons/warning.png", .category = "editor" });
         try register(.{ .urn = "376e63cc-21e1-4d05-bab7-ab5f71cd7ad3", .path = "icons/info.png", .category = "editor" });
@@ -389,6 +406,14 @@ pub fn getResourceId(path: []const u8) !Uuid {
 pub fn getResourcePath(id: Uuid) ![:0]const u8 {
     if (instance().resources.get(id)) |r| {
         return r.path;
+    } else {
+        return error.ResourceNotFound;
+    }
+}
+
+pub fn getResourceType(id: Uuid) !Resource.Type {
+    if (instance().resources.get(id)) |r| {
+        return r.type;
     } else {
         return error.ResourceNotFound;
     }
@@ -475,6 +500,7 @@ fn registerFromMeta(opts: struct {
     try register(.{
         .urn = &meta.value.id.urn(),
         .path = meta.value.path,
+        .type = meta.value.type,
         .category = opts.category,
     });
 }
@@ -482,6 +508,7 @@ fn registerFromMeta(opts: struct {
 pub fn register(opts: struct {
     urn: []const u8,
     path: []const u8,
+    type: ?Resource.Type = null,
     category: []const u8 = "assets",
 }) !void {
     const is_builtin = std.mem.eql(u8, opts.category, "builtin") or std.mem.eql(u8, opts.category, "editor");
@@ -518,7 +545,7 @@ pub fn register(opts: struct {
     try self.resources.put(id, Resource{
         .id = id,
         .path = path,
-        .type = Resource.Type.fromExt(std.fs.path.extension(path)),
+        .type = opts.type orelse Resource.Type.fromExt(std.fs.path.extension(path)),
     });
     res_ptr.value.* = ResourceNode.init(self.allocator, .{ .resource = id });
     index_entry.value_ptr.* = id;

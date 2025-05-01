@@ -7,13 +7,13 @@ const Editor = @import("Editor.zig");
 pub const ImString = struct {
     allocator: std.mem.Allocator,
     buf: [*:0]u8,
-    ccp: usize,
+    cap: usize,
 
     pub fn init(allocator: std.mem.Allocator) !ImString {
         const str = .{
             .allocator = allocator,
             .buf = try allocator.allocSentinel(u8, 0, 0),
-            .ccp = 0,
+            .cap = 0,
         };
         return str;
     }
@@ -22,7 +22,7 @@ pub const ImString = struct {
         return .{
             .allocator = allocator,
             .buf = (try allocator.dupeZ(u8, s)).ptr,
-            .ccp = s.len,
+            .cap = s.len,
         };
     }
 
@@ -35,21 +35,22 @@ pub const ImString = struct {
     }
 
     pub inline fn size(self: *const ImString) usize {
-        return self.ccp + 1;
+        return self.cap + 1;
     }
 
     pub inline fn length(self: *const ImString) usize {
         return self.span().len;
     }
 
-    pub fn set(self: *ImString, s: [:0]const u8) !void {
+    pub fn set(self: *ImString, s: []const u8) !void {
         try self.ensureCapacity(s.len);
-        @memcpy(self.buf[0 .. s.len + 1], utils.absorbSentinel(s));
+        @memcpy(self.buf[0..s.len], s);
+        self.buf[s.len] = 0;
     }
 
-    pub fn ensureCapacity(self: *ImString, ccp: usize) !void {
-        self.buf = @ptrCast(try self.allocator.realloc(self.buf[0..self.size()], ccp + 1));
-        self.ccp = ccp;
+    pub fn ensureCapacity(self: *ImString, cap: usize) !void {
+        self.buf = @ptrCast(try self.allocator.realloc(self.buf[0..self.size()], cap + 1));
+        self.cap = cap;
     }
 
     pub fn InputTextCallback(data: [*c]c.ImGuiInputTextCallbackData) callconv(.C) c_int {

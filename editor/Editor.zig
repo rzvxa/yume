@@ -799,6 +799,9 @@ pub fn messageBox(opts: struct {
 pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
     var engine = &instance().ctx.engine;
     const entry = try loaded_imgui_images.getOrPut(uri);
+    errdefer if (!entry.found_existing) {
+        _ = loaded_imgui_images.remove(uri);
+    };
     if (entry.found_existing) {
         return entry.value_ptr.*;
     }
