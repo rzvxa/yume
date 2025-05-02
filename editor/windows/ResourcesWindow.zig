@@ -234,14 +234,14 @@ fn drawItem(
         if (c.ImGui_IsItemDeactivated()) {
             if (c.ImGui_IsItemDeactivatedAfterEdit() and !c.ImGui_IsKeyPressed(c.ImGuiKey_Escape)) {
                 std.log.info("new name: {s}", .{self.renaming_str.buf});
-                const old_path = try item.res.node.path();
-                var new_name_buf: [256]u8 = undefined;
-                const new_path = std.fmt.bufPrint(&new_name_buf, "{s}/{s}{s}", .{
-                    std.fs.path.dirname(old_path),
-                    self.renaming_str.span(),
-                    Resources.yume_meta_extension_name,
-                });
-                item.res = try Resources.move(old_path, new_path);
+                // const old_path = try item.res.node.path();
+                // var new_name_buf: [256]u8 = undefined;
+                // const new_path = std.fmt.bufPrint(&new_name_buf, "{s}/{s}{s}", .{
+                //     std.fs.path.dirname(old_path),
+                //     self.renaming_str.span(),
+                //     Resources.yume_meta_extension_name,
+                // });
+                // item.res = try Resources.move(old_path, new_path);
             }
             try self.setRenaming(null);
         }

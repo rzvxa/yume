@@ -298,6 +298,7 @@ pub fn processEvent(self: *Self, event: *c.SDL_Event) bool {
 }
 
 pub fn update(self: *Self) !bool {
+    Project.update();
     self.sanitizeSelection(&self.selection);
     try self.scene_window.update(self.ctx);
     return self.ctx.world.progress(self.ctx.delta);

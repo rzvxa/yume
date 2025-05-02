@@ -275,7 +275,6 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                     }
 
                     if (ctx.world.get(selection, components.Mesh)) |mesh| {
-                        // try gizmo.drawBoundingBox(mesh.bounds, transform.?.value);
                         try gizmo.drawBoundingBoxCorners(mesh.bounds, transform.?.value);
                     }
                     var selection_id_buf = std.mem.zeroes([19:0]u8);
