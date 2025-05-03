@@ -6,7 +6,6 @@ const Uuid = @import("yume").Uuid;
 const AssetLoader = @import("yume").assets.AssetLoader;
 const EditorDatabase = @import("EditorDatabase.zig");
 const Resources = @import("Resources.zig");
-const Watch = @import("Watch.zig");
 
 const Self = @This();
 
@@ -18,9 +17,6 @@ yume_version: std.SemanticVersion = @import("yume").version,
 project_name: []const u8,
 scenes: std.ArrayList(Uuid),
 default_scene: Uuid,
-
-// unserialized data
-watcher: ?*Watch = null,
 
 pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     if (instance) |*ins| {
@@ -36,10 +32,6 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     defer project_root.close();
     try project_root.setAsCwd();
 
-    if (Watch.supported_platform) {
-        instance.?.watcher = try Watch.init(allocator, ".");
-    }
-
     try Resources.reinit(allocator);
     try Resources.indexCwd();
 
@@ -47,23 +39,8 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
 }
 
 pub fn unload(self: *Self) void {
-    if (self.watcher) |w| w.deinit();
     self.scenes.deinit();
     self.allocator.free(self.project_name);
-}
-
-pub fn update() void {
-    if (instance.?.watcher) |w| {
-        var ctx = {};
-        w.dispatch(void, &struct {
-            fn f(_: *void, e: Watch.Event) void {
-                switch (e) {
-                    .add, .remove, .modify => |s| log.debug("tag: {s} {s}", .{ @tagName(e), s }),
-                    .rename => |rn| log.debug("tag: {s} old: {s}, new: {s}", .{ @tagName(e), rn.old, rn.new }),
-                }
-            }
-        }.f, &ctx) catch |e| log.err("Watch error: {}", .{e});
-    }
 }
 
 pub fn current() ?*Self {

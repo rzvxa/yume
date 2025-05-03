@@ -38,12 +38,32 @@ pub const Event = union(enum) {
             } },
         };
     }
+
+    fn priority(e: Event) u8 {
+        return switch (e) {
+            .rename => 5,
+            .remove => 3,
+            .add => 3,
+            .modify => 2,
+        };
+    }
+
+    fn key(e: Event) []const u8 {
+        return switch (e) {
+            .rename => e.rename.old,
+            .add => e.add,
+            .remove => e.remove,
+            .modify => e.modify,
+        };
+    }
 };
+
+allocator: std.mem.Allocator,
 
 impl: Impl,
 
 mutex: std.Thread.Mutex = .{},
-events: std.ArrayListUnmanaged(Event) = .{},
+events: std.StringArrayHashMapUnmanaged(Event) = .{},
 last_error: ?anyerror = null,
 
 const Impl = switch (builtin.os.tag) {
@@ -51,8 +71,6 @@ const Impl = switch (builtin.os.tag) {
         const fs = std.fs;
         const w = std.os.windows;
         const kernel32 = w.kernel32;
-
-        allocator: std.mem.Allocator,
 
         callback: WatchCallback(anyopaque),
         callback_ctx: *anyopaque,
@@ -65,7 +83,7 @@ const Impl = switch (builtin.os.tag) {
         alive: std.atomic.Value(bool),
         thread: std.Thread,
 
-        fn init(ptr: *Impl, allocator: std.mem.Allocator, path: []const u8, callback: WatchCallback(anyopaque), callback_ctx: *anyopaque) !void {
+        fn init(ptr: *Impl, path: []const u8, callback: WatchCallback(anyopaque), callback_ctx: *anyopaque) !void {
             const event_handle = kernel32.CreateEventExW(
                 null,
                 null,
@@ -74,8 +92,6 @@ const Impl = switch (builtin.os.tag) {
             ) orelse return error.CreateEventFailure;
 
             ptr.* = Impl{
-                .allocator = allocator,
-
                 .callback = callback,
                 .callback_ctx = callback_ctx,
 
@@ -173,7 +189,7 @@ const Impl = switch (builtin.os.tag) {
             path_w.len = try std.unicode.wtf8ToWtf16Le(&path_w.data, full_path);
             path_w.data[path_w.len] = 0;
 
-            // Open the directory with the correct flags.
+            // open the directory with the correct flags.
             const handle = kernel32.CreateFileW(
                 path_w.span(),
                 w.FILE_LIST_DIRECTORY,
@@ -184,7 +200,7 @@ const Impl = switch (builtin.os.tag) {
                 null,
             );
             if (handle == w.INVALID_HANDLE_VALUE) {
-                return error.AccessDenied; // Or translate GetLastError() into your error type.
+                return error.AccessDenied;
             }
             return handle;
         }
@@ -215,7 +231,9 @@ const Impl = switch (builtin.os.tag) {
                 const file_name_ptr: *const u16 = &info_ptr.FileName[0];
                 const file_name_slice = @as([*]const u16, @ptrCast(file_name_ptr))[0..numUTF16Units];
 
-                const utf8_name = try std.unicode.utf16LeToUtf8Alloc(impl.allocator, file_name_slice);
+                var utf8_name_buf: [w.MAX_PATH]u8 = undefined;
+                const utf8_name_len = try std.unicode.utf16LeToUtf8(&utf8_name_buf, file_name_slice);
+                const utf8_name = utf8_name_buf[0..utf8_name_len];
 
                 impl.callback(impl.callback_ctx, switch (info_ptr.Action) {
                     w.FILE_ACTION_ADDED => .{ .add = utf8_name },
@@ -239,11 +257,10 @@ const Impl = switch (builtin.os.tag) {
     else => void,
 };
 
-/// The transparent API for clients.
 pub fn init(allocator: std.mem.Allocator, path: []const u8) !*Self {
     const self = try allocator.create(Self);
-    self.* = .{ .impl = undefined };
-    Impl.init(&self.impl, allocator, path, @ptrCast(&Self.collectEvent), self) catch |e| {
+    self.* = .{ .allocator = allocator, .impl = undefined };
+    Impl.init(&self.impl, path, @ptrCast(&Self.collectEvent), self) catch |e| {
         log.err("failed to init implementation: {}", .{e});
         return e;
     };
@@ -251,11 +268,14 @@ pub fn init(allocator: std.mem.Allocator, path: []const u8) !*Self {
 }
 
 pub fn deinit(self: *Self) void {
-    const allocator = self.impl.allocator;
+    const allocator = self.allocator;
     self.impl.deinit();
     {
         self.mutex.lock();
         defer self.mutex.unlock();
+        for (self.events.values()) |e| {
+            e.deinit(allocator);
+        }
         self.events.deinit(allocator);
         if (self.last_error) |e| {
             log.warn("unhandled watch error: {}", .{e});
@@ -274,9 +294,9 @@ pub fn dispatch(self: *Self, comptime CTX: type, callback: WatchCallback(CTX), c
         return err;
     }
 
-    for (self.events.items) |e| {
+    for (self.events.values()) |e| {
         callback(callback_ctx, e);
-        e.deinit(self.impl.allocator);
+        e.deinit(self.allocator);
     }
     self.events.clearRetainingCapacity();
 }
@@ -285,8 +305,42 @@ fn collectEvent(self: *Self, event: Event) void {
     self.mutex.lock();
     defer self.mutex.unlock();
 
-    self.events.append(self.impl.allocator, event) catch |err| {
+    const new_priority = event.priority();
+
+    // Look for an existing event for the same file (same key).
+    var gop = self.events.getOrPut(self.allocator, event.key()) catch |err| {
         self.last_error = err;
         return;
     };
+
+    if (gop.found_existing) { // an event for this file has already been recorded.
+        const existing_priority = gop.value_ptr.priority();
+        if (new_priority > existing_priority) {
+            // the new event is of higher priority, so replace the existing one.
+            const cloned = event.clone(self.allocator) catch |err| {
+                self.last_error = err;
+                return;
+            };
+            gop.value_ptr.deinit(self.allocator);
+            gop.value_ptr.* = cloned;
+        } else if (new_priority == existing_priority) {
+            const removed = self.events.fetchOrderedRemove(event.key()).?;
+            removed.value.deinit(self.allocator);
+            const cloned = event.clone(self.allocator) catch |err| {
+                self.last_error = err;
+                return;
+            };
+            self.events.put(self.allocator, event.key(), cloned) catch |err| {
+                cloned.deinit(self.allocator);
+                self.last_error = err;
+                return;
+            };
+        }
+    } else { // no event exists for this key yet, so add the new event to the list.
+        const cloned = event.clone(self.allocator) catch |err| {
+            self.last_error = err;
+            return;
+        };
+        gop.value_ptr.* = cloned;
+    }
 }

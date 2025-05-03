@@ -244,6 +244,10 @@ pub fn registerComponent(self: *Self, comptime T: type) void {
     self.components.put(ecs.typeName(T), comp) catch @panic("OOM");
 }
 
+pub fn isFocused(self: *Self) bool {
+    return c.SDL_GetWindowFlags(self.window) & c.SDL_WINDOW_INPUT_FOCUS != 0;
+}
+
 fn newFrame(self: *Self) void {
     self.inputs.clear();
 }

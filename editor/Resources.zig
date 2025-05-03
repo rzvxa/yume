@@ -2,6 +2,9 @@ const std = @import("std");
 
 const Uuid = @import("yume").Uuid;
 const utils = @import("yume").utils;
+const Watch = @import("Watch.zig");
+
+const GameApp = @import("yume").GameApp;
 
 const Editor = @import("Editor.zig");
 
@@ -47,9 +50,59 @@ pub const Resource = struct {
         }
     };
 
+    const max_buf_size = 4096;
+
     id: Uuid,
     path: [:0]u8,
     type: Type,
+
+    fn load(allocator: std.mem.Allocator, meta_path: []const u8) !Resource {
+        var file = try std.fs.cwd().openFile(meta_path, .{});
+        defer file.close();
+        var buf: [max_buf_size]u8 = undefined;
+        const stats = try file.stat();
+        if (stats.size > max_buf_size) return error.MetaFileIsTooBig;
+        const len = try file.readAll(&buf);
+        const content = buf[0..len];
+        return try std.json.parseFromSliceLeaky(Resource, allocator, content, .{});
+    }
+
+    fn save(self: *const Resource, create_if_missing: bool) !void {
+        var buf: [1024]u8 = undefined;
+        const meta_path = try std.fmt.bufPrint(&buf, "{s}{s}", .{ self.path, yume_meta_extension_name });
+        var file = if (create_if_missing)
+            try std.fs.cwd().createFile(meta_path, .{})
+        else
+            try std.fs.cwd().openFile(meta_path, .{ .mode = .write_only });
+        defer file.close();
+        try std.json.stringify(self, .{ .whitespace = .indent_4 }, file.writer());
+    }
+
+    // when there is no diff it will return null
+    fn merge(
+        allocator: std.mem.Allocator,
+        lhs: *const Resource,
+        rhs: *const Resource,
+        merge_bias: enum { lhs, rhs },
+    ) !?Resource {
+        _ = allocator;
+        _ = lhs;
+        _ = rhs;
+        _ = merge_bias;
+        return null;
+    }
+
+    pub fn clone(self: *const Resource, allocator: std.mem.Allocator) !Resource {
+        return .{
+            .id = self.id,
+            .type = self.type,
+            .path = try allocator.dupeZ(u8, self.path),
+        };
+    }
+
+    pub fn deinit(self: *Resource, allocator: std.mem.Allocator) void {
+        allocator.free(self.path);
+    }
 };
 
 const ResourceStorage = std.AutoHashMap(Uuid, Resource);
@@ -61,9 +114,12 @@ var singleton: ?Self = null;
 allocator: std.mem.Allocator,
 
 resources: ResourceStorage,
-resources_index: std.StringHashMap(Uuid),
+resources_index: std.StringHashMap(Uuid), // key is the resource URI
 
 resource_tree: ResourceNode,
+
+watcher: ?*Watch = null,
+watcher_counter: f32 = 0,
 
 pub const ResourceNode = struct {
     pub const Node = union(enum) {
@@ -270,6 +326,8 @@ pub fn init(allocator: std.mem.Allocator) !void {
         .resources = ResourceStorage.init(allocator),
         .resources_index = std.StringHashMap(Uuid).init(allocator),
         .resource_tree = ResourceNode.init(allocator, .{ .directory = try allocator.dupeZ(u8, "/") }),
+
+        .watcher = if (Watch.supported_platform) try Watch.init(allocator, ".") else null,
     };
 
     {
@@ -350,6 +408,7 @@ pub fn reinit(new_allocator: std.mem.Allocator) !void {
 
 pub fn deinit() !void {
     var self = instance();
+    if (self.watcher) |w| w.deinit();
     {
         var it = self.resources_index.iterator();
         while (it.next()) |kv| {
@@ -375,30 +434,27 @@ pub fn deinit() !void {
     }
 }
 
+pub fn resourceExists(id: Uuid) bool {
+    return instance().resources.contains(id);
+}
+
+pub fn resourceExistsByUri(uri: []const u8) bool {
+    return instance().resources_index.contains(uri);
+}
+
 // clones the resource meta data using the provided allocator
 pub fn getResource(allocator: std.mem.Allocator, id: Uuid) !?Resource {
     if (instance().resources.get(id)) |r| {
-        return .{
-            .id = r.id,
-            .type = r.type,
-            .path = try allocator.dupeZ(u8, r.path),
-        };
+        return try r.clone(allocator);
     } else {
         return error.ResourceNotFound;
     }
 }
 
-pub fn getResourceId(path: []const u8) !Uuid {
+pub fn getResourceId(uri: []const u8) !Uuid {
     const self = instance();
-    if (self.resources_index.get(path)) |id| {
+    if (self.resources_index.get(uri)) |id| {
         return id;
-    }
-    // TODO: add these to the index index
-    var it = self.resources.iterator();
-    while (it.next()) |next| {
-        if (std.mem.eql(u8, next.value_ptr.path, path)) {
-            return next.key_ptr.*;
-        }
     }
     return error.ResourceNotFound;
 }
@@ -480,28 +536,32 @@ pub fn dfsPostOrder(allocator: std.mem.Allocator) !ResourceNode.DfsPostOrder {
 fn registerFromMeta(opts: struct {
     path: []const u8,
     category: []const u8 = "assets",
+    update_uuid_if_exists: bool = false,
 }) !void {
-    const buf_size = 4096;
-    var buf: [buf_size]u8 = undefined;
+    var buf: [Resource.max_buf_size]u8 = undefined;
 
     const self = instance();
-    var file = try std.fs.cwd().openFile(
+    var meta = try Resource.load(
+        self.allocator,
         try std.fmt.bufPrint(&buf, "{s}{s}", .{ opts.path, yume_meta_extension_name }),
-        .{},
     );
-    defer file.close();
-    const stats = try file.stat();
-    if (stats.size > buf_size) return error.MetaFileIsTooBig;
-    const len = try file.readAll(&buf);
-    const content = buf[0..len];
-    const meta = try std.json.parseFromSlice(Resource, self.allocator, content, .{});
-    defer meta.deinit();
+    defer meta.deinit(self.allocator);
+
+    if (opts.update_uuid_if_exists and resourceExists(meta.id)) {
+        meta.id = Uuid.new();
+    }
+
+    if (!std.mem.eql(u8, meta.path, opts.path)) {
+        self.allocator.free(meta.path);
+        meta.path = try self.allocator.dupeZ(u8, opts.path);
+    }
 
     try register(.{
-        .urn = &meta.value.id.urn(),
-        .path = meta.value.path,
-        .type = meta.value.type,
+        .urn = &meta.id.urn(),
+        .path = meta.path,
+        .type = meta.type,
         .category = opts.category,
+        .ensure_meta = false,
     });
 }
 
@@ -510,6 +570,7 @@ pub fn register(opts: struct {
     path: []const u8,
     type: ?Resource.Type = null,
     category: []const u8 = "assets",
+    ensure_meta: bool = true,
 }) !void {
     const is_builtin = std.mem.eql(u8, opts.category, "builtin") or std.mem.eql(u8, opts.category, "editor");
     var self = instance();
@@ -540,15 +601,18 @@ pub fn register(opts: struct {
 
     const parsed_path = try parseUri(self.allocator, uri);
     defer self.allocator.free(parsed_path);
-    const res_ptr = try self.resource_tree.getOrPut(parsed_path);
+    const res_node = try self.resource_tree.getOrPut(parsed_path);
+    std.debug.assert(!res_node.found_existing);
+    const res_ptr = try self.resources.getOrPut(id);
     std.debug.assert(!res_ptr.found_existing);
-    try self.resources.put(id, Resource{
+    res_ptr.value_ptr.* = Resource{
         .id = id,
         .path = path,
         .type = opts.type orelse Resource.Type.fromExt(std.fs.path.extension(path)),
-    });
-    res_ptr.value.* = ResourceNode.init(self.allocator, .{ .resource = id });
+    };
+    res_node.value.* = ResourceNode.init(self.allocator, .{ .resource = id });
     index_entry.value_ptr.* = id;
+    res_ptr.value_ptr.save(opts.ensure_meta) catch |err| if (opts.ensure_meta) return err else {};
 }
 
 // TODO: shaders should register like any other resource
@@ -585,18 +649,18 @@ pub fn indexCwd() !void {
         if (entry.kind != .file) {
             continue;
         }
-        const fullpath = try allocator.dupe(u8, entry.path);
-        const baseext = utils.baseExtensionSplit(fullpath);
+        const normalized = utils.normalizePathSep(try allocator.dupe(u8, entry.path));
+        const baseext = utils.baseExtensionSplit(normalized);
         if (std.mem.eql(u8, baseext.ext, yume_meta_extension_name)) {
             if (files.fetchRemove(baseext.base)) |_| {
                 try registerFromMeta(.{ .path = baseext.base });
             } else {
                 try metas.put(baseext.base, {});
             }
-        } else if (metas.fetchRemove(entry.path)) |_| {
+        } else if (metas.fetchRemove(normalized)) |_| {
             try registerFromMeta(.{ .path = baseext.base });
         } else {
-            try files.put(entry.path, {});
+            try files.put(normalized, {});
         }
     }
 
@@ -640,5 +704,133 @@ pub fn parseUri(allocator: std.mem.Allocator, uri: []const u8) ![:0]const u8 {
         return try std.fmt.allocPrintZ(allocator, "/{s}", .{uri[0..end_of_protocol]});
     } else {
         return try std.fmt.allocPrintZ(allocator, "/{s}/{s}", .{ uri[0..end_of_protocol], uri[end_of_protocol + 3 ..] });
+    }
+}
+
+pub fn update(dt: f32, ctx: *GameApp) void {
+    const ins = instance();
+    ins.watcher_counter += dt;
+    if (!ctx.isFocused()) {
+        return;
+    }
+
+    if (ins.watcher) |w| {
+        if (ins.watcher_counter > 1) {
+            ins.watcher_counter = 0;
+            w.dispatch(Self, &struct {
+                fn f(self: *Self, event: Watch.Event) void {
+                    Self.onWatchEvent(self, event) catch |err| log.err(
+                        "watching project encountered an error {}",
+                        .{err},
+                    );
+                }
+            }.f, ins) catch |e| log.err("Watch error: {}", .{e});
+        }
+    }
+}
+
+fn onWatchEvent(self: *Self, event: Watch.Event) !void {
+    var sfa = std.heap.stackFallback(std.fs.max_path_bytes, self.allocator);
+    const allocator = sfa.get();
+    switch (event) {
+        .add => |path| {
+            const baseext = utils.baseExtensionSplit(path);
+            if (std.mem.eql(u8, baseext.ext, yume_meta_extension_name)) { // seen new meta
+                const uri = try std.fmt.allocPrint(self.allocator, "assets://{s}", .{baseext.base});
+                defer self.allocator.free(uri);
+                if (resourceExistsByUri(uri)) {
+                    const res_id = try getResourceId(uri);
+                    try syncMeta(res_id, .disk);
+                } else if (try utils.pathExists(baseext.base)) {
+                    // if resource path exists we attempt to register it
+                    try registerFromMeta(.{ .path = baseext.base, .update_uuid_if_exists = true });
+                } else {
+                    // orphan meta files aren't allowed
+                    log.err("Seen a meta file \"{s}\" without the actual resource, removing the meta file.", .{path});
+                    try std.fs.cwd().deleteFile(path);
+                }
+            } else { // seen new resource file
+                const maybe_meta = try std.fmt.allocPrint(allocator, "{s}{s}", .{ path, yume_meta_extension_name });
+                if (try utils.pathExists(maybe_meta)) {
+                    try registerFromMeta(.{ .path = path, .update_uuid_if_exists = true });
+                } else {
+                    try register(.{
+                        .urn = &Uuid.new().urn(),
+                        .path = path,
+                    });
+                }
+            }
+        },
+        .remove => |path| {
+            const baseext = utils.baseExtensionSplit(path);
+            if (std.mem.eql(u8, baseext.ext, yume_meta_extension_name)) { // removing a meta
+                const uri = try std.fmt.allocPrint(self.allocator, "assets://{s}", .{baseext.base});
+                defer self.allocator.free(uri);
+                if (resourceExistsByUri(uri)) {
+                    const res_id = try getResourceId(uri);
+                    var res = try getResource(self.allocator, res_id);
+                    defer res.?.deinit(self.allocator);
+                    try res.?.save(true);
+                } else if (try utils.pathExists(baseext.base)) {
+                    try registerFromMeta(.{ .path = baseext.base, .update_uuid_if_exists = true });
+                } else {
+                    log.err("Seen a meta file \"{s}\" without the actual resource, removing the meta file.", .{path});
+                    try std.fs.cwd().deleteFile(path);
+                }
+            } else { // seen new resource file
+                const maybe_meta = try std.fmt.allocPrint(allocator, "{s}{s}", .{ path, yume_meta_extension_name });
+                if (try utils.pathExists(maybe_meta)) {
+                    try registerFromMeta(.{ .path = path, .update_uuid_if_exists = true });
+                } else {
+                    try register(.{ .urn = &Uuid.new().urn(), .path = path });
+                }
+            }
+        },
+        .modify => |s| log.debug("tag: {s} {s}", .{ @tagName(event), s }),
+        .rename => |rn| log.debug("tag: {s} old: {s}, new: {s}", .{ @tagName(event), rn.old, rn.new }),
+    }
+}
+
+pub fn syncMeta(id: Uuid, bias: enum { memory, disk }) !void {
+    const self = instance();
+    var buf: [1024]u8 = undefined;
+
+    var in_mem = (try getResource(self.allocator, id)).?;
+    defer in_mem.deinit(self.allocator);
+
+    const meta_path = try std.fmt.bufPrint(&buf, "{s}{s}", .{ in_mem.path, yume_meta_extension_name });
+
+    var on_disk = try Resource.load(self.allocator, meta_path);
+    defer on_disk.deinit(self.allocator);
+
+    const uri: []const u8 = try std.fmt.allocPrint(self.allocator, "assets://{s}", .{in_mem.path});
+    defer self.allocator.free(uri);
+
+    const merge_result = try Resource.merge(self.allocator, &in_mem, &on_disk, if (bias == .memory) .lhs else .rhs);
+    if (merge_result) |merged| {
+        const node = try findResourceNodeByUri(uri) orelse return error.InvalidSyncMetaOperation;
+        if (!merged.id.eql(in_mem.id)) {
+            const old_id = in_mem.id;
+            if (try self.resources_index.fetchPut(try self.allocator.dupe(u8, uri), merged.id)) |old| {
+                self.allocator.free(old.key);
+            } else log.err(
+                "Invalid sync operation, Resources might be partially broken, old_id: {s}, new_id: {s}, uri: {s}",
+                .{ old_id.urn(), merged.id.urn(), uri },
+            );
+            if (self.resources.fetchRemove(id)) |old| {
+                var val = old.value;
+                val.deinit(self.allocator);
+            } else log.err(
+                "Invalid sync operation, Resources might be partially broken, old_id: {s}, new_id: {s}, uri: {s}",
+                .{ old_id.urn(), merged.id.urn(), uri },
+            );
+
+            try self.resources.put(merged.id, merged);
+
+            node.node.resource = merged.id;
+        } else if (self.resources.getPtr(id)) |res| {
+            res.deinit(self.allocator);
+            res.* = merged;
+        } else return error.InvalidSyncMetaOperation;
     }
 }

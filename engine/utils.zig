@@ -160,3 +160,17 @@ pub fn baseExtensionSplit(path: []const u8) BaseExtensionSplitResult {
         .index_of_dot = index,
     };
 }
+
+// mutates the path in-place and returns it
+// this function replaces `\\` with `/` in-place and therefore path is guaranteed
+// to always have enough room for the result.
+pub fn normalizePathSep(path: []u8) []u8 {
+    if (builtin.os.tag == .windows) {
+        for (path, 0..) |char, i| {
+            if (char == '\\') {
+                path[i] = '/';
+            }
+        }
+    }
+    return path;
+}
