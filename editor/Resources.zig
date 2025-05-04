@@ -53,8 +53,65 @@ pub const Resource = struct {
     const max_buf_size = 4096;
 
     id: Uuid,
-    path: [:0]u8,
+    uri: [:0]u8,
+    protocol_len: usize,
     type: Type,
+
+    pub inline fn path(self: *const Resource) [:0]const u8 {
+        return self.uri[self.protocol_len + "://".len .. :0];
+    }
+
+    pub inline fn protocol(self: *const Resource) []const u8 {
+        return self.uri[0..self.protocol_len];
+    }
+
+    pub inline fn protocolUri(self: *const Resource) []const u8 {
+        return self.uri[0 .. self.protocol_len + 3];
+    }
+
+    pub fn bufLoadPath(self: *const Resource, buf: []u8) ![:0]const u8 {
+        const result = try self.bufFullpath(buf);
+        if (std.mem.eql(u8, self.protocol(), "builtin-shaders")) {
+            var backing_buf: [std.fs.max_path_bytes]u8 = undefined;
+            @memcpy(backing_buf[0..result.len], result);
+            const baseext = utils.baseExtensionSplit(backing_buf[0..result.len]);
+            return try std.fmt.bufPrintZ(buf, "{s}.spv", .{baseext.base});
+        } else {
+            return result;
+        }
+    }
+
+    pub fn bufFullpath(self: *const Resource, buf: []u8) ![:0]const u8 {
+        if (std.mem.eql(u8, self.protocol(), "assets")) {
+            const path_tmp = self.path();
+            @memcpy(buf[0 .. path_tmp.len + 1], utils.absorbSentinel(path_tmp));
+            return buf[0..path_tmp.len :0];
+        } else if (std.mem.eql(u8, self.protocol(), "builtin-shaders")) { // TODO: use builtin://shaders/*
+            var editor_root_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const editor_root = try Editor.bufRootDir(&editor_root_buf);
+            return try std.fmt.bufPrintZ(buf, "{s}/shaders/{s}", .{ editor_root, self.path() });
+        } else {
+            var editor_root_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const editor_root = try Editor.bufRootDir(&editor_root_buf);
+            return try std.fmt.bufPrintZ(buf, "{s}/assets/{s}/{s}", .{ editor_root, self.protocol(), self.path() });
+        }
+    }
+
+    pub fn bufMetaPath(self: *const Resource, buf: []u8) ![:0]const u8 {
+        var fullpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const fullpath = try self.bufFullpath(&fullpath_buf);
+        return std.fmt.bufPrintZ(buf, "{s}{s}", .{ fullpath, yume_meta_extension_name });
+    }
+
+    // if uri is at the root, e.g. `assets://` it will return null
+    pub fn parentUri(self: *const Resource) ?[]const u8 {
+        return if (self.uri.len == self.protocol_len + "://".len)
+            null
+        else if (std.fs.path.dirname(self.path())) |dirname|
+            self.uri[0 .. self.protocol_len + "://".len + dirname.len]
+        else
+            null;
+    }
 
     fn load(allocator: std.mem.Allocator, meta_path: []const u8) !Resource {
         var file = try std.fs.cwd().openFile(meta_path, .{});
@@ -64,18 +121,26 @@ pub const Resource = struct {
         if (stats.size > max_buf_size) return error.MetaFileIsTooBig;
         const len = try file.readAll(&buf);
         const content = buf[0..len];
-        return try std.json.parseFromSliceLeaky(Resource, allocator, content, .{});
+        const parsed = try std.json.parseFromSlice(Resource, allocator, content, .{});
+        defer parsed.deinit();
+        return parsed.value.clone(allocator);
     }
 
     fn save(self: *const Resource, create_if_missing: bool) !void {
         var buf: [1024]u8 = undefined;
-        const meta_path = try std.fmt.bufPrint(&buf, "{s}{s}", .{ self.path, yume_meta_extension_name });
-        var file = if (create_if_missing)
-            try std.fs.cwd().createFile(meta_path, .{})
-        else
-            try std.fs.cwd().openFile(meta_path, .{ .mode = .write_only });
-        defer file.close();
+        const meta_path = try self.bufMetaPath(&buf);
+        var file = f: {
+            if (create_if_missing) {
+                break :f try std.fs.cwd().createFile(meta_path, .{ .truncate = true });
+            } else {
+                const file = try std.fs.cwd().openFile(meta_path, .{ .mode = .write_only });
+                try file.seekTo(0);
+                try file.setEndPos(0);
+                break :f file;
+            }
+        };
         try std.json.stringify(self, .{ .whitespace = .indent_4 }, file.writer());
+        defer file.close();
     }
 
     // when there is no diff it will return null
@@ -96,12 +161,13 @@ pub const Resource = struct {
         return .{
             .id = self.id,
             .type = self.type,
-            .path = try allocator.dupeZ(u8, self.path),
+            .uri = try allocator.dupeZ(u8, self.uri),
+            .protocol_len = self.protocol_len,
         };
     }
 
     pub fn deinit(self: *Resource, allocator: std.mem.Allocator) void {
-        allocator.free(self.path);
+        allocator.free(self.uri);
     }
 };
 
@@ -261,9 +327,17 @@ pub const ResourceNode = struct {
         };
     }
 
-    fn deinit(self: *ResourceNode) void {
+    fn deinit(self: *ResourceNode, recursive: bool) void {
         self.node.deinit(self.children.allocator);
-        self.children.deinit();
+        {
+            var iter = self.children.iterator();
+            if (recursive) {
+                while (iter.next()) |it| {
+                    it.value_ptr.deinit(true);
+                }
+            }
+            self.children.deinit();
+        }
     }
 
     pub fn dfs(self: *ResourceNode, allocator: std.mem.Allocator, comptime order: enum { pre, post }) !switch (order) {
@@ -330,6 +404,8 @@ pub fn init(allocator: std.mem.Allocator) !void {
         .watcher = if (Watch.supported_platform) try Watch.init(allocator, ".") else null,
     };
 
+    errdefer deinit() catch {};
+
     {
         try register(.{ .urn = "3e21192b-6c22-4a4f-98ca-a4a43f675986", .path = "materials/default.mat", .category = "builtin" });
         try register(.{ .urn = "e732bb0c-19bb-492b-a79d-24fde85964d2", .path = "materials/none.mat", .category = "builtin" });
@@ -342,7 +418,6 @@ pub fn init(allocator: std.mem.Allocator) !void {
         try register(.{ .urn = "6d4f3849-e3d7-4cb0-b593-095a9afafb99", .path = "suzanne.obj", .category = "builtin" });
         try register(.{ .urn = "23400ade-52d7-416b-9679-884a49de1722", .path = "cube.obj", .category = "builtin" });
         try register(.{ .urn = "ab7151f0-1f77-4ae8-99ad-17695c6ab9de", .path = "sphere.obj", .category = "builtin" });
-        try register(.{ .urn = "ac03092a-60d1-43d4-a4df-4c691aafae7b", .path = "bunny.obj", .category = "builtin" });
     }
 
     {
@@ -419,7 +494,7 @@ pub fn deinit() !void {
     {
         var it = self.resources.iterator();
         while (it.next()) |kv| {
-            self.allocator.free(kv.value_ptr.path);
+            kv.value_ptr.deinit(self.allocator);
         }
     }
     self.resources.deinit();
@@ -429,7 +504,7 @@ pub fn deinit() !void {
         defer iter.deinit();
         while (try iter.next()) |res| {
             if (res.key_ptr) |k| self.allocator.free(k.*);
-            res.value_ptr.deinit();
+            res.value_ptr.deinit(false);
         }
     }
 }
@@ -451,6 +526,10 @@ pub fn getResource(allocator: std.mem.Allocator, id: Uuid) !?Resource {
     }
 }
 
+fn getResourcePtr(id: Uuid) ?*Resource {
+    return instance().resources.getPtr(id);
+}
+
 pub fn getResourceId(uri: []const u8) !Uuid {
     const self = instance();
     if (self.resources_index.get(uri)) |id| {
@@ -461,7 +540,23 @@ pub fn getResourceId(uri: []const u8) !Uuid {
 
 pub fn getResourcePath(id: Uuid) ![:0]const u8 {
     if (instance().resources.get(id)) |r| {
-        return r.path;
+        return r.path();
+    } else {
+        return error.ResourceNotFound;
+    }
+}
+
+pub fn bufResourceFullpath(id: Uuid, buf: []u8) ![:0]const u8 {
+    if (instance().resources.get(id)) |r| {
+        return r.bufFullpath(buf);
+    } else {
+        return error.ResourceNotFound;
+    }
+}
+
+pub fn getResourceFullpath(id: Uuid) ![:0]const u8 {
+    if (instance().resources.get(id)) |r| {
+        return r.path();
     } else {
         return error.ResourceNotFound;
     }
@@ -486,16 +581,13 @@ pub fn findResourceNode(path: []const u8) !?*ResourceNode {
 
 pub fn findResourceNodeByUri(uri: []const u8) !?*ResourceNode {
     const self = instance();
-    if (uri.len == 1 and uri[0] == '/') {
-        return &self.resource_tree;
-    }
     var sfa = std.heap.stackFallback(2048, self.allocator);
     const allocator = sfa.get();
 
     const path = try parseUri(allocator, uri);
     defer allocator.free(path);
 
-    return self.resource_tree.find(path);
+    return findResourceNode(path);
 }
 
 // new path can be either relative to the root of the project or an absolute one
@@ -505,7 +597,8 @@ pub fn move(id: Uuid, new_path: []const u8) !*ResourceNode {
     if (try utils.pathExists(new_path)) {
         return error.DestinationAlreadyExists;
     }
-    const old_path = try getResourcePath(id);
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const old_path = try bufResourceFullpath(id, &buf);
     const old_dir = try std.fs.cwd().openDir(try std.fs.path.dirname(old_path));
     defer old_dir.close();
     const new_dir = try std.fs.cwd().openDir(try std.fs.path.dirname(new_path));
@@ -519,8 +612,11 @@ pub fn move(id: Uuid, new_path: []const u8) !*ResourceNode {
 }
 
 pub fn readAssetAlloc(allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) ![]u8 {
-    log.debug("readAssetAlloc ({s}) :: {s}\n", .{ id.urn(), try getResourcePath(id) });
-    var file = std.fs.cwd().openFile(try getResourcePath(id), .{}) catch return error.FailedToOpenResource;
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const resource = getResourcePtr(id) orelse return error.ResourceNotFound;
+    const fullpath = resource.bufLoadPath(&buf) catch return error.FailedToOpenResource;
+    log.debug("readAssetAlloc ({s}) :: {s}\n", .{ id.urn(), fullpath });
+    var file = std.fs.cwd().openFile(fullpath, .{}) catch return error.FailedToOpenResource;
     defer file.close();
     return file.readToEndAlloc(allocator, max_bytes) catch return error.FailedToReadResource;
 }
@@ -551,14 +647,14 @@ fn registerFromMeta(opts: struct {
         meta.id = Uuid.new();
     }
 
-    if (!std.mem.eql(u8, meta.path, opts.path)) {
-        self.allocator.free(meta.path);
-        meta.path = try self.allocator.dupeZ(u8, opts.path);
+    if (!std.mem.eql(u8, meta.path(), opts.path)) {
+        self.allocator.free(meta.uri);
+        meta.uri = try std.fmt.allocPrintZ(self.allocator, "{s}://{s}", .{ opts.category, opts.path });
     }
 
     try register(.{
         .urn = &meta.id.urn(),
-        .path = meta.path,
+        .path = meta.path(),
         .type = meta.type,
         .category = opts.category,
         .ensure_meta = false,
@@ -582,9 +678,10 @@ pub fn register(opts: struct {
         try std.fs.path.joinZ(self.allocator, &[_][]const u8{ editor_root, "assets", opts.category, opts.path })
     else
         try self.allocator.dupeZ(u8, opts.path);
-    errdefer self.allocator.free(path);
+    defer self.allocator.free(path);
 
     if (!try utils.pathExists(path)) {
+        log.err("Resource not found: {s}", .{path});
         return error.FileNotFound;
     }
     var uri: []const u8 = try std.fmt.allocPrint(self.allocator, "{s}://{s}", .{ opts.category, opts.path });
@@ -593,7 +690,8 @@ pub fn register(opts: struct {
         self.allocator.free(uri);
         uri = index_entry.key_ptr.*;
         if (self.resources.fetchRemove(index_entry.value_ptr.*)) |it| {
-            self.allocator.free(it.value.path);
+            var val = it.value;
+            val.deinit(self.allocator);
         }
 
         log.warn("Duplicate resource being registered to the Assets Database, Replacing the old asset. {s}:{s}", .{ index_entry.value_ptr.urn(), uri });
@@ -607,7 +705,8 @@ pub fn register(opts: struct {
     std.debug.assert(!res_ptr.found_existing);
     res_ptr.value_ptr.* = Resource{
         .id = id,
-        .path = path,
+        .uri = try self.allocator.dupeZ(u8, uri),
+        .protocol_len = opts.category.len,
         .type = opts.type orelse Resource.Type.fromExt(std.fs.path.extension(path)),
     };
     res_node.value.* = ResourceNode.init(self.allocator, .{ .resource = id });
@@ -623,13 +722,39 @@ fn registerBuiltinShader(urn: []const u8, path: []const u8) !void {
     defer self.allocator.free(editor_root);
     const pathspv = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ path[0 .. path.len - ".glsl".len], "spv" });
     defer self.allocator.free(pathspv);
+    const uri = try std.fmt.allocPrint(self.allocator, "builtin-shaders://{s}", .{path});
     try self.resources.put(id, Resource{
         .id = id,
-        .path = try std.fs.path.joinZ(self.allocator, &[_][]const u8{ editor_root, "shaders", pathspv }),
+        .uri = try self.allocator.dupeZ(u8, uri),
+        .protocol_len = "builtin-shaders".len,
         .type = .shader,
     });
-    const uri = try std.fmt.allocPrint(self.allocator, "builtin://{s}", .{path});
     try self.resources_index.put(uri, id);
+}
+
+// if resource isn't a project asset this function has undefined behavior.
+// builtin resources aren't meant to be unregistered
+fn unregister(id: Uuid) !void {
+    var self = instance();
+    const res_ptr = getResourcePtr(id) orelse return error.ResourceNotFound;
+    std.log.debug("{s}", .{res_ptr.path()});
+
+    const parent_uri = res_ptr.parentUri() orelse res_ptr.protocolUri();
+
+    var parent = try findResourceNodeByUri(parent_uri) orelse return error.UnexpectedError;
+
+    const index_kv = self.resources_index.fetchRemove(res_ptr.uri) orelse return error.IllegalUnregisterOperation;
+    self.allocator.free(index_kv.key);
+
+    var rnode = parent.children.fetchOrderedRemove(std.fs.path.basename(res_ptr.path())) orelse
+        return error.UnexpectedError;
+
+    self.allocator.free(rnode.key);
+    rnode.value.deinit(true);
+
+    var it = self.resources.fetchRemove(id) orelse return error.UnexpectedError;
+
+    it.value.deinit(self.allocator);
 }
 
 pub fn indexCwd() !void {
@@ -767,22 +892,25 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                 const uri = try std.fmt.allocPrint(self.allocator, "assets://{s}", .{baseext.base});
                 defer self.allocator.free(uri);
                 if (resourceExistsByUri(uri)) {
+                    // if the resource already exists, recreate the meta from memory
                     const res_id = try getResourceId(uri);
                     var res = try getResource(self.allocator, res_id);
                     defer res.?.deinit(self.allocator);
                     try res.?.save(true);
                 } else if (try utils.pathExists(baseext.base)) {
-                    try registerFromMeta(.{ .path = baseext.base, .update_uuid_if_exists = true });
+                    // if a resource file for the removed meta exists, but not registered, register it without meta
+                    try register(.{ .urn = &Uuid.new().urn(), .path = baseext.base });
                 } else {
-                    log.err("Seen a meta file \"{s}\" without the actual resource, removing the meta file.", .{path});
-                    try std.fs.cwd().deleteFile(path);
+                    // do nothing if removed meta file has no resource associated with it
                 }
-            } else { // seen new resource file
+            } else { // removing a resource
                 const maybe_meta = try std.fmt.allocPrint(allocator, "{s}{s}", .{ path, yume_meta_extension_name });
+                const uri = try std.fmt.allocPrint(self.allocator, "assets://{s}", .{path});
+                defer self.allocator.free(uri);
+                const res_id = try getResourceId(uri);
+                try unregister(res_id);
                 if (try utils.pathExists(maybe_meta)) {
-                    try registerFromMeta(.{ .path = path, .update_uuid_if_exists = true });
-                } else {
-                    try register(.{ .urn = &Uuid.new().urn(), .path = path });
+                    try std.fs.cwd().deleteFile(maybe_meta);
                 }
             }
         },
@@ -791,20 +919,19 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
     }
 }
 
-pub fn syncMeta(id: Uuid, bias: enum { memory, disk }) !void {
+fn syncMeta(id: Uuid, bias: enum { memory, disk }) !void {
     const self = instance();
     var buf: [1024]u8 = undefined;
 
     var in_mem = (try getResource(self.allocator, id)).?;
     defer in_mem.deinit(self.allocator);
 
-    const meta_path = try std.fmt.bufPrint(&buf, "{s}{s}", .{ in_mem.path, yume_meta_extension_name });
+    const meta_path = try in_mem.bufMetaPath(&buf);
 
     var on_disk = try Resource.load(self.allocator, meta_path);
     defer on_disk.deinit(self.allocator);
 
-    const uri: []const u8 = try std.fmt.allocPrint(self.allocator, "assets://{s}", .{in_mem.path});
-    defer self.allocator.free(uri);
+    const uri: []const u8 = in_mem.uri;
 
     const merge_result = try Resource.merge(self.allocator, &in_mem, &on_disk, if (bias == .memory) .lhs else .rhs);
     if (merge_result) |merged| {

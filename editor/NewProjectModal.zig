@@ -189,7 +189,8 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
         project.default_scene,
         Resources.Resource{
             .id = project.default_scene,
-            .path = try allocator.dupeZ(u8, "scenes/Default.scene"),
+            .uri = try allocator.dupeZ(u8, "assets://scenes/Default.scene"),
+            .protocol_len = "assets".len,
             .type = .scene,
         },
     );
@@ -197,7 +198,8 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
         project_id,
         Resources.Resource{
             .id = project_id,
-            .path = try allocator.dupeZ(u8, "yume.json"),
+            .uri = try allocator.dupeZ(u8, "assets://yume.json"),
+            .protocol_len = "assets".len,
             .type = .project,
         },
     );
@@ -222,7 +224,7 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
     {
         var iter = resources.valueIterator();
         while (iter.next()) |it| {
-            const filename = try std.fmt.allocPrint(allocator, "{s}/{s}{s}", .{ fullpath, it.path, Resources.yume_meta_extension_name });
+            const filename = try std.fmt.allocPrint(allocator, "{s}/{s}{s}", .{ fullpath, it.path(), Resources.yume_meta_extension_name });
 
             const content = try std.json.stringifyAlloc(allocator, it.*, .{ .whitespace = .indent_4 });
             var file = try std.fs.cwd().createFile(filename, .{});

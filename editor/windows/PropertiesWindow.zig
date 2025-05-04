@@ -238,7 +238,7 @@ fn drawResourceProperties(self: *Self, resource_id: Uuid) !void {
         return;
     };
 
-    c.ImGui_Text(try std.fmt.allocPrintZ(allocator, "{s}", .{std.fs.path.basename(resource.path)}));
+    c.ImGui_Text(try std.fmt.allocPrintZ(allocator, "{s}", .{std.fs.path.basename(resource.path())}));
     c.ImGui_Separator();
 
     for (0..2) |_| c.ImGui_Spacing();

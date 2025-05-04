@@ -11,7 +11,7 @@ const Resources = @import("Resources.zig");
 const log_harness = @import("logs_harness.zig");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
     defer if (gpa.deinit() == .leak) {
         @panic("Leaked memory");
     };

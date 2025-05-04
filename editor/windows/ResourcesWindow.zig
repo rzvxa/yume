@@ -263,7 +263,8 @@ fn drawItem(
         .double_click => {
             switch (item.res.node) {
                 .resource => |r| {
-                    try utils.tryOpenWithOsDefaultApplication(self.allocator, try Resources.getResourcePath(r));
+                    var buf: [std.fs.max_path_bytes]u8 = undefined;
+                    try utils.tryOpenWithOsDefaultApplication(self.allocator, try Resources.bufResourceFullpath(r, &buf));
                 },
                 .directory => |d| try self.setExplorerPath(d),
             }

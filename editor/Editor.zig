@@ -310,9 +310,9 @@ pub fn sanitizeSelection(self: *Self, sel: *Selection) void {
             sel.* = .{ .none = {} };
         },
         .resource => |it| {
-            _ = Resources.getResourcePath(it) catch {
+            if (!Resources.resourceExists(it)) {
                 sel.* = .{ .none = {} };
-            };
+            }
         },
         .many => |items| {
             var tail: usize = 0;
@@ -365,7 +365,11 @@ pub fn draw(self: *Self) !void {
                 if (self.ctx.scene_handle) |hndl| {
                     const scene = self.ctx.snapshotLiveScene() catch @panic("Faield to serialize scene");
                     defer scene.deinit();
-                    const path = Resources.getResourcePath(hndl.uuid) catch @panic("Scene not found!");
+                    var resource_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                    const path = Resources.bufResourceFullpath(
+                        hndl.uuid,
+                        &resource_path_buf,
+                    ) catch @panic("Scene not found!");
                     const json = std.json.stringifyAlloc(self.ctx.allocator, scene, .{ .whitespace = .indent_4 }) catch @panic("Failed to serialize the scene");
                     defer self.ctx.allocator.free(json);
                     log.info("saving scene \"{s}\" to save to \"{s}\"\n", .{ hndl.uuid.urn(), path });
@@ -937,7 +941,10 @@ fn getForwardDirection(transformMatrix: Mat4) Vec3 {
 
 pub fn rootDir(allocator: std.mem.Allocator) ![]const u8 {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const exe_path = try std.fs.selfExeDirPath(&buf);
-    const dirname = std.fs.path.dirname(exe_path) orelse return error.InvalidPath;
-    return allocator.dupe(u8, dirname);
+    return allocator.dupe(u8, try bufRootDir(&buf));
+}
+
+pub fn bufRootDir(buf: []u8) ![]const u8 {
+    const exe_path = try std.fs.selfExeDirPath(buf);
+    return std.fs.path.dirname(exe_path) orelse return error.InvalidPath;
 }
