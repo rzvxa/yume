@@ -28,16 +28,16 @@ pub const Resource = struct {
         png,
 
         pub fn fromExt(ext: []const u8) Type {
-            const eql = std.mem.eql;
-            return if (eql(u8, ext, ".scene"))
+            const seql = std.mem.eql;
+            return if (seql(u8, ext, ".scene"))
                 .scene
-            else if (eql(u8, ext, ".mat"))
+            else if (seql(u8, ext, ".mat"))
                 .mat
-            else if (eql(u8, ext, ".obj"))
+            else if (seql(u8, ext, ".obj"))
                 .obj
-            else if (eql(u8, ext, ".fbx"))
+            else if (seql(u8, ext, ".fbx"))
                 .fbx
-            else if (eql(u8, ext, ".png"))
+            else if (seql(u8, ext, ".png"))
                 .png
             else
                 .unknown;
@@ -121,12 +121,17 @@ pub const Resource = struct {
         if (stats.size > max_buf_size) return error.MetaFileIsTooBig;
         const len = try file.readAll(&buf);
         const content = buf[0..len];
-        const parsed = try std.json.parseFromSlice(Resource, allocator, content, .{});
+        return loadFromSlice(allocator, content);
+    }
+
+    fn loadFromSlice(allocator: std.mem.Allocator, slice: []const u8) !Resource {
+        const parsed = try std.json.parseFromSlice(Resource, allocator, slice, .{});
         defer parsed.deinit();
+        // TODO: use an explicit deserialization function to avoid leaks so this extra allocation can be removed
         return parsed.value.clone(allocator);
     }
 
-    fn save(self: *const Resource, create_if_missing: bool) !void {
+    fn save(self: *const Resource, allocator: std.mem.Allocator, create_if_missing: bool) !void {
         var buf: [1024]u8 = undefined;
         const meta_path = try self.bufMetaPath(&buf);
         var file = f: {
@@ -134,6 +139,16 @@ pub const Resource = struct {
                 break :f try std.fs.cwd().createFile(meta_path, .{ .truncate = true });
             } else {
                 const file = try std.fs.cwd().openFile(meta_path, .{ .mode = .write_only });
+                var content_buf: [max_buf_size]u8 = undefined;
+                const stats = try file.stat();
+                if (stats.size > max_buf_size) return error.MetaFileIsTooBig;
+                const len = try file.readAll(&content_buf);
+                const content = content_buf[0..len];
+                const on_disk = try loadFromSlice(allocator, content);
+                if (on_disk.eql(self)) {
+                    file.close();
+                    return;
+                }
                 try file.seekTo(0);
                 try file.setEndPos(0);
                 break :f file;
@@ -143,18 +158,14 @@ pub const Resource = struct {
         defer file.close();
     }
 
-    // when there is no diff it will return null
-    fn merge(
-        allocator: std.mem.Allocator,
+    fn eql(
         lhs: *const Resource,
         rhs: *const Resource,
-        merge_bias: enum { lhs, rhs },
-    ) !?Resource {
-        _ = allocator;
-        _ = lhs;
-        _ = rhs;
-        _ = merge_bias;
-        return null;
+    ) bool {
+        return lhs.id.eql(rhs.id) and
+            std.mem.eql(u8, lhs.uri, rhs.uri) and
+            lhs.protocol_len == rhs.protocol_len and
+            lhs.type == rhs.type;
     }
 
     pub fn clone(self: *const Resource, allocator: std.mem.Allocator) !Resource {
@@ -711,7 +722,7 @@ pub fn register(opts: struct {
     };
     res_node.value.* = ResourceNode.init(self.allocator, .{ .resource = id });
     index_entry.value_ptr.* = id;
-    res_ptr.value_ptr.save(opts.ensure_meta) catch |err| if (opts.ensure_meta) return err else {};
+    res_ptr.value_ptr.save(self.allocator, opts.ensure_meta) catch |err| if (opts.ensure_meta) return err else {};
 }
 
 // TODO: shaders should register like any other resource
@@ -764,13 +775,13 @@ pub fn indexCwd() !void {
     const allocator = arena.allocator();
     var dir = try std.fs.cwd().openDir(".", .{ .iterate = true });
     defer dir.close();
-    var iter = try dir.walk(allocator);
-    defer iter.deinit();
+    var walker = try dir.walk(allocator);
+    defer walker.deinit();
     var files = std.StringHashMap(void).init(allocator);
     defer files.deinit();
     var metas = std.StringHashMap(void).init(allocator);
     defer metas.deinit();
-    while (try iter.next()) |entry| {
+    while (try walker.next()) |entry| {
         if (entry.kind != .file) {
             continue;
         }
@@ -789,22 +800,17 @@ pub fn indexCwd() !void {
         }
     }
 
-    if (files.count() > 0) {
-        log.err("some files are not marked with meta files TODO", .{});
+    {
+        var iter = files.iterator();
+        while (iter.next()) |it| {
+            try register(.{ .urn = &Uuid.new().urn(), .path = it.key_ptr.* });
+        }
     }
 
-    if (metas.count() > 0) {
-        var buf: [256]u8 = undefined;
-        const result = try Editor.messageBox(.{
-            .title = "Notice",
-            .message = try std.fmt.bufPrintZ(
-                &buf,
-                "Found {d} meta files without the actual files, Do you want to delete them?",
-                .{metas.count()},
-            ),
-        });
-        if (result == 0) {
-            log.err("TODO", .{});
+    {
+        var iter = metas.iterator();
+        while (iter.next()) |it| {
+            try std.fs.cwd().deleteFile(it.key_ptr.*);
         }
     }
 }
@@ -844,6 +850,10 @@ pub fn update(dt: f32, ctx: *GameApp) void {
             ins.watcher_counter = 0;
             w.dispatch(Self, &struct {
                 fn f(self: *Self, event: Watch.Event) void {
+                    log.debug("resource watch event {s}({s})", .{ @tagName(event), switch (event) {
+                        .add, .remove, .modify => |s| s,
+                        .rename => |it| it.old,
+                    } });
                     Self.onWatchEvent(self, event) catch |err| log.err(
                         "watching project encountered an error {}",
                         .{err},
@@ -896,7 +906,7 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                     const res_id = try getResourceId(uri);
                     var res = try getResource(self.allocator, res_id);
                     defer res.?.deinit(self.allocator);
-                    try res.?.save(true);
+                    try res.?.save(self.allocator, true);
                 } else if (try utils.pathExists(baseext.base)) {
                     // if a resource file for the removed meta exists, but not registered, register it without meta
                     try register(.{ .urn = &Uuid.new().urn(), .path = baseext.base });
@@ -924,40 +934,44 @@ fn syncMeta(id: Uuid, bias: enum { memory, disk }) !void {
     var buf: [1024]u8 = undefined;
 
     var in_mem = (try getResource(self.allocator, id)).?;
-    defer in_mem.deinit(self.allocator);
 
     const meta_path = try in_mem.bufMetaPath(&buf);
 
-    var on_disk = try Resource.load(self.allocator, meta_path);
-    defer on_disk.deinit(self.allocator);
+    const on_disk = try Resource.load(self.allocator, meta_path);
 
     const uri: []const u8 = in_mem.uri;
 
-    const merge_result = try Resource.merge(self.allocator, &in_mem, &on_disk, if (bias == .memory) .lhs else .rhs);
-    if (merge_result) |merged| {
+    var target = if (bias == .memory) in_mem else on_disk;
+    errdefer target.deinit(self.allocator);
+    var other = if (bias == .memory) on_disk else in_mem;
+    defer other.deinit(self.allocator);
+
+    if (!target.eql(&other)) {
         const node = try findResourceNodeByUri(uri) orelse return error.InvalidSyncMetaOperation;
-        if (!merged.id.eql(in_mem.id)) {
+        if (!target.id.eql(in_mem.id)) {
             const old_id = in_mem.id;
-            if (try self.resources_index.fetchPut(try self.allocator.dupe(u8, uri), merged.id)) |old| {
+            if (try self.resources_index.fetchPut(try self.allocator.dupe(u8, uri), target.id)) |old| {
                 self.allocator.free(old.key);
             } else log.err(
                 "Invalid sync operation, Resources might be partially broken, old_id: {s}, new_id: {s}, uri: {s}",
-                .{ old_id.urn(), merged.id.urn(), uri },
+                .{ old_id.urn(), target.id.urn(), uri },
             );
             if (self.resources.fetchRemove(id)) |old| {
                 var val = old.value;
                 val.deinit(self.allocator);
             } else log.err(
                 "Invalid sync operation, Resources might be partially broken, old_id: {s}, new_id: {s}, uri: {s}",
-                .{ old_id.urn(), merged.id.urn(), uri },
+                .{ old_id.urn(), target.id.urn(), uri },
             );
 
-            try self.resources.put(merged.id, merged);
+            try self.resources.put(target.id, target);
 
-            node.node.resource = merged.id;
+            node.node.resource = target.id;
         } else if (self.resources.getPtr(id)) |res| {
             res.deinit(self.allocator);
-            res.* = merged;
+            res.* = target;
         } else return error.InvalidSyncMetaOperation;
+    } else {
+        target.deinit(self.allocator);
     }
 }

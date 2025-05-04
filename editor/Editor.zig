@@ -215,7 +215,13 @@ pub fn init(ctx: *GameApp) *Self {
 
         if (EditorDatabase.storage().last_open_scene) |los| {
             ctx.loadScene(los) catch |e| {
-                log.err("Failed to load previously loaded project {s} {?}\n", .{ lop, e });
+                log.err("Failed to load previously loaded scene {s} {?}\n", .{ lop, e });
+                if (Project.current()) |proj| {
+                    EditorDatabase.storage().last_open_scene = proj.default_scene;
+                    ctx.loadScene(proj.default_scene) catch |e2| {
+                        log.err("Failed to load project's default scene {s} {?}\n", .{ lop, e2 });
+                    };
+                }
             };
         }
     }
