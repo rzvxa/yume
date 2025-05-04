@@ -138,7 +138,8 @@ pub const Resource = struct {
             if (create_if_missing) {
                 break :f try std.fs.cwd().createFile(meta_path, .{ .truncate = true });
             } else {
-                const file = try std.fs.cwd().openFile(meta_path, .{ .mode = .write_only });
+                const file = try std.fs.cwd().openFile(meta_path, .{ .mode = .read_write });
+                errdefer file.close();
                 var content_buf: [max_buf_size]u8 = undefined;
                 const stats = try file.stat();
                 if (stats.size > max_buf_size) return error.MetaFileIsTooBig;
@@ -201,7 +202,7 @@ watcher_counter: f32 = 0,
 pub const ResourceNode = struct {
     pub const Node = union(enum) {
         resource: Uuid,
-        directory: [:0]const u8,
+        directory: [:0]u8,
 
         pub fn path(self: *const Node) ![:0]const u8 {
             return switch (self.*) {
@@ -654,13 +655,24 @@ fn registerFromMeta(opts: struct {
     );
     defer meta.deinit(self.allocator);
 
-    if (opts.update_uuid_if_exists and resourceExists(meta.id)) {
-        meta.id = Uuid.new();
-    }
+    const exists = resourceExists(meta.id);
 
     if (!std.mem.eql(u8, meta.path(), opts.path)) {
+        log.debug("ipdating meta path? {s} == {s}", .{ meta.path(), opts.path });
+        if (exists and !try utils.pathExists(meta.path())) { // it might be a moved resource
+            log.debug("already loaded", .{});
+            const res_ptr = getResourcePtr(meta.id).?;
+            self.allocator.free(res_ptr.uri);
+            res_ptr.uri = try std.fmt.allocPrintZ(self.allocator, "{s}://{s}", .{ opts.category, opts.path });
+            return;
+        }
         self.allocator.free(meta.uri);
         meta.uri = try std.fmt.allocPrintZ(self.allocator, "{s}://{s}", .{ opts.category, opts.path });
+    }
+    log.debug("ipdating meta path? {s} uri {s}", .{ meta.path(), meta.uri });
+
+    if (opts.update_uuid_if_exists and exists) {
+        meta.id = Uuid.new();
     }
 
     try register(.{
@@ -722,7 +734,7 @@ pub fn register(opts: struct {
     };
     res_node.value.* = ResourceNode.init(self.allocator, .{ .resource = id });
     index_entry.value_ptr.* = id;
-    res_ptr.value_ptr.save(self.allocator, opts.ensure_meta) catch |err| if (opts.ensure_meta) return err else {};
+    res_ptr.value_ptr.save(self.allocator, opts.ensure_meta) catch |err| if (opts.ensure_meta) return err else log.warn("something went wrong while saving the resource's meta {}", .{err});
 }
 
 // TODO: shaders should register like any other resource
@@ -754,7 +766,10 @@ fn unregister(id: Uuid) !void {
 
     var parent = try findResourceNodeByUri(parent_uri) orelse return error.UnexpectedError;
 
-    const index_kv = self.resources_index.fetchRemove(res_ptr.uri) orelse return error.IllegalUnregisterOperation;
+    const index_kv = self.resources_index.fetchRemove(res_ptr.uri) orelse {
+        log.debug("Failed to unregister uri: {s}", .{res_ptr.uri});
+        return error.IllegalUnregisterOperation;
+    };
     self.allocator.free(index_kv.key);
 
     var rnode = parent.children.fetchOrderedRemove(std.fs.path.basename(res_ptr.path())) orelse
@@ -782,21 +797,35 @@ pub fn indexCwd() !void {
     var metas = std.StringHashMap(void).init(allocator);
     defer metas.deinit();
     while (try walker.next()) |entry| {
-        if (entry.kind != .file) {
-            continue;
-        }
-        const normalized = utils.normalizePathSep(try allocator.dupe(u8, entry.path));
-        const baseext = utils.baseExtensionSplit(normalized);
-        if (std.mem.eql(u8, baseext.ext, yume_meta_extension_name)) {
-            if (files.fetchRemove(baseext.base)) |_| {
-                try registerFromMeta(.{ .path = baseext.base });
-            } else {
-                try metas.put(baseext.base, {});
-            }
-        } else if (metas.fetchRemove(normalized)) |_| {
-            try registerFromMeta(.{ .path = baseext.base });
-        } else {
-            try files.put(normalized, {});
+        switch (entry.kind) {
+            .file => {
+                const normalized = utils.normalizePathSep(try allocator.dupe(u8, entry.path));
+                const baseext = utils.baseExtensionSplit(normalized);
+                if (std.mem.eql(u8, baseext.ext, yume_meta_extension_name)) {
+                    if (files.fetchRemove(baseext.base)) |_| {
+                        try registerFromMeta(.{ .path = baseext.base });
+                    } else {
+                        try metas.put(baseext.base, {});
+                    }
+                } else if (metas.fetchRemove(normalized)) |_| {
+                    try registerFromMeta(.{ .path = baseext.base });
+                } else {
+                    try files.put(normalized, {});
+                }
+            },
+            .directory => { // TODO: perhaps directories should have a register method as well?
+                var dir_node = ResourceNode.init(self.allocator, .{
+                    .directory = try std.fmt.allocPrintZ(self.allocator, "/assets/{s}", .{entry.path}),
+                });
+                _ = utils.normalizePathSepZ(dir_node.node.directory);
+                const gop = try self.resource_tree.getOrPut(dir_node.node.directory);
+                if (gop.found_existing) {
+                    dir_node.deinit(false);
+                } else {
+                    gop.value.* = dir_node;
+                }
+            },
+            else => {},
         }
     }
 
@@ -868,7 +897,8 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
     var sfa = std.heap.stackFallback(std.fs.max_path_bytes, self.allocator);
     const allocator = sfa.get();
     switch (event) {
-        .add => |path| {
+        .add => |p| {
+            const path = utils.normalizePathSep(p);
             const baseext = utils.baseExtensionSplit(path);
             if (std.mem.eql(u8, baseext.ext, yume_meta_extension_name)) { // seen new meta
                 const uri = try std.fmt.allocPrint(self.allocator, "assets://{s}", .{baseext.base});
@@ -896,7 +926,8 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                 }
             }
         },
-        .remove => |path| {
+        .remove => |p| {
+            const path = utils.normalizePathSep(p);
             const baseext = utils.baseExtensionSplit(path);
             if (std.mem.eql(u8, baseext.ext, yume_meta_extension_name)) { // removing a meta
                 const uri = try std.fmt.allocPrint(self.allocator, "assets://{s}", .{baseext.base});
@@ -910,6 +941,11 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                 } else if (try utils.pathExists(baseext.base)) {
                     // if a resource file for the removed meta exists, but not registered, register it without meta
                     try register(.{ .urn = &Uuid.new().urn(), .path = baseext.base });
+                } else if (try findResourceNode(baseext.base)) |res| {
+                    switch (res.node) {
+                        .resource => |id| try unregister(id),
+                        else => {},
+                    }
                 } else {
                     // do nothing if removed meta file has no resource associated with it
                 }

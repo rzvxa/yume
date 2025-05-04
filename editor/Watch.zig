@@ -10,7 +10,7 @@ pub fn WatchCallback(comptime CTX: type) type {
     return *const fn (*CTX, Event) void;
 }
 pub const Event = union(enum) {
-    const Path = []const u8;
+    const Path = []u8;
 
     add: Path,
     remove: Path,

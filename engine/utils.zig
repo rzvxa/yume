@@ -174,3 +174,19 @@ pub fn normalizePathSep(path: []u8) []u8 {
     }
     return path;
 }
+
+pub fn normalizePathSepZ(path: [*:0]u8) [*:0]u8 {
+    if (builtin.os.tag == .windows) {
+        var i: usize = 0;
+        while (true) : (i += 1) {
+            if (path[i] == 0) {
+                break;
+            }
+
+            if (path[i] == '\\') {
+                path[i] = '/';
+            }
+        }
+    }
+    return path;
+}
