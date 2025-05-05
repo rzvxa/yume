@@ -16,6 +16,7 @@ allocator: std.mem.Allocator,
 explorer_path: [:0]const u8,
 selected_file: ?ResourceNode.Node = null,
 renaming_file: ?ResourceNode.Node = null,
+entering_renaming: bool = false,
 is_focused: bool = false,
 sort_by_name: bool = true,
 renaming_str: imutils.ImString,
@@ -150,10 +151,11 @@ pub fn draw(self: *Self) !void {
 
 fn drawItem(
     self: *Self,
-    item: OrderedItem,
+    item_const: OrderedItem,
     item_sz: f32,
     style: c.ImGuiStyle,
 ) !void {
+    var item = item_const;
     const is_root = std.mem.eql(u8, self.explorer_path, "/");
     const is_dir = item.res.node == .directory;
     const resource_type: Resources.Resource.Type = blk: {
@@ -202,8 +204,8 @@ fn drawItem(
             c.ImGuiCol_Button,
             if (self.is_focused) col_selected_active else col_selected_inactive,
         );
+    c.ImGui_SetNextItemAllowOverlap();
     const clicked = c.ImGui_ButtonEx("##name", btn_size);
-    c.ImGui_SetItemAllowOverlap();
     if (is_selected)
         c.ImGui_PopStyleColor();
     var result: ItemResult = .none;
@@ -220,7 +222,10 @@ fn drawItem(
     const text_y = pos.y + item_sz;
     if (is_renaming) {
         c.ImGui_SetCursorPosY(text_y);
-        c.ImGui_SetKeyboardFocusHere();
+        if (self.entering_renaming) {
+            c.ImGui_SetKeyboardFocusHere();
+            self.entering_renaming = false;
+        }
         _ = c.ImGui_InputTextWithHintAndSizeEx(
             "##renaming-input",
             null,
@@ -234,16 +239,20 @@ fn drawItem(
         if (c.ImGui_IsItemDeactivated()) {
             if (c.ImGui_IsItemDeactivatedAfterEdit() and !c.ImGui_IsKeyPressed(c.ImGuiKey_Escape)) {
                 std.log.info("new name: {s}", .{self.renaming_str.buf});
-                // const old_path = try item.res.node.path();
-                // var new_name_buf: [256]u8 = undefined;
-                // const new_path = std.fmt.bufPrint(&new_name_buf, "{s}/{s}{s}", .{
-                //     std.fs.path.dirname(old_path),
-                //     self.renaming_str.span(),
-                //     Resources.yume_meta_extension_name,
-                // });
-                // item.res = try Resources.move(old_path, new_path);
+                const old_path = try item.res.node.path();
+                var new_name_buf: [256]u8 = undefined;
+                const new_path = try std.fmt.bufPrint(&new_name_buf, "{s}/{s}{s}", .{
+                    std.fs.path.dirname(old_path).?,
+                    self.renaming_str.span(),
+                    std.fs.path.extension(old_path),
+                });
+                if (Resources.move(old_path, new_path)) |it| {
+                    item.res = it;
+                } else |err| {
+                    std.log.err("failed to rename from \"{s}\" to \"{s}\", err: {}", .{ old_path, new_path, err });
+                }
             }
-            try self.setRenaming(null);
+            _ = try self.setRenaming(null);
         }
     } else {
         const text_area_x = pos.x + ((btn_size.x - wrap_width) / 2) + ((wrap_width - text_size.x) / 2);
@@ -283,12 +292,14 @@ fn drawItem(
 
 fn setExplorerPath(self: *Self, path: []const u8) !void {
     const old_mem = self.explorer_path;
+    _ = try self.setRenaming(null);
     self.explorer_path = try self.allocator.dupeZ(u8, path);
     self.allocator.free(old_mem);
 }
 
 fn setSelected(self: *Self, item: ?OrderedItem) !void {
     var ed = Editor.instance();
+    _ = try self.setRenaming(null);
     if (self.selected_file) |*it| {
         switch (it.*) {
             .resource => |u| _ = ed.selection.remove(.resource, u),
@@ -314,5 +325,6 @@ fn setRenaming(self: *Self, item: ?OrderedItem) !void {
     }
     if (item) |it| {
         self.renaming_file = try it.res.node.clone(self.allocator);
+        self.entering_renaming = true;
     }
 }

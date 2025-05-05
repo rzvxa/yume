@@ -145,7 +145,8 @@ pub const Resource = struct {
                 if (stats.size > max_buf_size) return error.MetaFileIsTooBig;
                 const len = try file.readAll(&content_buf);
                 const content = content_buf[0..len];
-                const on_disk = try loadFromSlice(allocator, content);
+                var on_disk = try loadFromSlice(allocator, content);
+                defer on_disk.deinit(allocator);
                 if (on_disk.eql(self)) {
                     file.close();
                     return;
@@ -419,69 +420,69 @@ pub fn init(allocator: std.mem.Allocator) !void {
     errdefer deinit() catch {};
 
     {
-        try register(.{ .urn = "3e21192b-6c22-4a4f-98ca-a4a43f675986", .path = "materials/default.mat", .category = "builtin" });
-        try register(.{ .urn = "e732bb0c-19bb-492b-a79d-24fde85964d2", .path = "materials/none.mat", .category = "builtin" });
-        try register(.{ .urn = "61de2700-0eac-4fd5-9c56-0bd5b6b9ba10", .path = "materials/pbr.mat", .category = "builtin" });
-        try register(.{ .urn = "ad4bc22b-3765-4a9d-bab7-7984e101428a", .path = "lost_empire-RGBA.png", .category = "builtin" });
-        try register(.{ .urn = "00923d64-c2ca-4d36-abbd-90b1fbde7a48", .path = "1x1.png", .category = "builtin" });
-        try register(.{ .urn = "54dff348-3f93-429a-83c0-2d29b1ae00dd", .path = "1x1b.png", .category = "builtin" });
-        try register(.{ .urn = "c4340d7a-caab-4925-965c-5ea71d8e447e", .path = "1x1h.png", .category = "builtin" });
-        try register(.{ .urn = "ac6b9d14-0a56-458a-a7cc-fd36ede79468", .path = "lost_empire.obj", .category = "builtin" });
-        try register(.{ .urn = "6d4f3849-e3d7-4cb0-b593-095a9afafb99", .path = "suzanne.obj", .category = "builtin" });
-        try register(.{ .urn = "23400ade-52d7-416b-9679-884a49de1722", .path = "cube.obj", .category = "builtin" });
-        try register(.{ .urn = "ab7151f0-1f77-4ae8-99ad-17695c6ab9de", .path = "sphere.obj", .category = "builtin" });
+        _ = try register(.{ .urn = "3e21192b-6c22-4a4f-98ca-a4a43f675986", .path = "materials/default.mat", .category = "builtin" });
+        _ = try register(.{ .urn = "e732bb0c-19bb-492b-a79d-24fde85964d2", .path = "materials/none.mat", .category = "builtin" });
+        _ = try register(.{ .urn = "61de2700-0eac-4fd5-9c56-0bd5b6b9ba10", .path = "materials/pbr.mat", .category = "builtin" });
+        _ = try register(.{ .urn = "ad4bc22b-3765-4a9d-bab7-7984e101428a", .path = "lost_empire-RGBA.png", .category = "builtin" });
+        _ = try register(.{ .urn = "00923d64-c2ca-4d36-abbd-90b1fbde7a48", .path = "1x1.png", .category = "builtin" });
+        _ = try register(.{ .urn = "54dff348-3f93-429a-83c0-2d29b1ae00dd", .path = "1x1b.png", .category = "builtin" });
+        _ = try register(.{ .urn = "c4340d7a-caab-4925-965c-5ea71d8e447e", .path = "1x1h.png", .category = "builtin" });
+        _ = try register(.{ .urn = "ac6b9d14-0a56-458a-a7cc-fd36ede79468", .path = "lost_empire.obj", .category = "builtin" });
+        _ = try register(.{ .urn = "6d4f3849-e3d7-4cb0-b593-095a9afafb99", .path = "suzanne.obj", .category = "builtin" });
+        _ = try register(.{ .urn = "23400ade-52d7-416b-9679-884a49de1722", .path = "cube.obj", .category = "builtin" });
+        _ = try register(.{ .urn = "ab7151f0-1f77-4ae8-99ad-17695c6ab9de", .path = "sphere.obj", .category = "builtin" });
     }
 
     {
-        try registerBuiltinShader("cf64bfc9-703c-43b0-9d01-c8032706872c", "tri_mesh.vert.glsl");
-        try registerBuiltinShader("79d1e1cc-607d-491c-b2e8-d1d3a44bd6a4", "pbr.frag.glsl");
-        try registerBuiltinShader("8b4db7d0-33a6-4f42-96cc-7b1d88566f27", "default_lit.frag.glsl");
-        try registerBuiltinShader("9939ab1b-d72c-4463-b039-58211f2d6531", "textured_lit.frag.glsl");
+        _ = try registerBuiltinShader("cf64bfc9-703c-43b0-9d01-c8032706872c", "tri_mesh.vert.glsl");
+        _ = try registerBuiltinShader("79d1e1cc-607d-491c-b2e8-d1d3a44bd6a4", "pbr.frag.glsl");
+        _ = try registerBuiltinShader("8b4db7d0-33a6-4f42-96cc-7b1d88566f27", "default_lit.frag.glsl");
+        _ = try registerBuiltinShader("9939ab1b-d72c-4463-b039-58211f2d6531", "textured_lit.frag.glsl");
     }
 
     {
-        try register(.{ .urn = "2d02fa29-3740-4dfc-ab04-e77539734053", .path = "icons/play.png", .category = "editor" });
-        try register(.{ .urn = "f4f6b6d6-66f8-4e8a-a575-3316b6a8a684", .path = "icons/pause.png", .category = "editor" });
-        try register(.{ .urn = "b3cd9d64-6708-4d40-9f2b-9723df7bf3b1", .path = "icons/stop.png", .category = "editor" });
-        try register(.{ .urn = "f23969d8-89cb-49cd-98fc-5ddec4955fc7", .path = "icons/fast-forward.png", .category = "editor" });
-        try register(.{ .urn = "d63f3601-bf6e-456c-bb6e-be3b7692afa9", .path = "icons/folder.png", .category = "editor" });
-        try register(.{ .urn = "a7838838-1942-46c9-83e5-49b949b70b26", .path = "icons/file.png", .category = "editor" });
-        try register(.{ .urn = "93b26cfb-5269-4c8c-9269-74b60cbff456", .path = "icons/object.png", .category = "editor" });
-        try register(.{ .urn = "ef77f971-4c34-4000-b0c4-9eab7ebafc8e", .path = "icons/move-tool.png", .category = "editor" });
-        try register(.{ .urn = "e8480d10-cb60-4831-9796-f0823761d489", .path = "icons/rotate-tool.png", .category = "editor" });
-        try register(.{ .urn = "b2c4cc39-1272-42b5-a40d-3e62d4cfbb12", .path = "icons/scale-tool.png", .category = "editor" });
-        try register(.{ .urn = "4bf6d06c-2d96-4b12-8c20-f9a03a5152e1", .path = "icons/transform-tool.png", .category = "editor" });
-        try register(.{ .urn = "eab7824b-f71c-4b90-a468-a5d91f4a3f7b", .path = "icons/close.png", .category = "editor" });
-        try register(.{ .urn = "715b644d-f9a5-4aad-9cf9-6328cc849006", .path = "icons/browse.png", .category = "editor" });
-        try register(.{ .urn = "48d0e511-cdaf-4111-8ffa-f7e31fbe9636", .path = "icons/home.png", .category = "editor" });
-        try register(.{ .urn = "55cfea70-2c07-470f-a60c-7e8269ee2497", .path = "icons/editor.png", .category = "editor" });
-        try register(.{ .urn = "dd8f5337-cf79-489e-849c-5331a044a578", .path = "icons/library.png", .category = "editor" });
+        _ = try register(.{ .urn = "2d02fa29-3740-4dfc-ab04-e77539734053", .path = "icons/play.png", .category = "editor" });
+        _ = try register(.{ .urn = "f4f6b6d6-66f8-4e8a-a575-3316b6a8a684", .path = "icons/pause.png", .category = "editor" });
+        _ = try register(.{ .urn = "b3cd9d64-6708-4d40-9f2b-9723df7bf3b1", .path = "icons/stop.png", .category = "editor" });
+        _ = try register(.{ .urn = "f23969d8-89cb-49cd-98fc-5ddec4955fc7", .path = "icons/fast-forward.png", .category = "editor" });
+        _ = try register(.{ .urn = "d63f3601-bf6e-456c-bb6e-be3b7692afa9", .path = "icons/folder.png", .category = "editor" });
+        _ = try register(.{ .urn = "a7838838-1942-46c9-83e5-49b949b70b26", .path = "icons/file.png", .category = "editor" });
+        _ = try register(.{ .urn = "93b26cfb-5269-4c8c-9269-74b60cbff456", .path = "icons/object.png", .category = "editor" });
+        _ = try register(.{ .urn = "ef77f971-4c34-4000-b0c4-9eab7ebafc8e", .path = "icons/move-tool.png", .category = "editor" });
+        _ = try register(.{ .urn = "e8480d10-cb60-4831-9796-f0823761d489", .path = "icons/rotate-tool.png", .category = "editor" });
+        _ = try register(.{ .urn = "b2c4cc39-1272-42b5-a40d-3e62d4cfbb12", .path = "icons/scale-tool.png", .category = "editor" });
+        _ = try register(.{ .urn = "4bf6d06c-2d96-4b12-8c20-f9a03a5152e1", .path = "icons/transform-tool.png", .category = "editor" });
+        _ = try register(.{ .urn = "eab7824b-f71c-4b90-a468-a5d91f4a3f7b", .path = "icons/close.png", .category = "editor" });
+        _ = try register(.{ .urn = "715b644d-f9a5-4aad-9cf9-6328cc849006", .path = "icons/browse.png", .category = "editor" });
+        _ = try register(.{ .urn = "48d0e511-cdaf-4111-8ffa-f7e31fbe9636", .path = "icons/home.png", .category = "editor" });
+        _ = try register(.{ .urn = "55cfea70-2c07-470f-a60c-7e8269ee2497", .path = "icons/editor.png", .category = "editor" });
+        _ = try register(.{ .urn = "dd8f5337-cf79-489e-849c-5331a044a578", .path = "icons/library.png", .category = "editor" });
 
-        try register(.{ .urn = "72bb403a-8624-4541-bbaa-a85668340db1", .path = "icons/camera.png", .category = "editor" });
-        try register(.{ .urn = "1e2e7db3-8b27-45b9-adf1-05e808175043", .path = "icons/mesh.png", .category = "editor" });
-        try register(.{ .urn = "849d928a-a459-4df7-97c4-49877fba782c", .path = "icons/material.png", .category = "editor" });
-        try register(.{ .urn = "e54f4382-dc55-4380-89db-0475bc02dd03", .path = "icons/point-light.png", .category = "editor" });
-        try register(.{ .urn = "e17a74c7-cb8e-4cd3-90f2-d76ee499a13e", .path = "icons/sun.png", .category = "editor" });
+        _ = try register(.{ .urn = "72bb403a-8624-4541-bbaa-a85668340db1", .path = "icons/camera.png", .category = "editor" });
+        _ = try register(.{ .urn = "1e2e7db3-8b27-45b9-adf1-05e808175043", .path = "icons/mesh.png", .category = "editor" });
+        _ = try register(.{ .urn = "849d928a-a459-4df7-97c4-49877fba782c", .path = "icons/material.png", .category = "editor" });
+        _ = try register(.{ .urn = "e54f4382-dc55-4380-89db-0475bc02dd03", .path = "icons/point-light.png", .category = "editor" });
+        _ = try register(.{ .urn = "e17a74c7-cb8e-4cd3-90f2-d76ee499a13e", .path = "icons/sun.png", .category = "editor" });
 
-        try register(.{ .urn = "d16bc474-c896-4aec-b35d-fcdfac790fbb", .path = "icons/filetypes/fbx.png", .category = "editor" });
-        try register(.{ .urn = "825643b1-6054-49a8-8ec1-fce29767e512", .path = "icons/filetypes/mat.png", .category = "editor" });
-        try register(.{ .urn = "38d6820e-c8e5-4374-9e8a-4196c5ab0802", .path = "icons/filetypes/obj.png", .category = "editor" });
-        try register(.{ .urn = "6a6ef862-387e-41f9-864f-6e764213f60b", .path = "icons/filetypes/png.png", .category = "editor" });
-        try register(.{ .urn = "88bbd334-c48e-489f-b5e7-a9c035220db5", .path = "icons/filetypes/project.png", .category = "editor" });
-        try register(.{ .urn = "8467cf1a-51fa-416f-8fd8-e5f3adc5e18c", .path = "icons/filetypes/scene.png", .category = "editor" });
-        try register(.{ .urn = "c77e42f5-0c63-4046-b99f-220e270bd7bd", .path = "icons/filetypes/shader.png", .category = "editor" });
+        _ = try register(.{ .urn = "d16bc474-c896-4aec-b35d-fcdfac790fbb", .path = "icons/filetypes/fbx.png", .category = "editor" });
+        _ = try register(.{ .urn = "825643b1-6054-49a8-8ec1-fce29767e512", .path = "icons/filetypes/mat.png", .category = "editor" });
+        _ = try register(.{ .urn = "38d6820e-c8e5-4374-9e8a-4196c5ab0802", .path = "icons/filetypes/obj.png", .category = "editor" });
+        _ = try register(.{ .urn = "6a6ef862-387e-41f9-864f-6e764213f60b", .path = "icons/filetypes/png.png", .category = "editor" });
+        _ = try register(.{ .urn = "88bbd334-c48e-489f-b5e7-a9c035220db5", .path = "icons/filetypes/project.png", .category = "editor" });
+        _ = try register(.{ .urn = "8467cf1a-51fa-416f-8fd8-e5f3adc5e18c", .path = "icons/filetypes/scene.png", .category = "editor" });
+        _ = try register(.{ .urn = "c77e42f5-0c63-4046-b99f-220e270bd7bd", .path = "icons/filetypes/shader.png", .category = "editor" });
 
-        try register(.{ .urn = "682be1c4-a465-40ed-a4f0-31a07f2b1a20", .path = "icons/error.png", .category = "editor" });
-        try register(.{ .urn = "a330bc08-999b-46df-a49b-f959a3b75b65", .path = "icons/warning.png", .category = "editor" });
-        try register(.{ .urn = "376e63cc-21e1-4d05-bab7-ab5f71cd7ad3", .path = "icons/info.png", .category = "editor" });
-        try register(.{ .urn = "7165bb42-7816-49a4-9b8b-ddb1aa1ee6a9", .path = "icons/debug.png", .category = "editor" });
+        _ = try register(.{ .urn = "682be1c4-a465-40ed-a4f0-31a07f2b1a20", .path = "icons/error.png", .category = "editor" });
+        _ = try register(.{ .urn = "a330bc08-999b-46df-a49b-f959a3b75b65", .path = "icons/warning.png", .category = "editor" });
+        _ = try register(.{ .urn = "376e63cc-21e1-4d05-bab7-ab5f71cd7ad3", .path = "icons/info.png", .category = "editor" });
+        _ = try register(.{ .urn = "7165bb42-7816-49a4-9b8b-ddb1aa1ee6a9", .path = "icons/debug.png", .category = "editor" });
 
-        try register(.{ .urn = "1884f2b3-2689-4414-b0fe-b854e582c7f4", .path = "icons/error-mono.png", .category = "editor" });
-        try register(.{ .urn = "ede4ab11-60c2-49e9-8792-22d26fc9cb50", .path = "icons/warning-mono.png", .category = "editor" });
-        try register(.{ .urn = "fc2d47e6-9777-4c80-8c52-7d49fbec5d8a", .path = "icons/info-mono.png", .category = "editor" });
-        try register(.{ .urn = "4306862e-7010-4063-8084-1cb6713ac701", .path = "icons/debug-mono.png", .category = "editor" });
+        _ = try register(.{ .urn = "1884f2b3-2689-4414-b0fe-b854e582c7f4", .path = "icons/error-mono.png", .category = "editor" });
+        _ = try register(.{ .urn = "ede4ab11-60c2-49e9-8792-22d26fc9cb50", .path = "icons/warning-mono.png", .category = "editor" });
+        _ = try register(.{ .urn = "fc2d47e6-9777-4c80-8c52-7d49fbec5d8a", .path = "icons/info-mono.png", .category = "editor" });
+        _ = try register(.{ .urn = "4306862e-7010-4063-8084-1cb6713ac701", .path = "icons/debug-mono.png", .category = "editor" });
 
-        try register(.{ .urn = "9660e8f4-6809-4d57-9507-511117128bc3", .path = "icons/yume.png", .category = "editor" });
+        _ = try register(.{ .urn = "9660e8f4-6809-4d57-9507-511117128bc3", .path = "icons/yume.png", .category = "editor" });
     }
 }
 
@@ -602,25 +603,28 @@ pub fn findResourceNodeByUri(uri: []const u8) !?*ResourceNode {
     return findResourceNode(path);
 }
 
-// new path can be either relative to the root of the project or an absolute one
-// results in the resource node getting moved and therefore invalidating the pointer,
-// it returns the new pointer to the resource
-pub fn move(id: Uuid, new_path: []const u8) !*ResourceNode {
+// both new and old paths are relative to the project's root
+pub fn move(old_path: []const u8, new_path: []const u8) !*ResourceNode {
     if (try utils.pathExists(new_path)) {
         return error.DestinationAlreadyExists;
     }
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const old_path = try bufResourceFullpath(id, &buf);
-    const old_dir = try std.fs.cwd().openDir(try std.fs.path.dirname(old_path));
+    var old_dir = try std.fs.cwd().openDir(std.fs.path.dirname(old_path) orelse ".", .{});
     defer old_dir.close();
-    const new_dir = try std.fs.cwd().openDir(try std.fs.path.dirname(new_path));
+    var new_dir = try std.fs.cwd().openDir(std.fs.path.dirname(new_path) orelse ".", .{});
     defer new_dir.close();
 
     const old_basename = std.fs.path.basename(old_path);
     const new_basename = std.fs.path.basename(new_path);
 
+    var old_meta_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const old_meta = try std.fmt.bufPrintZ(&old_meta_buf, "{s}{s}", .{ old_basename, yume_meta_extension_name });
+    var new_meta_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const new_meta = try std.fmt.bufPrintZ(&new_meta_buf, "{s}{s}", .{ new_basename, yume_meta_extension_name });
+
     try std.fs.rename(old_dir, old_basename, new_dir, new_basename);
-    @compileError("TODO");
+    try std.fs.rename(old_dir, old_meta, new_dir, new_meta);
+    const id = try registerFromMeta(.{ .path = new_path });
+    return (try findResourceNodeByUri(getResourcePtr(id).?.uri)).?;
 }
 
 pub fn readAssetAlloc(allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) ![]u8 {
@@ -645,7 +649,7 @@ fn registerFromMeta(opts: struct {
     path: []const u8,
     category: []const u8 = "assets",
     update_uuid_if_exists: bool = false,
-}) !void {
+}) !Uuid {
     var buf: [Resource.max_buf_size]u8 = undefined;
 
     const self = instance();
@@ -664,7 +668,7 @@ fn registerFromMeta(opts: struct {
             const res_ptr = getResourcePtr(meta.id).?;
             self.allocator.free(res_ptr.uri);
             res_ptr.uri = try std.fmt.allocPrintZ(self.allocator, "{s}://{s}", .{ opts.category, opts.path });
-            return;
+            return res_ptr.id;
         }
         self.allocator.free(meta.uri);
         meta.uri = try std.fmt.allocPrintZ(self.allocator, "{s}://{s}", .{ opts.category, opts.path });
@@ -675,7 +679,7 @@ fn registerFromMeta(opts: struct {
         meta.id = Uuid.new();
     }
 
-    try register(.{
+    return try register(.{
         .urn = &meta.id.urn(),
         .path = meta.path(),
         .type = meta.type,
@@ -690,7 +694,7 @@ pub fn register(opts: struct {
     type: ?Resource.Type = null,
     category: []const u8 = "assets",
     ensure_meta: bool = true,
-}) !void {
+}) !Uuid {
     const is_builtin = std.mem.eql(u8, opts.category, "builtin") or std.mem.eql(u8, opts.category, "editor");
     var self = instance();
     const id = try Uuid.fromUrnSlice(opts.urn);
@@ -735,6 +739,8 @@ pub fn register(opts: struct {
     res_node.value.* = ResourceNode.init(self.allocator, .{ .resource = id });
     index_entry.value_ptr.* = id;
     res_ptr.value_ptr.save(self.allocator, opts.ensure_meta) catch |err| if (opts.ensure_meta) return err else log.warn("something went wrong while saving the resource's meta {}", .{err});
+
+    return res_ptr.key_ptr.*;
 }
 
 // TODO: shaders should register like any other resource
@@ -803,12 +809,12 @@ pub fn indexCwd() !void {
                 const baseext = utils.baseExtensionSplit(normalized);
                 if (std.mem.eql(u8, baseext.ext, yume_meta_extension_name)) {
                     if (files.fetchRemove(baseext.base)) |_| {
-                        try registerFromMeta(.{ .path = baseext.base });
+                        _ = try registerFromMeta(.{ .path = baseext.base });
                     } else {
                         try metas.put(baseext.base, {});
                     }
                 } else if (metas.fetchRemove(normalized)) |_| {
-                    try registerFromMeta(.{ .path = baseext.base });
+                    _ = try registerFromMeta(.{ .path = baseext.base });
                 } else {
                     try files.put(normalized, {});
                 }
@@ -832,7 +838,7 @@ pub fn indexCwd() !void {
     {
         var iter = files.iterator();
         while (iter.next()) |it| {
-            try register(.{ .urn = &Uuid.new().urn(), .path = it.key_ptr.* });
+            _ = try register(.{ .urn = &Uuid.new().urn(), .path = it.key_ptr.* });
         }
     }
 
@@ -908,7 +914,7 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                     try syncMeta(res_id, .disk);
                 } else if (try utils.pathExists(baseext.base)) {
                     // if resource path exists we attempt to register it
-                    try registerFromMeta(.{ .path = baseext.base, .update_uuid_if_exists = true });
+                    _ = try registerFromMeta(.{ .path = baseext.base, .update_uuid_if_exists = true });
                 } else {
                     // orphan meta files aren't allowed
                     log.err("Seen a meta file \"{s}\" without the actual resource, removing the meta file.", .{path});
@@ -917,9 +923,9 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
             } else { // seen new resource file
                 const maybe_meta = try std.fmt.allocPrint(allocator, "{s}{s}", .{ path, yume_meta_extension_name });
                 if (try utils.pathExists(maybe_meta)) {
-                    try registerFromMeta(.{ .path = path, .update_uuid_if_exists = true });
+                    _ = try registerFromMeta(.{ .path = path, .update_uuid_if_exists = true });
                 } else {
-                    try register(.{
+                    _ = try register(.{
                         .urn = &Uuid.new().urn(),
                         .path = path,
                     });
@@ -940,7 +946,7 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                     try res.?.save(self.allocator, true);
                 } else if (try utils.pathExists(baseext.base)) {
                     // if a resource file for the removed meta exists, but not registered, register it without meta
-                    try register(.{ .urn = &Uuid.new().urn(), .path = baseext.base });
+                    _ = try register(.{ .urn = &Uuid.new().urn(), .path = baseext.base });
                 } else if (try findResourceNode(baseext.base)) |res| {
                     switch (res.node) {
                         .resource => |id| try unregister(id),
