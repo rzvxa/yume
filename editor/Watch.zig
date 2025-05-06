@@ -110,7 +110,9 @@ const Impl = switch (builtin.os.tag) {
                     &buffer,
                     buffer.len,
                     w.TRUE, // watch subdirectories
-                    w.FILE_NOTIFY_CHANGE_FILE_NAME | w.FILE_NOTIFY_CHANGE_LAST_WRITE,
+                    w.FILE_NOTIFY_CHANGE_FILE_NAME |
+                        w.FILE_NOTIFY_CHANGE_DIR_NAME |
+                        w.FILE_NOTIFY_CHANGE_LAST_WRITE,
                     null, // lpBytesReturned is not used in overlapped mode.
                     &impl.overlapped,
                     null, // no completion routine.

@@ -13,7 +13,6 @@ const ResourceNode = @import("../Resources.zig").ResourceNode;
 const Self = @This();
 
 allocator: std.mem.Allocator,
-explorer_path: [:0]const u8,
 explorer_uri: ?Resources.Uri,
 selected_file: ?ResourceNode.Node = null,
 renaming_file: ?ResourceNode.Node = null,
@@ -25,8 +24,7 @@ renaming_str: imutils.ImString,
 pub fn init(allocator: std.mem.Allocator) !Self {
     return .{
         .allocator = allocator,
-        .explorer_path = try allocator.dupeZ(u8, "/assets"),
-        .explorer_uri = null,
+        .explorer_uri = try Resources.Uri.parse(allocator, "assets://"),
         .renaming_str = try imutils.ImString.init(allocator),
     };
 }
@@ -41,7 +39,6 @@ pub fn deinit(self: *Self) void {
     }
 
     self.renaming_str.deinit();
-    self.allocator.free(self.explorer_path);
     if (self.explorer_uri) |*uri| uri.deinit(self.allocator);
 }
 
@@ -275,14 +272,25 @@ fn drawItem(
     }
     c.ImGui_PopID();
 
+    if (result == .none) {
+        if (is_selected and c.ImGui_IsKeyPressed(c.ImGuiKey_F2)) {
+            result = .name_double_click;
+        }
+    }
+
     switch (result) {
         .none => {},
         .click => try self.setSelected(item),
         .double_click => {
             switch (item.res.node) {
                 .resource => |r| {
-                    var buf: [std.fs.max_path_bytes]u8 = undefined;
-                    try utils.tryOpenWithOsDefaultApplication(self.allocator, try Resources.bufResourceFullpath(r, &buf));
+                    switch (resource_type) {
+                        .scene => try Editor.instance().openScene(r),
+                        else => {
+                            var buf: [std.fs.max_path_bytes]u8 = undefined;
+                            try utils.tryOpenWithOsDefaultApplication(self.allocator, try Resources.bufResourceFullpath(r, &buf));
+                        },
+                    }
                 },
                 .directory => |d| try self.setExplorerPath(d.span()),
                 .root => try self.setExplorerPath(null),

@@ -214,11 +214,11 @@ pub fn init(ctx: *GameApp) *Self {
         };
 
         if (EditorDatabase.storage().last_open_scene) |los| {
-            ctx.loadScene(los) catch |e| {
+            singleton.openScene(los) catch |e| {
                 log.err("Failed to load previously loaded scene {s} {?}\n", .{ lop, e });
                 if (Project.current()) |proj| {
                     EditorDatabase.storage().last_open_scene = proj.default_scene;
-                    ctx.loadScene(proj.default_scene) catch |e2| {
+                    singleton.openScene(proj.default_scene) catch |e2| {
                         log.err("Failed to load project's default scene {s} {?}\n", .{ lop, e2 });
                     };
                 }
@@ -670,6 +670,11 @@ pub fn newProject(self: *Self) void {
 
 pub fn openProject(self: *Self) void {
     self.open_project_modal.open();
+}
+
+pub fn openScene(self: *Self, scene_id: Uuid) !void {
+    try self.ctx.loadScene(scene_id);
+    EditorDatabase.storage().last_open_scene = scene_id;
 }
 
 pub fn trySetParentKeepUniquePathName(world: ecs.World, entity: ecs.Entity, new_parent: ecs.Entity, allocator: std.mem.Allocator) !void {
