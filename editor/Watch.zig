@@ -15,15 +15,18 @@ pub const Event = union(enum) {
     add: Path,
     remove: Path,
     modify: Path,
-    rename: struct { old: Path, new: Path },
+    rename_old: Path,
+    rename_new: Path,
+
+    pub inline fn path(e: *const Event) []const u8 {
+        return switch (e.*) {
+            inline .add, .remove, .modify, .rename_old, .rename_new => |s| s,
+        };
+    }
 
     fn deinit(e: *const Event, allocator: std.mem.Allocator) void {
         return switch (e.*) {
-            .add, .remove, .modify => |s| allocator.free(s),
-            .rename => |rn| {
-                allocator.free(rn.old);
-                allocator.free(rn.new);
-            },
+            .add, .remove, .modify, .rename_old, .rename_new => |s| allocator.free(s),
         };
     }
 
@@ -32,28 +35,8 @@ pub const Event = union(enum) {
             .add => |s| .{ .add = try allocator.dupe(u8, s) },
             .remove => |s| .{ .remove = try allocator.dupe(u8, s) },
             .modify => |s| .{ .modify = try allocator.dupe(u8, s) },
-            .rename => |rn| .{ .rename = .{
-                .old = try allocator.dupe(u8, rn.old),
-                .new = try allocator.dupe(u8, rn.new),
-            } },
-        };
-    }
-
-    fn priority(e: Event) u8 {
-        return switch (e) {
-            .rename => 5,
-            .remove => 3,
-            .add => 3,
-            .modify => 2,
-        };
-    }
-
-    fn key(e: Event) []const u8 {
-        return switch (e) {
-            .rename => e.rename.old,
-            .add => e.add,
-            .remove => e.remove,
-            .modify => e.modify,
+            .rename_old => |s| .{ .rename_old = try allocator.dupe(u8, s) },
+            .rename_new => |s| .{ .rename_new = try allocator.dupe(u8, s) },
         };
     }
 };
@@ -63,7 +46,7 @@ allocator: std.mem.Allocator,
 impl: Impl,
 
 mutex: std.Thread.Mutex = .{},
-events: std.StringArrayHashMapUnmanaged(Event) = .{},
+events: std.ArrayListUnmanaged(Event) = .{},
 last_error: ?anyerror = null,
 
 const Impl = switch (builtin.os.tag) {
@@ -217,7 +200,6 @@ const Impl = switch (builtin.os.tag) {
 
             var offset: usize = 0;
             var info_ptr: *const FILE_NOTIFY_INFORMATION = undefined;
-            var old_name_temp: ?[]u8 = null;
 
             while (offset < buffer.len) : ({
                 // move to the next record. the NextEntryOffset field tells us the distance to advance.
@@ -239,16 +221,8 @@ const Impl = switch (builtin.os.tag) {
                     w.FILE_ACTION_ADDED => .{ .add = utf8_name },
                     w.FILE_ACTION_REMOVED => .{ .remove = utf8_name },
                     w.FILE_ACTION_MODIFIED => .{ .modify = utf8_name },
-                    w.FILE_ACTION_RENAMED_OLD_NAME => {
-                        // new file name should always follow the old name entry
-                        if (info_ptr.NextEntryOffset == 0) return error.UnexpectedError;
-                        old_name_temp = utf8_name;
-                        continue;
-                    },
-                    w.FILE_ACTION_RENAMED_NEW_NAME => .{ .rename = .{
-                        .old = old_name_temp orelse return error.UnexpectedError,
-                        .new = utf8_name,
-                    } },
+                    w.FILE_ACTION_RENAMED_OLD_NAME => .{ .rename_old = utf8_name },
+                    w.FILE_ACTION_RENAMED_NEW_NAME => .{ .rename_new = utf8_name },
                     else => unreachable,
                 });
             }
@@ -273,7 +247,7 @@ pub fn deinit(self: *Self) void {
     {
         self.mutex.lock();
         defer self.mutex.unlock();
-        for (self.events.values()) |e| {
+        for (self.events.items) |e| {
             e.deinit(allocator);
         }
         self.events.deinit(allocator);
@@ -294,7 +268,7 @@ pub fn dispatch(self: *Self, comptime CTX: type, callback: WatchCallback(CTX), c
         return err;
     }
 
-    for (self.events.values()) |e| {
+    for (self.events.items) |e| {
         callback(callback_ctx, e);
         e.deinit(self.allocator);
     }
@@ -305,42 +279,14 @@ fn collectEvent(self: *Self, event: Event) void {
     self.mutex.lock();
     defer self.mutex.unlock();
 
-    const new_priority = event.priority();
-
-    // Look for an existing event for the same file (same key).
-    var gop = self.events.getOrPut(self.allocator, event.key()) catch |err| {
+    const cloned = event.clone(self.allocator) catch |err| {
         self.last_error = err;
         return;
     };
+    errdefer cloned.deinit(self.allocator);
 
-    if (gop.found_existing) { // an event for this file has already been recorded.
-        const existing_priority = gop.value_ptr.priority();
-        if (new_priority > existing_priority) {
-            // the new event is of higher priority, so replace the existing one.
-            const cloned = event.clone(self.allocator) catch |err| {
-                self.last_error = err;
-                return;
-            };
-            gop.value_ptr.deinit(self.allocator);
-            gop.value_ptr.* = cloned;
-        } else if (new_priority == existing_priority) {
-            const removed = self.events.fetchOrderedRemove(event.key()).?;
-            removed.value.deinit(self.allocator);
-            const cloned = event.clone(self.allocator) catch |err| {
-                self.last_error = err;
-                return;
-            };
-            self.events.put(self.allocator, event.key(), cloned) catch |err| {
-                cloned.deinit(self.allocator);
-                self.last_error = err;
-                return;
-            };
-        }
-    } else { // no event exists for this key yet, so add the new event to the list.
-        const cloned = event.clone(self.allocator) catch |err| {
-            self.last_error = err;
-            return;
-        };
-        gop.value_ptr.* = cloned;
-    }
+    self.events.append(self.allocator, cloned) catch |err| {
+        self.last_error = err;
+        return;
+    };
 }

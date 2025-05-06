@@ -53,25 +53,16 @@ pub const Resource = struct {
     const max_buf_size = 4096;
 
     id: Uuid,
-    uri: [:0]u8,
-    protocol_len: usize,
+    uri: Uri,
     type: Type,
 
     pub inline fn path(self: *const Resource) [:0]const u8 {
-        return self.uri[self.protocol_len + "://".len .. :0];
-    }
-
-    pub inline fn protocol(self: *const Resource) []const u8 {
-        return self.uri[0..self.protocol_len];
-    }
-
-    pub inline fn protocolUri(self: *const Resource) []const u8 {
-        return self.uri[0 .. self.protocol_len + 3];
+        return self.uri.pathZ();
     }
 
     pub fn bufLoadPath(self: *const Resource, buf: []u8) ![:0]const u8 {
         const result = try self.bufFullpath(buf);
-        if (std.mem.eql(u8, self.protocol(), "builtin-shaders")) {
+        if (std.mem.eql(u8, self.uri.protocol(), "builtin-shaders")) {
             var backing_buf: [std.fs.max_path_bytes]u8 = undefined;
             @memcpy(backing_buf[0..result.len], result);
             const baseext = utils.baseExtensionSplit(backing_buf[0..result.len]);
@@ -82,18 +73,18 @@ pub const Resource = struct {
     }
 
     pub fn bufFullpath(self: *const Resource, buf: []u8) ![:0]const u8 {
-        if (std.mem.eql(u8, self.protocol(), "assets")) {
+        if (std.mem.eql(u8, self.uri.protocol(), "assets")) {
             const path_tmp = self.path();
             @memcpy(buf[0 .. path_tmp.len + 1], utils.absorbSentinel(path_tmp));
             return buf[0..path_tmp.len :0];
-        } else if (std.mem.eql(u8, self.protocol(), "builtin-shaders")) { // TODO: use builtin://shaders/*
+        } else if (std.mem.eql(u8, self.uri.protocol(), "builtin-shaders")) { // TODO: use builtin://shaders/*
             var editor_root_buf: [std.fs.max_path_bytes]u8 = undefined;
             const editor_root = try Editor.bufRootDir(&editor_root_buf);
             return try std.fmt.bufPrintZ(buf, "{s}/shaders/{s}", .{ editor_root, self.path() });
         } else {
             var editor_root_buf: [std.fs.max_path_bytes]u8 = undefined;
             const editor_root = try Editor.bufRootDir(&editor_root_buf);
-            return try std.fmt.bufPrintZ(buf, "{s}/assets/{s}/{s}", .{ editor_root, self.protocol(), self.path() });
+            return try std.fmt.bufPrintZ(buf, "{s}/assets/{s}/{s}", .{ editor_root, self.uri.protocol(), self.path() });
         }
     }
 
@@ -101,16 +92,6 @@ pub const Resource = struct {
         var fullpath_buf: [std.fs.max_path_bytes]u8 = undefined;
         const fullpath = try self.bufFullpath(&fullpath_buf);
         return std.fmt.bufPrintZ(buf, "{s}{s}", .{ fullpath, yume_meta_extension_name });
-    }
-
-    // if uri is at the root, e.g. `assets://` it will return null
-    pub fn parentUri(self: *const Resource) ?[]const u8 {
-        return if (self.uri.len == self.protocol_len + "://".len)
-            null
-        else if (std.fs.path.dirname(self.path())) |dirname|
-            self.uri[0 .. self.protocol_len + "://".len + dirname.len]
-        else
-            null;
     }
 
     fn load(allocator: std.mem.Allocator, meta_path: []const u8) !Resource {
@@ -165,8 +146,7 @@ pub const Resource = struct {
         rhs: *const Resource,
     ) bool {
         return lhs.id.eql(rhs.id) and
-            std.mem.eql(u8, lhs.uri, rhs.uri) and
-            lhs.protocol_len == rhs.protocol_len and
+            lhs.uri.eql(&rhs.uri) and
             lhs.type == rhs.type;
     }
 
@@ -174,13 +154,12 @@ pub const Resource = struct {
         return .{
             .id = self.id,
             .type = self.type,
-            .uri = try allocator.dupeZ(u8, self.uri),
-            .protocol_len = self.protocol_len,
+            .uri = try self.uri.clone(allocator),
         };
     }
 
     pub fn deinit(self: *Resource, allocator: std.mem.Allocator) void {
-        allocator.free(self.uri);
+        self.uri.deinit(allocator);
     }
 };
 
@@ -202,13 +181,23 @@ watcher_counter: f32 = 0,
 
 pub const ResourceNode = struct {
     pub const Node = union(enum) {
+        root,
         resource: Uuid,
-        directory: [:0]u8,
+        directory: Uri,
 
         pub fn path(self: *const Node) ![:0]const u8 {
             return switch (self.*) {
+                .root => return error.RootNodeHasNoPath,
                 .resource => |id| getResourcePath(id),
-                .directory => |d| d,
+                .directory => |d| d.pathZ(),
+            };
+        }
+
+        pub fn uri(self: *const Node) !*const Uri {
+            return switch (self.*) {
+                .root => return error.RootNodeHasNoUri,
+                .resource => |id| &(getResourcePtr(id) orelse return error.ResourceNotFound).uri,
+                .directory => |*d| d,
             };
         }
 
@@ -225,22 +214,24 @@ pub const ResourceNode = struct {
             }
 
             return switch (lhs.*) {
+                .root => true,
                 .resource => |it| it.eql(rhs.resource),
-                .directory => |it| std.mem.eql(u8, it, rhs.directory),
+                .directory => |it| it.eql(&rhs.directory),
             };
         }
 
         pub fn clone(self: *Node, allocator: std.mem.Allocator) !Node {
             return switch (self.*) {
+                .root => .root,
                 .resource => |it| .{ .resource = it },
-                .directory => |d| .{ .directory = try allocator.dupeZ(u8, d) },
+                .directory => |d| .{ .directory = try d.clone(allocator) },
             };
         }
 
         pub fn deinit(self: *Node, allocator: std.mem.Allocator) void {
             switch (self.*) {
-                .resource => {},
-                .directory => |d| allocator.free(d),
+                .root, .resource => {},
+                .directory => |*d| d.deinit(allocator),
             }
         }
     };
@@ -384,13 +375,25 @@ pub const ResourceNode = struct {
     }
 
     fn getOrPutInternal(parent: *ResourceNode, segments: *std.fs.path.NativeComponentIterator) !GetOrPutResult {
+        const allocator = parent.children.allocator;
         const segment = segments.next() orelse unreachable;
         const entry = try parent.children.getOrPut(segment.name);
         const has_next = segments.peekNext() != null;
         if (!entry.found_existing) {
-            entry.key_ptr.* = try parent.children.allocator.dupe(u8, segment.name);
+            entry.key_ptr.* = try allocator.dupe(u8, segment.name);
             if (has_next) {
-                entry.value_ptr.* = ResourceNode.init(parent.children.allocator, .{ .directory = try parent.children.allocator.dupeZ(u8, segment.path) });
+                if (parent.node == .root) {
+                    entry.value_ptr.* = ResourceNode.init(allocator, .{
+                        .directory = Uri.fromOwnedSliceWithProtocolLen(
+                            try std.fmt.allocPrintZ(allocator, "{s}://", .{segment.name}),
+                            segment.name.len,
+                        ),
+                    });
+                } else {
+                    entry.value_ptr.* = ResourceNode.init(allocator, .{
+                        .directory = try (try parent.node.uri()).join(allocator, &[_][]const u8{segment.name}),
+                    });
+                }
             }
         }
 
@@ -400,6 +403,8 @@ pub const ResourceNode = struct {
             GetOrPutResult{ .value = entry.value_ptr, .found_existing = entry.found_existing };
     }
 };
+
+const ResourceTree = struct {};
 
 fn instance() *Self {
     std.debug.assert(singleton != null);
@@ -412,7 +417,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
         .allocator = allocator,
         .resources = ResourceStorage.init(allocator),
         .resources_index = std.StringHashMap(Uuid).init(allocator),
-        .resource_tree = ResourceNode.init(allocator, .{ .directory = try allocator.dupeZ(u8, "/") }),
+        .resource_tree = ResourceNode.init(allocator, .root),
 
         .watcher = if (Watch.supported_platform) try Watch.init(allocator, ".") else null,
     };
@@ -594,6 +599,9 @@ pub fn findResourceNode(path: []const u8) !?*ResourceNode {
 
 pub fn findResourceNodeByUri(uri: []const u8) !?*ResourceNode {
     const self = instance();
+    if (uri.len == 0) {
+        return &self.resource_tree;
+    }
     var sfa = std.heap.stackFallback(2048, self.allocator);
     const allocator = sfa.get();
 
@@ -604,7 +612,7 @@ pub fn findResourceNodeByUri(uri: []const u8) !?*ResourceNode {
 }
 
 // both new and old paths are relative to the project's root
-pub fn move(old_path: []const u8, new_path: []const u8) !*ResourceNode {
+pub fn move(old_path: []const u8, new_path: []const u8) !void {
     if (try utils.pathExists(new_path)) {
         return error.DestinationAlreadyExists;
     }
@@ -617,14 +625,21 @@ pub fn move(old_path: []const u8, new_path: []const u8) !*ResourceNode {
     const new_basename = std.fs.path.basename(new_path);
 
     var old_meta_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const old_meta = try std.fmt.bufPrintZ(&old_meta_buf, "{s}{s}", .{ old_basename, yume_meta_extension_name });
+    const old_meta = try std.fmt.bufPrintZ(&old_meta_buf, "{s}{s}", .{ old_path, yume_meta_extension_name });
     var new_meta_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const new_meta = try std.fmt.bufPrintZ(&new_meta_buf, "{s}{s}", .{ new_basename, yume_meta_extension_name });
+    const new_meta = try std.fmt.bufPrintZ(&new_meta_buf, "{s}{s}", .{ new_path, yume_meta_extension_name });
 
     try std.fs.rename(old_dir, old_basename, new_dir, new_basename);
-    try std.fs.rename(old_dir, old_meta, new_dir, new_meta);
-    const id = try registerFromMeta(.{ .path = new_path });
-    return (try findResourceNodeByUri(getResourcePtr(id).?.uri)).?;
+    if (try utils.pathExists(old_meta) and !try utils.pathExists(new_meta)) {
+        try std.fs.rename(
+            old_dir,
+            std.fs.path.basename(old_meta),
+            new_dir,
+            std.fs.path.basename(new_meta),
+        );
+    }
+    // const id = try registerFromMeta(.{ .path = new_path });
+    // return (try findResourceNodeByUri(getResourcePtr(id).?.uri)).?;
 }
 
 pub fn readAssetAlloc(allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) ![]u8 {
@@ -662,18 +677,16 @@ fn registerFromMeta(opts: struct {
     const exists = resourceExists(meta.id);
 
     if (!std.mem.eql(u8, meta.path(), opts.path)) {
-        log.debug("ipdating meta path? {s} == {s}", .{ meta.path(), opts.path });
+        log.debug("updating meta path? {s} == {s}", .{ meta.path(), opts.path });
         if (exists and !try utils.pathExists(meta.path())) { // it might be a moved resource
             log.debug("already loaded", .{});
             const res_ptr = getResourcePtr(meta.id).?;
-            self.allocator.free(res_ptr.uri);
-            res_ptr.uri = try std.fmt.allocPrintZ(self.allocator, "{s}://{s}", .{ opts.category, opts.path });
+            try res_ptr.uri.setPath(self.allocator, opts.path);
             return res_ptr.id;
         }
-        self.allocator.free(meta.uri);
-        meta.uri = try std.fmt.allocPrintZ(self.allocator, "{s}://{s}", .{ opts.category, opts.path });
+        try meta.uri.setPath(self.allocator, opts.path);
     }
-    log.debug("ipdating meta path? {s} uri {s}", .{ meta.path(), meta.uri });
+    log.debug("updating meta path? {s} uri {s}", .{ meta.path(), meta.uri });
 
     if (opts.update_uuid_if_exists and exists) {
         meta.id = Uuid.new();
@@ -732,8 +745,7 @@ pub fn register(opts: struct {
     std.debug.assert(!res_ptr.found_existing);
     res_ptr.value_ptr.* = Resource{
         .id = id,
-        .uri = try self.allocator.dupeZ(u8, uri),
-        .protocol_len = opts.category.len,
+        .uri = try Uri.initWithProtocolLen(self.allocator, uri, opts.category.len),
         .type = opts.type orelse Resource.Type.fromExt(std.fs.path.extension(path)),
     };
     res_node.value.* = ResourceNode.init(self.allocator, .{ .resource = id });
@@ -754,8 +766,7 @@ fn registerBuiltinShader(urn: []const u8, path: []const u8) !void {
     const uri = try std.fmt.allocPrint(self.allocator, "builtin-shaders://{s}", .{path});
     try self.resources.put(id, Resource{
         .id = id,
-        .uri = try self.allocator.dupeZ(u8, uri),
-        .protocol_len = "builtin-shaders".len,
+        .uri = try Uri.initWithProtocolLen(self.allocator, uri, "builtin-shaders".len),
         .type = .shader,
     });
     try self.resources_index.put(uri, id);
@@ -768,11 +779,11 @@ fn unregister(id: Uuid) !void {
     const res_ptr = getResourcePtr(id) orelse return error.ResourceNotFound;
     std.log.debug("{s}", .{res_ptr.path()});
 
-    const parent_uri = res_ptr.parentUri() orelse res_ptr.protocolUri();
+    const parent_uri = res_ptr.uri.parent() orelse res_ptr.uri.protocolWithSeperator();
 
     var parent = try findResourceNodeByUri(parent_uri) orelse return error.UnexpectedError;
 
-    const index_kv = self.resources_index.fetchRemove(res_ptr.uri) orelse {
+    const index_kv = self.resources_index.fetchRemove(res_ptr.uri.span()) orelse {
         log.debug("Failed to unregister uri: {s}", .{res_ptr.uri});
         return error.IllegalUnregisterOperation;
     };
@@ -821,10 +832,15 @@ pub fn indexCwd() !void {
             },
             .directory => { // TODO: perhaps directories should have a register method as well?
                 var dir_node = ResourceNode.init(self.allocator, .{
-                    .directory = try std.fmt.allocPrintZ(self.allocator, "/assets/{s}", .{entry.path}),
+                    .directory = Uri.fromOwnedSliceWithProtocolLen(
+                        try std.fmt.allocPrintZ(self.allocator, "assets://{s}", .{entry.path}),
+                        "assets".len,
+                    ),
                 });
-                _ = utils.normalizePathSepZ(dir_node.node.directory);
-                const gop = try self.resource_tree.getOrPut(dir_node.node.directory);
+
+                const tmp_path = try std.fmt.allocPrintZ(self.allocator, "/assets/{s}", .{entry.path}); // TODO: remove me
+                defer self.allocator.free(tmp_path);
+                const gop = try self.resource_tree.getOrPut(tmp_path);
                 if (gop.found_existing) {
                     dir_node.deinit(false);
                 } else {
@@ -885,10 +901,7 @@ pub fn update(dt: f32, ctx: *GameApp) void {
             ins.watcher_counter = 0;
             w.dispatch(Self, &struct {
                 fn f(self: *Self, event: Watch.Event) void {
-                    log.debug("resource watch event {s}({s})", .{ @tagName(event), switch (event) {
-                        .add, .remove, .modify => |s| s,
-                        .rename => |it| it.old,
-                    } });
+                    log.debug("resource watch event {s}({s})", .{ @tagName(event), event.path() });
                     Self.onWatchEvent(self, event) catch |err| log.err(
                         "watching project encountered an error {}",
                         .{err},
@@ -903,7 +916,7 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
     var sfa = std.heap.stackFallback(std.fs.max_path_bytes, self.allocator);
     const allocator = sfa.get();
     switch (event) {
-        .add => |p| {
+        .add, .rename_new => |p| {
             const path = utils.normalizePathSep(p);
             const baseext = utils.baseExtensionSplit(path);
             if (std.mem.eql(u8, baseext.ext, yume_meta_extension_name)) { // seen new meta
@@ -932,7 +945,7 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                 }
             }
         },
-        .remove => |p| {
+        .remove, .rename_old => |p| {
             const path = utils.normalizePathSep(p);
             const baseext = utils.baseExtensionSplit(path);
             if (std.mem.eql(u8, baseext.ext, yume_meta_extension_name)) { // removing a meta
@@ -967,7 +980,6 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
             }
         },
         .modify => |s| log.debug("tag: {s} {s}", .{ @tagName(event), s }),
-        .rename => |rn| log.debug("tag: {s} old: {s}, new: {s}", .{ @tagName(event), rn.old, rn.new }),
     }
 }
 
@@ -981,7 +993,7 @@ fn syncMeta(id: Uuid, bias: enum { memory, disk }) !void {
 
     const on_disk = try Resource.load(self.allocator, meta_path);
 
-    const uri: []const u8 = in_mem.uri;
+    const uri: []const u8 = in_mem.uri.span();
 
     var target = if (bias == .memory) in_mem else on_disk;
     errdefer target.deinit(self.allocator);
@@ -1017,3 +1029,265 @@ fn syncMeta(id: Uuid, bias: enum { memory, disk }) !void {
         target.deinit(self.allocator);
     }
 }
+
+pub const Uri = extern struct {
+    buf: [*:0]u8,
+    len: usize,
+    protocol_len: usize,
+
+    pub fn parse(allocator: std.mem.Allocator, slice: []const u8) !Uri {
+        return parseOwnedSlice(try allocator.dupeZ(u8, slice));
+    }
+
+    pub fn parseOwnedSlice(slice: [:0]u8) !Uri {
+        var protocol_len: usize = 0;
+        for (0..slice.len) |i| {
+            if (slice[i] == ':') {
+                if (slice.len > i + 2 and slice[i + 1] == '/' and slice[i + 2] == '/') {
+                    protocol_len = i;
+                    break;
+                }
+            }
+        }
+
+        if (protocol_len == 0) {
+            log.err("Invalid Uri: {s}", .{slice});
+            return error.InvalidUri;
+        }
+
+        return fromOwnedSliceWithProtocolLen(slice, protocol_len);
+    }
+
+    pub fn initWithProtocolLen(allocator: std.mem.Allocator, slice: []const u8, protocol_len: usize) !Uri {
+        return fromOwnedSliceWithProtocolLen(try allocator.dupeZ(u8, slice), protocol_len);
+    }
+
+    pub inline fn fromOwnedSliceWithProtocolLen(slice: [:0]u8, protocol_len: usize) Uri {
+        return .{
+            .buf = utils.normalizePathSepZ(slice.ptr),
+            .len = slice.len,
+            .protocol_len = protocol_len,
+        };
+    }
+
+    // based on std.fs.path.joinSepMaybeZ
+    pub fn join(uri: *const Uri, allocator: std.mem.Allocator, paths: []const []const u8) !Uri {
+        std.log.debug("joining {s} with {s}", .{ uri, paths[0] });
+        if (paths.len == 0) return uri.clone(allocator);
+
+        // Find first non-empty path index.
+        const first_path_index = blk: {
+            for (paths, 0..) |p, index| {
+                if (p.len == 0) continue else break :blk index;
+            }
+
+            // All paths provided were empty, so return early.
+            return uri.clone(allocator);
+        };
+
+        // Calculate length needed for resulting joined path buffer.
+        const total_len = blk: {
+            var sum: usize = paths[first_path_index].len;
+            var prev_path = paths[first_path_index];
+            std.debug.assert(prev_path.len > 0);
+            var i: usize = first_path_index + 1;
+            while (i < paths.len) : (i += 1) {
+                const this_path = paths[i];
+                if (this_path.len == 0) continue;
+                const prev_sep = std.fs.path.isSep(prev_path[prev_path.len - 1]);
+                const this_sep = std.fs.path.isSep(this_path[0]);
+                sum += @intFromBool(!prev_sep and !this_sep);
+                sum += if (prev_sep and this_sep) this_path.len - 1 else this_path.len;
+                prev_path = this_path;
+            }
+
+            sum += 1;
+            break :blk sum;
+        };
+
+        const base_uri = uri.span();
+        var base_len: usize = base_uri.len;
+        if (base_uri[base_uri.len - 1] != '/') {
+            base_len += 1;
+        }
+        const buf = try allocator.alloc(u8, total_len + base_len);
+        errdefer allocator.free(buf);
+        @memcpy(buf[0..base_uri.len], base_uri);
+        if (base_len > base_uri.len) { // needs seperator?
+            buf[base_uri.len] = '/';
+        }
+        @memcpy(buf[base_len .. base_len + paths[first_path_index].len], paths[first_path_index]);
+        var buf_index: usize = base_len + paths[first_path_index].len;
+        var prev_path = paths[first_path_index];
+        std.debug.assert(prev_path.len > 0);
+        var i: usize = first_path_index + 1;
+        while (i < paths.len) : (i += 1) {
+            const this_path = paths[i];
+            if (this_path.len == 0) continue;
+            const prev_sep = std.fs.path.isSep(prev_path[prev_path.len - 1]);
+            const this_sep = std.fs.path.isSep(this_path[0]);
+            if (!prev_sep and !this_sep) {
+                buf[buf_index] = '/';
+                buf_index += 1;
+            }
+            const adjusted_path = if (prev_sep and this_sep) this_path[1..] else this_path;
+            @memcpy(buf[buf_index..][0..adjusted_path.len], adjusted_path);
+            buf_index += adjusted_path.len;
+            prev_path = this_path;
+        }
+
+        buf[buf.len - 1] = 0;
+
+        // No need for shrink since buf is exactly the correct size.
+        return fromOwnedSliceWithProtocolLen(buf[0 .. buf.len - 1 :0], uri.protocol_len);
+    }
+
+    pub fn deinit(uri: *Uri, allocator: std.mem.Allocator) void {
+        allocator.free(uri.buf[0..uri.len :0]);
+    }
+
+    // keeps the protocol, updates the remainder of the Uri
+    pub fn setPath(uri: *Uri, allocator: std.mem.Allocator, path_: []const u8) !void {
+        const len_of_prot_uri = uri.protocol_len + "://".len;
+        const new_size = path_.len + len_of_prot_uri;
+        const new_buf = try allocator.realloc(utils.absorbSentinel(uri.buf[0..uri.len :0]), new_size + 1);
+        @memcpy(new_buf[len_of_prot_uri..new_size], path_);
+        uri.buf = @ptrCast(new_buf.ptr);
+        uri.buf[new_size] = 0;
+        uri.len = new_size;
+    }
+
+    pub fn clone(uri: *const Uri, allocator: std.mem.Allocator) !Uri {
+        return initWithProtocolLen(allocator, uri.span(), uri.protocol_len);
+    }
+
+    pub inline fn span(uri: *const Uri) []const u8 {
+        return uri.buf[0..uri.len];
+    }
+
+    pub inline fn spanZ(uri: *const Uri) [:0]const u8 {
+        return uri.buf[0..uri.len :0];
+    }
+
+    pub inline fn path(uri: *const Uri) []const u8 {
+        return uri.buf[uri.protocol_len + "://".len .. uri.len];
+    }
+
+    pub inline fn pathZ(uri: *const Uri) [:0]const u8 {
+        return uri.buf[uri.protocol_len + "://".len .. uri.len :0];
+    }
+
+    pub inline fn protocol(uri: *const Uri) []const u8 {
+        return uri.buf[0..uri.protocol_len];
+    }
+
+    // includes the `://` portion as well
+    pub inline fn protocolWithSeperator(uri: *const Uri) []const u8 {
+        return uri.buf[0 .. uri.protocol_len + "://".len];
+    }
+
+    // if uri is at the root, e.g. `assets://` it will return null
+    pub fn parent(uri: *const Uri) ?[]const u8 {
+        return if (uri.len == uri.protocol_len + "://".len)
+            null
+        else if (std.fs.path.dirname(uri.path())) |dirname|
+            uri.buf[0 .. uri.protocol_len + "://".len + dirname.len]
+        else
+            null;
+    }
+
+    pub inline fn eql(lhs: *const Uri, rhs: *const Uri) bool {
+        return lhs.protocol_len == rhs.protocol_len and
+            std.mem.eql(u8, lhs.span(), rhs.span());
+    }
+
+    pub fn jsonStringify(uri: *const Uri, jws: anytype) !void {
+        return jws.write(uri.span());
+    }
+
+    pub fn jsonParse(allocator: std.mem.Allocator, jrs: anytype, _: anytype) !Uri {
+        const tk = try jrs.nextAlloc(allocator, .alloc_if_needed);
+
+        switch (tk) {
+            inline .string => |s| return parse(allocator, s) catch return error.UnexpectedToken,
+            inline .allocated_string => |s| {
+                defer allocator.free(s);
+                return parse(allocator, s) catch return error.UnexpectedToken;
+            },
+            else => {
+                log.err("{}\n", .{tk});
+                return error.UnexpectedToken;
+            },
+        }
+    }
+
+    pub fn format(
+        uri: *const Uri,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+
+        return writer.print("{s}", .{uri.span()});
+    }
+
+    pub const ComponentIterator = struct {
+        pub const Result = struct {
+            name: []const u8,
+            uri: []const u8,
+        };
+        buf: [*:0]const u8,
+        next_len: usize,
+        cursor: usize = 0,
+        next_token_type: enum { protocol, segment, last } = .protocol,
+
+        pub fn next(iter: *ComponentIterator) ?Result {
+            if (iter.next_len == 0) {
+                return null;
+            }
+
+            const name_slice = iter.buf[iter.cursor .. iter.cursor + iter.next_len];
+            iter.cursor += iter.next_len;
+            const it = switch (iter.next_token_type) {
+                .protocol => Result{
+                    .name = name_slice,
+                    .uri = iter.buf[0 .. iter.cursor + "://".len],
+                },
+                .segment => Result{
+                    .name = name_slice,
+                    .uri = iter.buf[0 .. iter.cursor + "/".len],
+                },
+                .last => Result{
+                    .name = name_slice,
+                    .uri = iter.buf[0..iter.cursor],
+                },
+            };
+
+            iter.cursor = it.uri.len;
+            var i: usize = iter.cursor;
+            while (true) : (i += 1) {
+                if (iter.buf[i] == 0) {
+                    iter.next_token_type = .last;
+                    break;
+                }
+
+                if (iter.buf[i] == '/') {
+                    iter.next_token_type = .segment;
+                    break;
+                }
+            }
+
+            iter.next_len = i - iter.cursor;
+
+            return it;
+        }
+    };
+
+    pub fn componentIterator(
+        uri: *const Uri,
+    ) ComponentIterator {
+        return ComponentIterator{ .buf = uri.buf, .next_len = uri.protocol_len };
+    }
+};

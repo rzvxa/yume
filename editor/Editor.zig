@@ -266,7 +266,7 @@ pub fn windowTitle(self: *Self) ![]u8 {
         if (self.ctx.scene_handle) |scene| {
             return try std.fmt.allocPrint(self.ctx.allocator, "{s} - {s} - {s}", .{
                 proj.project_name,
-                try Resources.getResourcePath(scene.uuid),
+                Resources.getResourcePath(scene.uuid) catch "UNKNOWN",
                 title,
             });
         } else {

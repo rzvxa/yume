@@ -14,6 +14,7 @@ const Self = @This();
 
 allocator: std.mem.Allocator,
 explorer_path: [:0]const u8,
+explorer_uri: ?Resources.Uri,
 selected_file: ?ResourceNode.Node = null,
 renaming_file: ?ResourceNode.Node = null,
 entering_renaming: bool = false,
@@ -25,6 +26,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     return .{
         .allocator = allocator,
         .explorer_path = try allocator.dupeZ(u8, "/assets"),
+        .explorer_uri = null,
         .renaming_str = try imutils.ImString.init(allocator),
     };
 }
@@ -40,6 +42,7 @@ pub fn deinit(self: *Self) void {
 
     self.renaming_str.deinit();
     self.allocator.free(self.explorer_path);
+    if (self.explorer_uri) |*uri| uri.deinit(self.allocator);
 }
 
 pub const ItemResult = union(enum) {
@@ -80,8 +83,10 @@ pub fn draw(self: *Self) !void {
     const col_count = @max(1, avail.x / (item_sz + 32));
     const view_size = c.ImVec2{ .x = avail.x, .y = avail.y - bread_crumb_height - 1 };
 
-    const resource_node = (try Resources.findResourceNode(self.explorer_path)) orelse {
-        try self.setExplorerPath("/assets");
+    const explorer_path = if (self.explorer_uri) |uri| uri.span() else "";
+
+    const resource_node = (try Resources.findResourceNodeByUri(explorer_path)) orelse {
+        try self.setExplorerPath("assets://");
         return;
     };
 
@@ -121,31 +126,33 @@ pub fn draw(self: *Self) !void {
     }
 
     const home_height = c.ImGui_GetTextLineHeight();
-    if (c.ImGui_ImageButton("/", try Editor.getImGuiTexture("editor://icons/home.png"), .{ .x = home_height, .y = home_height })) {
-        try self.setExplorerPath("/");
+    if (c.ImGui_ImageButton("root", try Editor.getImGuiTexture("editor://icons/home.png"), .{ .x = home_height, .y = home_height })) {
+        try self.setExplorerPath(null);
     }
-    c.ImGui_SameLineEx(0, 0);
-    const explorer_path = try allocator.dupe(u8, self.explorer_path);
-    defer allocator.free(explorer_path);
-    var crumbs = try std.fs.path.componentIterator(explorer_path);
-    var i: c_int = 0;
-    while (crumbs.next()) |crumb| : (i += 1) {
-        c.ImGui_PushIDInt(i);
-        defer c.ImGui_PopID();
-        const name = try allocator.dupeZ(u8, crumb.name);
-        defer allocator.free(name);
-        if (c.ImGui_Button(name)) {
-            try self.setExplorerPath(crumb.path);
-        }
+    if (self.explorer_uri) |uri_borrowed| {
+        var uri = try uri_borrowed.clone(allocator);
+        defer uri.deinit(allocator);
         c.ImGui_SameLineEx(0, 0);
-        c.ImGui_BeginDisabled(true);
-        if (i == 0) {
-            _ = c.ImGui_Button("://");
-        } else {
-            _ = c.ImGui_ArrowButton("sep", c.ImGuiDir_Right);
+        var crumbs = uri.componentIterator();
+        var i: c_int = 0;
+        while (crumbs.next()) |crumb| : (i += 1) {
+            c.ImGui_PushIDInt(i);
+            defer c.ImGui_PopID();
+            const name = try allocator.dupeZ(u8, crumb.name);
+            defer allocator.free(name);
+            if (c.ImGui_Button(name)) {
+                try self.setExplorerPath(crumb.uri);
+            }
+            c.ImGui_SameLineEx(0, 0);
+            c.ImGui_BeginDisabled(true);
+            if (i == 0) {
+                _ = c.ImGui_Button("://");
+            } else {
+                _ = c.ImGui_ArrowButton("sep", c.ImGuiDir_Right);
+            }
+            c.ImGui_EndDisabled();
+            c.ImGui_SameLineEx(0, 0);
         }
-        c.ImGui_EndDisabled();
-        c.ImGui_SameLineEx(0, 0);
     }
 }
 
@@ -156,7 +163,7 @@ fn drawItem(
     style: c.ImGuiStyle,
 ) !void {
     var item = item_const;
-    const is_root = std.mem.eql(u8, self.explorer_path, "/");
+    const is_root = self.explorer_uri == null;
     const is_dir = item.res.node == .directory;
     const resource_type: Resources.Resource.Type = blk: {
         if (is_dir) {
@@ -210,6 +217,9 @@ fn drawItem(
         c.ImGui_PopStyleColor();
     var result: ItemResult = .none;
     if (clicked) {
+        if (!is_root) {
+            std.log.debug("click: {s}", .{item.res.node.uri() catch @panic("We")});
+        }
         result = .click;
     }
     if (c.ImGui_IsItemHovered(c.ImGuiHoveredFlags_None) and c.ImGui_IsMouseDoubleClicked(0)) {
@@ -242,15 +252,14 @@ fn drawItem(
                 const old_path = try item.res.node.path();
                 var new_name_buf: [256]u8 = undefined;
                 const new_path = try std.fmt.bufPrint(&new_name_buf, "{s}/{s}{s}", .{
-                    std.fs.path.dirname(old_path).?,
+                    std.fs.path.dirname(old_path) orelse ".",
                     self.renaming_str.span(),
                     std.fs.path.extension(old_path),
                 });
-                if (Resources.move(old_path, new_path)) |it| {
-                    item.res = it;
-                } else |err| {
+                std.log.err("old_path: {s}, new_path: {s}", .{ old_path, new_path });
+                Resources.move(old_path, new_path) catch |err| {
                     std.log.err("failed to rename from \"{s}\" to \"{s}\", err: {}", .{ old_path, new_path, err });
-                }
+                };
             }
             _ = try self.setRenaming(null);
         }
@@ -275,7 +284,8 @@ fn drawItem(
                     var buf: [std.fs.max_path_bytes]u8 = undefined;
                     try utils.tryOpenWithOsDefaultApplication(self.allocator, try Resources.bufResourceFullpath(r, &buf));
                 },
-                .directory => |d| try self.setExplorerPath(d),
+                .directory => |d| try self.setExplorerPath(d.span()),
+                .root => try self.setExplorerPath(null),
             }
         },
         .name_double_click => {
@@ -290,11 +300,12 @@ fn drawItem(
     }
 }
 
-fn setExplorerPath(self: *Self, path: []const u8) !void {
-    const old_mem = self.explorer_path;
+fn setExplorerPath(self: *Self, path: ?[]const u8) !void {
+    if (path) |p| std.log.debug("setExplorerPath: {s}", .{p});
+    var old_mem = self.explorer_uri;
     _ = try self.setRenaming(null);
-    self.explorer_path = try self.allocator.dupeZ(u8, path);
-    self.allocator.free(old_mem);
+    self.explorer_uri = if (path) |p| try Resources.Uri.parse(self.allocator, p) else null;
+    if (old_mem) |*uri| uri.deinit(self.allocator);
 }
 
 fn setSelected(self: *Self, item: ?OrderedItem) !void {
@@ -302,6 +313,7 @@ fn setSelected(self: *Self, item: ?OrderedItem) !void {
     _ = try self.setRenaming(null);
     if (self.selected_file) |*it| {
         switch (it.*) {
+            .root => {},
             .resource => |u| _ = ed.selection.remove(.resource, u),
             .directory => {},
         }

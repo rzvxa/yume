@@ -189,8 +189,11 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
         project.default_scene,
         Resources.Resource{
             .id = project.default_scene,
-            .uri = try allocator.dupeZ(u8, "assets://scenes/Default.scene"),
-            .protocol_len = "assets".len,
+            .uri = try Resources.Uri.initWithProtocolLen(
+                allocator,
+                "assets://scenes/Default.scene",
+                "assets".len,
+            ),
             .type = .scene,
         },
     );
@@ -198,8 +201,11 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
         project_id,
         Resources.Resource{
             .id = project_id,
-            .uri = try allocator.dupeZ(u8, "assets://yume.json"),
-            .protocol_len = "assets".len,
+            .uri = try Resources.Uri.initWithProtocolLen(
+                allocator,
+                "assets://yume.json",
+                "assets".len,
+            ),
             .type = .project,
         },
     );
