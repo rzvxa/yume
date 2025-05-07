@@ -1268,9 +1268,10 @@ pub const Uri = extern struct {
 
     pub fn bufFullpath(uri: *const Uri, buf: []u8) ![:0]const u8 {
         if (std.mem.eql(u8, uri.protocol(), "assets")) {
-            const path_tmp = uri.pathZ();
-            @memcpy(buf[0 .. path_tmp.len + 1], utils.absorbSentinel(path_tmp));
-            return buf[0..path_tmp.len :0];
+            const slice = try std.fs.cwd().realpath(uri.path(), buf);
+            if (buf.len <= slice.len) return error.NoSpaceLeft;
+            buf[slice.len] = 0;
+            return utils.normalizePathSepZ(@ptrCast(slice.ptr))[0..slice.len :0];
         } else if (std.mem.eql(u8, uri.protocol(), "builtin-shaders")) { // TODO: use builtin://shaders/*
             var editor_root_buf: [std.fs.max_path_bytes]u8 = undefined;
             const editor_root = try Editor.bufRootDir(&editor_root_buf);

@@ -1,6 +1,7 @@
 const c = @import("clibs");
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 const utils = @import("yume").utils;
 
@@ -52,6 +53,7 @@ pub const ItemResult = union(enum) {
 pub const OrderedItem = struct {
     key: []const u8,
     res: *ResourceNode,
+    type: Resources.Resource.Type,
 
     pub fn compare(_: void, a: OrderedItem, b: OrderedItem) bool {
         const a_is_dir = a.res.node == .directory;
@@ -94,6 +96,11 @@ pub fn draw(self: *Self) !void {
         try items.append(OrderedItem{
             .key = entry.key_ptr.*,
             .res = entry.value_ptr,
+
+            .type = if (entry.value_ptr.node == .directory)
+                .unknown
+            else
+                try Resources.getResourceType(entry.value_ptr.node.resource),
         });
     }
     if (self.sort_by_name) {
@@ -105,8 +112,21 @@ pub fn draw(self: *Self) !void {
         defer c.ImGui_EndChildFrame();
         if (draw_frame) {
             const table_flags = c.ImGuiTableFlags_SizingStretchSame;
-            const draw_table = c.ImGui_BeginTableEx("node", @intFromFloat(col_count), table_flags, .{ .x = view_size.x, .y = view_size.y - 12 }, 0);
+            const table_size = c.ImVec2{ .x = view_size.x, .y = view_size.y - 12 };
+            const cursor = c.ImGui_GetCursorPos();
+            c.ImGui_SetNextItemAllowOverlap();
+            _ = c.ImGui_InvisibleButton("resources-background", table_size, 0);
+            try self.drawBackgroundContextMenu();
+            c.ImGui_SetCursorPos(cursor);
+            const draw_table = c.ImGui_BeginTableEx(
+                "node",
+                @intFromFloat(col_count),
+                table_flags,
+                table_size,
+                0,
+            );
             defer c.ImGui_EndTable();
+
             if (draw_table) {
                 var index: usize = 0;
                 for (items.items) |item| {
@@ -162,12 +182,6 @@ fn drawItem(
     var item = item_const;
     const is_root = self.explorer_uri == null;
     const is_dir = item.res.node == .directory;
-    const resource_type: Resources.Resource.Type = blk: {
-        if (is_dir) {
-            break :blk .unknown;
-        }
-        break :blk try Resources.getResourceType(item.res.node.resource);
-    };
     const icon = blk: {
         if (is_root) {
             if (std.mem.eql(u8, item.key, "builtin")) {
@@ -181,8 +195,8 @@ fn drawItem(
             }
         } else if (is_dir) {
             break :blk try Editor.getImGuiTexture("editor://icons/folder.png");
-        } else if (resource_type != .unknown) {
-            const possible_icon_path = resource_type.fileIconUri();
+        } else if (item.type != .unknown) {
+            const possible_icon_path = item.type.fileIconUri();
             break :blk Editor.getImGuiTexture(possible_icon_path) catch try Editor.getImGuiTexture("editor://icons/file.png");
         } else {
             break :blk try Editor.getImGuiTexture("editor://icons/file.png");
@@ -192,7 +206,7 @@ fn drawItem(
     const allocator = self.allocator;
     const col_selected_active = c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0, .y = 0.478, .z = 0.8, .w = 1 });
     const col_selected_inactive = c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 0.2, .y = 0.478, .z = 0.8, .w = 1 });
-    const name = try if (resource_type == .unknown) allocator.dupeZ(u8, item.key) else allocator.dupeZ(u8, std.fs.path.stem(item.key));
+    const name = try if (item.type == .unknown) allocator.dupeZ(u8, item.key) else allocator.dupeZ(u8, std.fs.path.stem(item.key));
     defer allocator.free(name);
     const is_selected = if (self.selected_file) |sel| sel.eql(&item.res.node) else false;
     const is_renaming = if (self.renaming_file) |ren| ren.eql(&item.res.node) else false;
@@ -210,6 +224,7 @@ fn drawItem(
         );
     c.ImGui_SetNextItemAllowOverlap();
     const clicked = c.ImGui_ButtonEx("##name", btn_size);
+    try self.drawItemContextMenu(item);
     if (is_selected)
         c.ImGui_PopStyleColor();
     var result: ItemResult = .none;
@@ -281,29 +296,74 @@ fn drawItem(
     switch (result) {
         .none => {},
         .click => try self.setSelected(item),
-        .double_click => {
-            switch (item.res.node) {
-                .resource => |r| {
-                    switch (resource_type) {
-                        .scene => try Editor.instance().openScene(r),
-                        else => {
-                            var buf: [std.fs.max_path_bytes]u8 = undefined;
-                            try utils.tryOpenWithOsDefaultApplication(self.allocator, try Resources.bufResourceFullpath(r, &buf));
-                        },
-                    }
-                },
-                .directory => |d| try self.setExplorerPath(d.span()),
-                .root => try self.setExplorerPath(null),
-            }
-        },
+        .double_click => try self.open(item),
         .name_double_click => {
-            if (resource_type != .project) {
+            if (item.type != .project) {
                 try self.setSelected(item);
                 try self.renaming_str.set(std.fs.path.stem(name));
                 try self.setRenaming(item);
             } else {
                 std.log.info("Can't rename the project file", .{});
             }
+        },
+    }
+}
+
+fn drawItemContextMenu(self: *Self, item: OrderedItem) !void {
+    if (c.ImGui_BeginPopupContextItemEx("context-menu", c.ImGuiPopupFlags_MouseButtonRight)) {
+        if (c.ImGui_MenuItem("Open")) {
+            try self.open(item);
+        }
+        if (c.ImGui_MenuItem(switch (builtin.os.tag) {
+            .macos => "Find in Finder",
+            .windows => "Reveal in Explorer",
+            else => "Reveal in File Manager",
+        })) {
+            try self.reveal(item);
+        }
+        c.ImGui_Separator();
+        if (c.ImGui_MenuItem("Cut*")) {}
+        if (c.ImGui_MenuItem("Copy*")) {}
+        if (c.ImGui_MenuItem("Paste*")) {}
+
+        if (c.ImGui_MenuItem("Delete*")) {}
+        c.ImGui_EndPopup();
+    }
+}
+
+fn drawBackgroundContextMenu(_: *Self) !void {
+    if (c.ImGui_BeginPopupContextItemEx("background-context-menu", c.ImGuiPopupFlags_MouseButtonRight)) {
+        if (c.ImGui_MenuItem("New Directory*")) {}
+        c.ImGui_EndPopup();
+    }
+}
+
+fn open(self: *Self, item: OrderedItem) !void {
+    switch (item.res.node) {
+        .resource => |r| {
+            switch (item.type) {
+                .scene => try Editor.instance().openScene(r),
+                else => {
+                    var buf: [std.fs.max_path_bytes]u8 = undefined;
+                    try utils.tryOpenWithOsDefaultApplication(self.allocator, try Resources.bufResourceFullpath(r, &buf));
+                },
+            }
+        },
+        .directory => |d| try self.setExplorerPath(d.span()),
+        .root => try self.setExplorerPath(null),
+    }
+}
+
+fn reveal(self: *Self, item: OrderedItem) !void {
+    switch (item.res.node) {
+        .root => return error.CanNotRevealRoot,
+        .resource => |r| {
+            var buf: [std.fs.max_path_bytes]u8 = undefined;
+            try utils.tryRevealPathInOsFileManager(self.allocator, try Resources.bufResourceFullpath(r, &buf));
+        },
+        .directory => |d| {
+            var buf: [std.fs.max_path_bytes]u8 = undefined;
+            try utils.tryRevealPathInOsFileManager(self.allocator, try d.bufFullpath(&buf));
         },
     }
 }

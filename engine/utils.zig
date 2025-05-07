@@ -126,8 +126,31 @@ pub fn tryOpenWithOsDefaultApplication(allocator: std.mem.Allocator, path: []con
             "\"\"",
             path,
         } }) catch return error.FailedToOpen,
+        .macos => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "open", path } }) catch return error.FailedToOpen,
         .linux => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "xdg-open", path } }) catch return error.LauncherNotFound,
-        .macos => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "open", path } }) catch return error.LauncherNotFound,
+        else => |p| @compileError("Unsupported platform: " ++ p),
+    };
+}
+
+pub fn tryRevealPathInOsFileManager(allocator: std.mem.Allocator, path: []const u8) !void {
+    _ = switch (builtin.os.tag) {
+        .windows => {
+            const cmd_head = "explorer /select,";
+            var buf: [std.fs.max_path_bytes + cmd_head.len]u8 = undefined;
+            const cmd = try std.fmt.bufPrint(&buf, "{s}{s}", .{ cmd_head, path });
+            _ = OsifyPathSep(cmd[cmd_head.len..]);
+            std.log.debug("select: {s}", .{cmd});
+            _ = std.process.Child.run(.{
+                .allocator = allocator,
+                .argv = &.{
+                    "cmd",
+                    "/c",
+                    cmd,
+                },
+            }) catch return error.FailedToReveal;
+        },
+        .macos => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "open -R", path } }) catch return error.FailedToReveal,
+        .linux => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "xdg-open", path } }) catch return error.FileManagerNotFound,
         else => |p| @compileError("Unsupported platform: " ++ p),
     };
 }
@@ -185,6 +208,18 @@ pub fn normalizePathSepZ(path: [*:0]u8) [*:0]u8 {
 
             if (path[i] == '\\') {
                 path[i] = '/';
+            }
+        }
+    }
+    return path;
+}
+
+// similar to normalizePath but works in reverse, on windows turns '/' to '\'
+pub fn OsifyPathSep(path: []u8) []u8 {
+    if (builtin.os.tag == .windows) {
+        for (path, 0..) |char, i| {
+            if (char == '/') {
+                path[i] = '\\';
             }
         }
     }
