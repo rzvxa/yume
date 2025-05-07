@@ -72,20 +72,8 @@ pub const Resource = struct {
         }
     }
 
-    pub fn bufFullpath(self: *const Resource, buf: []u8) ![:0]const u8 {
-        if (std.mem.eql(u8, self.uri.protocol(), "assets")) {
-            const path_tmp = self.path();
-            @memcpy(buf[0 .. path_tmp.len + 1], utils.absorbSentinel(path_tmp));
-            return buf[0..path_tmp.len :0];
-        } else if (std.mem.eql(u8, self.uri.protocol(), "builtin-shaders")) { // TODO: use builtin://shaders/*
-            var editor_root_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const editor_root = try Editor.bufRootDir(&editor_root_buf);
-            return try std.fmt.bufPrintZ(buf, "{s}/shaders/{s}", .{ editor_root, self.path() });
-        } else {
-            var editor_root_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const editor_root = try Editor.bufRootDir(&editor_root_buf);
-            return try std.fmt.bufPrintZ(buf, "{s}/assets/{s}/{s}", .{ editor_root, self.uri.protocol(), self.path() });
-        }
+    pub inline fn bufFullpath(self: *const Resource, buf: []u8) ![:0]const u8 {
+        return self.uri.bufFullpath(buf);
     }
 
     pub fn bufMetaPath(self: *const Resource, buf: []u8) ![:0]const u8 {
@@ -913,8 +901,90 @@ pub fn update(dt: f32, ctx: *GameApp) void {
 }
 
 fn onWatchEvent(self: *Self, event: Watch.Event) !void {
-    var sfa = std.heap.stackFallback(std.fs.max_path_bytes, self.allocator);
+    var sfa = std.heap.stackFallback(4096, self.allocator);
     const allocator = sfa.get();
+
+    dir_ev: {
+        var uri = Uri.fromOwnedSliceWithProtocolLen(
+            try std.fmt.allocPrintZ(self.allocator, "assets://{s}", .{event.path()}),
+            "assets".len,
+        );
+        defer uri.deinit(self.allocator);
+
+        switch (event) {
+            .add, .rename_new => |s| {
+                var dir = std.fs.cwd().openDir(s, .{ .iterate = true }) catch |err| switch (err) {
+                    error.NotDir => break :dir_ev, // not a directory, so we can break out of the directory sub-routine
+                    else => return err,
+                };
+                defer dir.close();
+
+                var dir_node = ResourceNode.init(self.allocator, .{
+                    .directory = try uri.clone(self.allocator),
+                });
+
+                const tmp_path = try std.fmt.allocPrintZ(self.allocator, "/assets/{s}", .{uri.path()}); // TODO: remove me
+                defer self.allocator.free(tmp_path);
+                const gop = try self.resource_tree.getOrPut(tmp_path);
+                if (gop.found_existing) {
+                    dir_node.deinit(false);
+                } else {
+                    gop.value.* = dir_node;
+                }
+
+                var dir_iter = dir.iterate();
+                while (try dir_iter.next()) |next| {
+                    switch (next.kind) {
+                        .file, .directory => {
+                            const slice = try std.fs.path.join(allocator, &[_][]const u8{ s, next.name });
+                            defer allocator.free(slice);
+                            try self.onWatchEvent(switch (event) {
+                                .add => .{ .add = slice },
+                                .remove => .{ .remove = slice },
+                                .modify => .{ .modify = slice },
+                                .rename_old => .{ .rename_old = slice },
+                                .rename_new => .{ .rename_new = slice },
+                            });
+                        },
+                        else => {},
+                    }
+                }
+            },
+            .remove, .rename_old => {
+                // if resource doesn't exist or isn't a directory, break out of the directory event sub-routine
+                const res = (try findResourceNodeByUri(uri.span())) orelse break :dir_ev;
+                if (res.node != .directory) {
+                    break :dir_ev;
+                }
+
+                var parent_res = (try findResourceNodeByUri(uri.parent() orelse "assets://")).?;
+
+                var dir_iter = res.children.iterator();
+
+                while (dir_iter.next()) |next| {
+                    // TODO: no need to dupe if events become []const u8
+                    const slice = try allocator.dupe(u8, try next.value_ptr.node.path());
+                    defer allocator.free(slice);
+                    try self.onWatchEvent(switch (event) {
+                        .add => .{ .add = slice },
+                        .remove => .{ .remove = slice },
+                        .modify => .{ .modify = slice },
+                        .rename_old => .{ .rename_old = slice },
+                        .rename_new => .{ .rename_new = slice },
+                    });
+                }
+
+                std.debug.assert(res.children.count() == 0);
+                var res_entry = parent_res.children.fetchOrderedRemove(std.fs.path.basename(uri.path())).?;
+                res_entry.value.deinit(true);
+                self.allocator.free(res_entry.key);
+            },
+            .modify => {},
+        }
+
+        return;
+    }
+
     switch (event) {
         .add, .rename_new => |p| {
             const path = utils.normalizePathSep(p);
@@ -1194,6 +1264,22 @@ pub const Uri = extern struct {
             uri.buf[0 .. uri.protocol_len + "://".len + dirname.len]
         else
             null;
+    }
+
+    pub fn bufFullpath(uri: *const Uri, buf: []u8) ![:0]const u8 {
+        if (std.mem.eql(u8, uri.protocol(), "assets")) {
+            const path_tmp = uri.pathZ();
+            @memcpy(buf[0 .. path_tmp.len + 1], utils.absorbSentinel(path_tmp));
+            return buf[0..path_tmp.len :0];
+        } else if (std.mem.eql(u8, uri.protocol(), "builtin-shaders")) { // TODO: use builtin://shaders/*
+            var editor_root_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const editor_root = try Editor.bufRootDir(&editor_root_buf);
+            return try std.fmt.bufPrintZ(buf, "{s}/shaders/{s}", .{ editor_root, uri.path() });
+        } else {
+            var editor_root_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const editor_root = try Editor.bufRootDir(&editor_root_buf);
+            return try std.fmt.bufPrintZ(buf, "{s}/assets/{s}/{s}", .{ editor_root, uri.protocol(), uri.path() });
+        }
     }
 
     pub inline fn eql(lhs: *const Uri, rhs: *const Uri) bool {
