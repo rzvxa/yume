@@ -139,7 +139,6 @@ pub fn tryRevealPathInOsFileManager(allocator: std.mem.Allocator, path: []const 
             var buf: [std.fs.max_path_bytes + cmd_head.len]u8 = undefined;
             const cmd = try std.fmt.bufPrint(&buf, "{s}{s}", .{ cmd_head, path });
             _ = OsifyPathSep(cmd[cmd_head.len..]);
-            std.log.debug("select: {s}", .{cmd});
             _ = std.process.Child.run(.{
                 .allocator = allocator,
                 .argv = &.{

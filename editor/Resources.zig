@@ -208,7 +208,7 @@ pub const ResourceNode = struct {
             };
         }
 
-        pub fn clone(self: *Node, allocator: std.mem.Allocator) !Node {
+        pub fn clone(self: *const Node, allocator: std.mem.Allocator) !Node {
             return switch (self.*) {
                 .root => .root,
                 .resource => |it| .{ .resource = it },
@@ -585,15 +585,15 @@ pub fn findResourceNode(path: []const u8) !?*ResourceNode {
     return self.resource_tree.find(path);
 }
 
-pub fn findResourceNodeByUri(uri: []const u8) !?*ResourceNode {
+pub fn findResourceNodeByUri(uri: *const Uri) !?*ResourceNode {
     const self = instance();
-    if (uri.len == 0) {
+    if (uri.isRoot()) {
         return &self.resource_tree;
     }
     var sfa = std.heap.stackFallback(2048, self.allocator);
     const allocator = sfa.get();
 
-    const path = try parseUri(allocator, uri);
+    const path = try parseUri(allocator, uri.span());
     defer allocator.free(path);
 
     return findResourceNode(path);
@@ -767,9 +767,11 @@ fn unregister(id: Uuid) !void {
     const res_ptr = getResourcePtr(id) orelse return error.ResourceNotFound;
     std.log.debug("{s}", .{res_ptr.path()});
 
-    const parent_uri = res_ptr.uri.parent() orelse res_ptr.uri.protocolWithSeperator();
+    const parent_uri_slice = res_ptr.uri.parent() orelse res_ptr.uri.protocolWithSeperator();
+    var parent_uri = try Uri.parse(self.allocator, parent_uri_slice);
+    defer parent_uri.deinit(self.allocator);
 
-    var parent = try findResourceNodeByUri(parent_uri) orelse return error.UnexpectedError;
+    var parent = try findResourceNodeByUri(&parent_uri) orelse return error.UnexpectedError;
 
     const index_kv = self.resources_index.fetchRemove(res_ptr.uri.span()) orelse {
         log.debug("Failed to unregister uri: {s}", .{res_ptr.uri});
@@ -855,6 +857,12 @@ pub fn indexCwd() !void {
 }
 
 pub fn parseUri(allocator: std.mem.Allocator, uri: []const u8) ![:0]const u8 {
+    // fast path for URIs from the root `:://`
+    // e.g. `:://assets/x/y/z` over `assets://x/y/z`
+    if (std.mem.eql(u8, uri[0..":://".len], ":://")) {
+        return try std.fmt.allocPrintZ(allocator, "/{s}", .{uri[":://".len..]});
+    }
+
     var end_of_protocol: usize = 0;
     for (0..uri.len) |i| {
         if (uri[i] == ':') {
@@ -952,12 +960,14 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
             },
             .remove, .rename_old => {
                 // if resource doesn't exist or isn't a directory, break out of the directory event sub-routine
-                const res = (try findResourceNodeByUri(uri.span())) orelse break :dir_ev;
+                const res = (try findResourceNodeByUri(&uri)) orelse break :dir_ev;
                 if (res.node != .directory) {
                     break :dir_ev;
                 }
 
-                var parent_res = (try findResourceNodeByUri(uri.parent() orelse "assets://")).?;
+                var parent_uri = (try uri.parentUri(self.allocator)) orelse try Uri.parse(self.allocator, "assets://");
+                defer parent_uri.deinit(self.allocator);
+                var parent_res = (try findResourceNodeByUri(&parent_uri)).?;
 
                 var dir_iter = res.children.iterator();
 
@@ -1063,7 +1073,7 @@ fn syncMeta(id: Uuid, bias: enum { memory, disk }) !void {
 
     const on_disk = try Resource.load(self.allocator, meta_path);
 
-    const uri: []const u8 = in_mem.uri.span();
+    const uri: *const Uri = &in_mem.uri;
 
     var target = if (bias == .memory) in_mem else on_disk;
     errdefer target.deinit(self.allocator);
@@ -1074,18 +1084,18 @@ fn syncMeta(id: Uuid, bias: enum { memory, disk }) !void {
         const node = try findResourceNodeByUri(uri) orelse return error.InvalidSyncMetaOperation;
         if (!target.id.eql(in_mem.id)) {
             const old_id = in_mem.id;
-            if (try self.resources_index.fetchPut(try self.allocator.dupe(u8, uri), target.id)) |old| {
+            if (try self.resources_index.fetchPut(try self.allocator.dupe(u8, uri.span()), target.id)) |old| {
                 self.allocator.free(old.key);
             } else log.err(
                 "Invalid sync operation, Resources might be partially broken, old_id: {s}, new_id: {s}, uri: {s}",
-                .{ old_id.urn(), target.id.urn(), uri },
+                .{ old_id.urn(), target.id.urn(), uri.span() },
             );
             if (self.resources.fetchRemove(id)) |old| {
                 var val = old.value;
                 val.deinit(self.allocator);
             } else log.err(
                 "Invalid sync operation, Resources might be partially broken, old_id: {s}, new_id: {s}, uri: {s}",
-                .{ old_id.urn(), target.id.urn(), uri },
+                .{ old_id.urn(), target.id.urn(), uri.span() },
             );
 
             try self.resources.put(target.id, target);
@@ -1251,6 +1261,16 @@ pub const Uri = extern struct {
         return uri.buf[0..uri.protocol_len];
     }
 
+    // is protocol `assets://`?
+    pub inline fn isAssets(uri: *const Uri) bool {
+        return std.mem.eql(u8, uri.protocol(), "assets");
+    }
+
+    // shortthand for checking if URI is exactly `:://`
+    pub inline fn isRoot(uri: *const Uri) bool {
+        return std.mem.eql(u8, uri.span(), ":://");
+    }
+
     // includes the `://` portion as well
     pub inline fn protocolWithSeperator(uri: *const Uri) []const u8 {
         return uri.buf[0 .. uri.protocol_len + "://".len];
@@ -1264,6 +1284,25 @@ pub const Uri = extern struct {
             uri.buf[0 .. uri.protocol_len + "://".len + dirname.len]
         else
             null;
+    }
+
+    pub fn parentUri(uri: *const Uri, allocator: std.mem.Allocator) !?Uri {
+        if (uri.parent()) |p| {
+            return try initWithProtocolLen(allocator, p, uri.protocol_len);
+        } else {
+            return null;
+        }
+    }
+
+    pub fn parentUriOr(uri: *const Uri, or_kind: enum { root, protocol_uri }, allocator: std.mem.Allocator) !Uri {
+        if (uri.parent()) |p| {
+            return try initWithProtocolLen(allocator, p, uri.protocol_len);
+        } else {
+            return switch (or_kind) {
+                .root => initWithProtocolLen(allocator, ":://", 1),
+                .protocol_uri => initWithProtocolLen(allocator, uri.protocolWithSeperator(), uri.protocol_len),
+            };
+        }
     }
 
     pub fn bufFullpath(uri: *const Uri, buf: []u8) ![:0]const u8 {
