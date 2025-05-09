@@ -24,7 +24,12 @@ pub fn main() !void {
     try Resources.init(allocator);
     defer Resources.deinit() catch {};
 
-    var app = GameApp.init(allocator, Resources.readAssetAlloc, "Yume Editor");
+    var app = GameApp.init(.{
+        .allocator = allocator,
+        .loader = Resources.readAssetAlloc,
+        .window_title = "Yume Editor",
+        .window_extent = .{ .x = 1600, .y = 800 },
+    });
     defer app.deinit();
 
     try app.run(Editor);

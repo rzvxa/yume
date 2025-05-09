@@ -14,15 +14,12 @@ const Vec3 = math3d.Vec3;
 const Vec4 = math3d.Vec4;
 const Mat4 = math3d.Mat4;
 
-const context = @import("context.zig");
 const components = @import("ecs.zig").components;
 const Camera = components.Camera;
 const Mesh = components.Mesh;
 const Vertex = components.mesh.Vertex;
 const BoundingBox = components.mesh.BoundingBox;
 const Material = components.Material;
-
-const window_extent = context.window_extent;
 
 const log = std.log.scoped(.vulkan_engine);
 

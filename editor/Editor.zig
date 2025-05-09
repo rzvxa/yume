@@ -405,7 +405,11 @@ pub fn draw(self: *Self) !void {
             if (c.ImGui_MenuItem("About*")) {}
             c.ImGui_EndMenu();
         }
-        c.ImGui_SetCursorPosX((c.ImGui_GetCursorPosX() - (13 * 3)) + (GameApp.window_extent.width / 2) - c.ImGui_GetCursorPosX());
+        c.ImGui_SetCursorPosX(
+            (c.ImGui_GetCursorPosX() - (13 * 3)) +
+                (@as(f32, @floatFromInt(self.ctx.windowExtent().x)) / 2) -
+                c.ImGui_GetCursorPosX(),
+        );
         if (c.ImGui_ImageButton(
             "Play",
             try getImGuiTexture(if (self.play) "editor://icons/stop.png" else "editor://icons/play.png"),

@@ -6,12 +6,11 @@ const log = std.log.scoped(.GameApp);
 const VulkanEngine = @import("VulkanEngine.zig");
 pub const RenderCommand = VulkanEngine.RenderCommand;
 
-const context = @import("context.zig");
-pub const window_extent = context.window_extent;
 const utils = @import("utils.zig");
 const Uuid = @import("uuid.zig").Uuid;
 
 const math3d = @import("math3d.zig");
+const Vec2U = math3d.Vec2U;
 const Vec3 = math3d.Vec3;
 
 const Assets = @import("assets.zig").Assets;
@@ -44,32 +43,42 @@ scene_handle: ?SceneAssetHandle = null,
 
 delta: f32 = 0.016,
 
-pub fn init(a: std.mem.Allocator, loader: assets.ResourceLoader, window_title: []const u8) *Self {
+pub fn init(opts: struct {
+    allocator: std.mem.Allocator,
+    loader: assets.ResourceLoader,
+    window_title: []const u8,
+    window_extent: Vec2U,
+}) *Self {
     utils.checkSdl(c.SDL_Init(c.SDL_INIT_VIDEO));
 
-    const window = c.SDL_CreateWindow(window_title.ptr, window_extent.width, window_extent.height, c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE) orelse @panic("Failed to create SDL window");
+    const window = c.SDL_CreateWindow(
+        opts.window_title.ptr,
+        @intCast(opts.window_extent.x),
+        @intCast(opts.window_extent.y),
+        c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE,
+    ) orelse @panic("Failed to create SDL window");
 
     _ = c.SDL_ShowWindow(window);
 
-    const engine = VulkanEngine.init(a, window);
+    const engine = VulkanEngine.init(opts.allocator, window);
 
-    const self = a.create(Self) catch @panic("OOM");
+    const self = opts.allocator.create(Self) catch @panic("OOM");
 
     self.* = Self{
         .world = ecs.World.init() catch @panic("failed to create the world"),
         .scene_root = undefined,
-        .scene = Scene.init(a) catch @panic("failed to create default scene"),
-        .window_title = window_title,
-        .allocator = a,
+        .scene = Scene.init(opts.allocator) catch @panic("failed to create default scene"),
+        .window_title = opts.window_title,
+        .allocator = opts.allocator,
         .window = window,
         .inputs = inputs.init(window) catch @panic("Failed to initialize input manager"),
         .engine = engine,
-        .components = std.StringHashMap(ecs.ComponentDef).init(a),
+        .components = std.StringHashMap(ecs.ComponentDef).init(opts.allocator),
     };
 
     self.scene_root = self.world.create("root");
 
-    Assets.init(a, &self.engine, loader);
+    Assets.init(opts.allocator, &self.engine, opts.loader);
 
     self.registerComponent(ecs.components.Uuid);
     self.registerComponent(ecs.components.Meta);
@@ -244,8 +253,15 @@ pub fn registerComponent(self: *Self, comptime T: type) void {
     self.components.put(ecs.typeName(T), comp) catch @panic("OOM");
 }
 
-pub fn isFocused(self: *Self) bool {
+pub fn isFocused(self: *const Self) bool {
     return c.SDL_GetWindowFlags(self.window) & c.SDL_WINDOW_INPUT_FOCUS != 0;
+}
+
+pub fn windowExtent(self: *const Self) Vec2U {
+    return Vec2U.make(
+        self.engine.swapchain_extent.width,
+        self.engine.swapchain_extent.height,
+    );
 }
 
 fn newFrame(self: *Self) void {

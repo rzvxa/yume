@@ -159,9 +159,10 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 me.d.camera.updateViewProjection();
                 _ = c.ecs_run(me.app.world.inner, me.d.render_system, me.app.delta, me);
 
+                const window_extent = me.app.windowExtent();
                 c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
                     .offset = .{ .x = 0, .y = 0 },
-                    .extent = GameApp.window_extent,
+                    .extent = .{ .width = @intCast(window_extent.x), .height = @intCast(window_extent.y) },
                 }});
             }
         }.f, &self.frame_userdata);

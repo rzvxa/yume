@@ -1023,6 +1023,57 @@ pub const Rect = struct {
     height: f32,
 };
 
+pub const Vec2U = extern struct {
+    const Self = @This();
+    x: u32,
+    y: u32,
+
+    pub const ZERO = make(0.0, 0.0);
+
+    pub inline fn make(x: u32, y: u32) Vec2U {
+        return .{ .x = x, .y = y };
+    }
+
+    pub inline fn muli(self: Self, other: u32) Self {
+        return make(self.x * other, self.y * other);
+    }
+
+    pub inline fn scalar(n: u32) Vec2U {
+        return .{ .x = n, .y = n };
+    }
+
+    pub inline fn squaredLen(self: Self) f32 {
+        return self.x * self.x + self.y * self.y;
+    }
+
+    pub inline fn len(self: Self) f32 {
+        return @sqrt(self.x * self.x + self.y * self.y);
+    }
+
+    pub inline fn add(self: Self, other: Self) Self {
+        return make(self.x - other.x, self.y - other.y);
+    }
+
+    pub inline fn sub(self: Self, other: Self) Self {
+        return make(self.x - other.x, self.y - other.y);
+    }
+
+    pub fn lerp(a: Self, b: Self, t: f32) Self {
+        return make(
+            std.math.lerp(a.x, b.x, t),
+            std.math.lerp(a.y, b.y, t),
+        );
+    }
+
+    pub inline fn fromArray(xy: [2]u32) Self {
+        return @as(*const Self, @ptrCast(&xy)).*;
+    }
+
+    pub inline fn toArray(self: Self) [2]u32 {
+        return @as(*const [2]u32, @ptrCast(&self)).*;
+    }
+};
+
 pub fn epsilonEqual(a: f32, b: f32) bool {
     return @abs(a - b) <= epsilon;
 }
