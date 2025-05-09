@@ -29,7 +29,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     return .{
         .allocator = allocator,
         .state = .normal,
-        .uri = try Resources.Uri.parse(allocator, "assets://"),
+        .uri = try Resources.Uri.parse(allocator, "project://"),
         .name_str = try imutils.ImString.init(allocator),
     };
 }
@@ -85,7 +85,7 @@ pub fn draw(self: *Self) !void {
     const view_size = c.ImVec2{ .x = avail.x, .y = avail.y - bread_crumb_height - 1 };
 
     const resource_node = (try Resources.findResourceNodeByUri(&self.uri)) orelse {
-        self.setUri(try Resources.Uri.parse(self.allocator, "assets://"));
+        self.setUri(try Resources.Uri.parse(self.allocator, "project://"));
         return;
     };
 
@@ -196,7 +196,7 @@ fn drawItem(
         if (is_root) {
             if (std.mem.eql(u8, key, "builtin")) {
                 break :blk try Editor.getImGuiTexture("editor://icons/yume.png");
-            } else if (std.mem.eql(u8, key, "assets")) {
+            } else if (std.mem.eql(u8, key, "project")) {
                 break :blk try Editor.getImGuiTexture("editor://icons/library.png");
             } else if (std.mem.eql(u8, key, "editor")) {
                 break :blk try Editor.getImGuiTexture("editor://icons/editor.png");
@@ -358,7 +358,7 @@ fn drawItemContextMenu(self: *Self, node: *const Node, ty: Resources.Resource.Ty
 
 fn drawBackgroundContextMenu(self: *Self) !void {
     if (c.ImGui_BeginPopupContextItemEx("background-context-menu", c.ImGuiPopupFlags_MouseButtonRight)) {
-        const readonly = !self.uri.isAssets(); // TODO: Resources should provide this stat
+        const readonly = !self.uri.isProject(); // TODO: Resources should provide this stat
 
         if (readonly) {
             c.ImGui_BeginDisabled(true);

@@ -637,9 +637,10 @@ fn initImGui(engine: *Engine) !void {
     });
 
     const io = c.ImGui_GetIO();
-    roboto14 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/editor/fonts/roboto.ttf", 14, null, null);
-    roboto24 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/editor/fonts/roboto.ttf", 24, null, null);
-    roboto32 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/editor/fonts/roboto.ttf", 32, null, null);
+    // TODO: load fonts as assets similar to imgui textures
+    roboto14 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "resources/editor/fonts/roboto.ttf", 14, null, null);
+    roboto24 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "resources/editor/fonts/roboto.ttf", 24, null, null);
+    roboto32 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "resources/editor/fonts/roboto.ttf", 32, null, null);
 
     _ = c.cImGui_ImplVulkan_Init(&init_info);
     _ = c.cImGui_ImplVulkan_CreateFontsTexture();

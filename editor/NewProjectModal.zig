@@ -191,8 +191,8 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
             .id = project.default_scene,
             .uri = try Resources.Uri.initWithProtocolLen(
                 allocator,
-                "assets://scenes/Default.scene",
-                "assets".len,
+                "project://scenes/Default.scene",
+                "project".len,
             ),
             .type = .scene,
         },
@@ -203,8 +203,8 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
             .id = project_id,
             .uri = try Resources.Uri.initWithProtocolLen(
                 allocator,
-                "assets://yume.json",
-                "assets".len,
+                "project://yume.json",
+                "project".len,
             ),
             .type = .project,
         },

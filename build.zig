@@ -188,11 +188,11 @@ pub fn build(b: *std.Build) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    try build_all_assets(b, .prefix, "assets", "assets");
+    try build_all_resources(b, .prefix, "resources", "resources");
     try build_all_shaders(b, .prefix, "shaders", "shaders");
 }
 
-fn build_all_assets(
+fn build_all_resources(
     b: *std.Build,
     installdir: std.Build.InstallDir,
     srcdir: []const u8,
@@ -210,7 +210,7 @@ fn build_all_assets(
                 b.getInstallStep().dependOn(&b.addInstallFileWithDir(.{ .cwd_relative = src }, installdir, out).step);
             },
             .directory => {
-                try build_all_assets(b, installdir, src, out);
+                try build_all_resources(b, installdir, src, out);
             },
             else => {},
         }

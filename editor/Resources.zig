@@ -650,7 +650,7 @@ pub fn dfsPostOrder(allocator: std.mem.Allocator) !ResourceNode.DfsPostOrder {
 
 fn registerFromMeta(opts: struct {
     path: []const u8,
-    category: []const u8 = "assets",
+    category: []const u8 = "project",
     update_uuid_if_exists: bool = false,
 }) !Uuid {
     var buf: [Resource.max_buf_size]u8 = undefined;
@@ -693,7 +693,7 @@ pub fn register(opts: struct {
     urn: []const u8,
     path: []const u8,
     type: ?Resource.Type = null,
-    category: []const u8 = "assets",
+    category: []const u8 = "project",
     ensure_meta: bool = true,
 }) !Uuid {
     const is_builtin = std.mem.eql(u8, opts.category, "builtin") or std.mem.eql(u8, opts.category, "editor");
@@ -703,7 +703,7 @@ pub fn register(opts: struct {
     defer self.allocator.free(editor_root);
 
     const path = if (is_builtin)
-        try std.fs.path.joinZ(self.allocator, &[_][]const u8{ editor_root, "assets", opts.category, opts.path })
+        try std.fs.path.joinZ(self.allocator, &[_][]const u8{ editor_root, "resources", opts.category, opts.path })
     else
         try self.allocator.dupeZ(u8, opts.path);
     defer self.allocator.free(path);
@@ -823,12 +823,12 @@ pub fn indexCwd() !void {
             .directory => { // TODO: perhaps directories should have a register method as well?
                 var dir_node = ResourceNode.init(self.allocator, .{
                     .directory = Uri.fromOwnedSliceWithProtocolLen(
-                        try std.fmt.allocPrintZ(self.allocator, "assets://{s}", .{entry.path}),
-                        "assets".len,
+                        try std.fmt.allocPrintZ(self.allocator, "project://{s}", .{entry.path}),
+                        "project".len,
                     ),
                 });
 
-                const tmp_path = try std.fmt.allocPrintZ(self.allocator, "/assets/{s}", .{entry.path}); // TODO: remove me
+                const tmp_path = try std.fmt.allocPrintZ(self.allocator, "/project/{s}", .{entry.path}); // TODO: remove me
                 defer self.allocator.free(tmp_path);
                 const gop = try self.resource_tree.getOrPut(tmp_path);
                 if (gop.found_existing) {
@@ -858,7 +858,7 @@ pub fn indexCwd() !void {
 
 pub fn parseUri(allocator: std.mem.Allocator, uri: []const u8) ![:0]const u8 {
     // fast path for URIs from the root `:://`
-    // e.g. `:://assets/x/y/z` over `assets://x/y/z`
+    // e.g. `:://project/x/y/z` over `project://x/y/z`
     if (std.mem.eql(u8, uri[0..":://".len], ":://")) {
         return try std.fmt.allocPrintZ(allocator, "/{s}", .{uri[":://".len..]});
     }
@@ -914,8 +914,8 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
 
     dir_ev: {
         var uri = Uri.fromOwnedSliceWithProtocolLen(
-            try std.fmt.allocPrintZ(self.allocator, "assets://{s}", .{event.path()}),
-            "assets".len,
+            try std.fmt.allocPrintZ(self.allocator, "project://{s}", .{event.path()}),
+            "project".len,
         );
         defer uri.deinit(self.allocator);
 
@@ -931,7 +931,7 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                     .directory = try uri.clone(self.allocator),
                 });
 
-                const tmp_path = try std.fmt.allocPrintZ(self.allocator, "/assets/{s}", .{uri.path()}); // TODO: remove me
+                const tmp_path = try std.fmt.allocPrintZ(self.allocator, "/project/{s}", .{uri.path()}); // TODO: remove me
                 defer self.allocator.free(tmp_path);
                 const gop = try self.resource_tree.getOrPut(tmp_path);
                 if (gop.found_existing) {
@@ -965,7 +965,7 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                     break :dir_ev;
                 }
 
-                var parent_uri = (try uri.parentUri(self.allocator)) orelse try Uri.parse(self.allocator, "assets://");
+                var parent_uri = (try uri.parentUri(self.allocator)) orelse try Uri.parse(self.allocator, "project://");
                 defer parent_uri.deinit(self.allocator);
                 var parent_res = (try findResourceNodeByUri(&parent_uri)).?;
 
@@ -1000,7 +1000,7 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
             const path = utils.normalizePathSep(p);
             const baseext = utils.baseExtensionSplit(path);
             if (std.mem.eql(u8, baseext.ext, yume_meta_extension_name)) { // seen new meta
-                const uri = try std.fmt.allocPrint(self.allocator, "assets://{s}", .{baseext.base});
+                const uri = try std.fmt.allocPrint(self.allocator, "project://{s}", .{baseext.base});
                 defer self.allocator.free(uri);
                 if (resourceExistsByUri(uri)) {
                     const res_id = try getResourceId(uri);
@@ -1029,7 +1029,7 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
             const path = utils.normalizePathSep(p);
             const baseext = utils.baseExtensionSplit(path);
             if (std.mem.eql(u8, baseext.ext, yume_meta_extension_name)) { // removing a meta
-                const uri = try std.fmt.allocPrint(self.allocator, "assets://{s}", .{baseext.base});
+                const uri = try std.fmt.allocPrint(self.allocator, "project://{s}", .{baseext.base});
                 defer self.allocator.free(uri);
                 if (resourceExistsByUri(uri)) {
                     // if the resource already exists, recreate the meta from memory
@@ -1050,7 +1050,7 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                 }
             } else { // removing a resource
                 const maybe_meta = try std.fmt.allocPrint(allocator, "{s}{s}", .{ path, yume_meta_extension_name });
-                const uri = try std.fmt.allocPrint(self.allocator, "assets://{s}", .{path});
+                const uri = try std.fmt.allocPrint(self.allocator, "project://{s}", .{path});
                 defer self.allocator.free(uri);
                 const res_id = try getResourceId(uri);
                 try unregister(res_id);
@@ -1261,9 +1261,9 @@ pub const Uri = extern struct {
         return uri.buf[0..uri.protocol_len];
     }
 
-    // is protocol `assets://`?
-    pub inline fn isAssets(uri: *const Uri) bool {
-        return std.mem.eql(u8, uri.protocol(), "assets");
+    // is protocol `project://`?
+    pub inline fn isProject(uri: *const Uri) bool {
+        return std.mem.eql(u8, uri.protocol(), "project");
     }
 
     // shortthand for checking if URI is exactly `:://`
@@ -1276,7 +1276,7 @@ pub const Uri = extern struct {
         return uri.buf[0 .. uri.protocol_len + "://".len];
     }
 
-    // if uri is at the root, e.g. `assets://` it will return null
+    // if uri is at the root, e.g. `project://` it will return null
     pub fn parent(uri: *const Uri) ?[]const u8 {
         return if (uri.len == uri.protocol_len + "://".len)
             null
@@ -1306,7 +1306,7 @@ pub const Uri = extern struct {
     }
 
     pub fn bufFullpath(uri: *const Uri, buf: []u8) ![:0]const u8 {
-        if (std.mem.eql(u8, uri.protocol(), "assets")) {
+        if (std.mem.eql(u8, uri.protocol(), "project")) {
             const slice = try std.fs.cwd().realpath(uri.path(), buf);
             if (buf.len <= slice.len) return error.NoSpaceLeft;
             buf[slice.len] = 0;
@@ -1318,7 +1318,7 @@ pub const Uri = extern struct {
         } else {
             var editor_root_buf: [std.fs.max_path_bytes]u8 = undefined;
             const editor_root = try Editor.bufRootDir(&editor_root_buf);
-            return try std.fmt.bufPrintZ(buf, "{s}/assets/{s}/{s}", .{ editor_root, uri.protocol(), uri.path() });
+            return try std.fmt.bufPrintZ(buf, "{s}/resources/{s}/{s}", .{ editor_root, uri.protocol(), uri.path() });
         }
     }
 
