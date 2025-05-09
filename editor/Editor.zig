@@ -673,6 +673,10 @@ pub fn openProject(self: *Self) void {
 }
 
 pub fn openScene(self: *Self, scene_id: Uuid) !void {
+    switch (self.selection) {
+        .entity => self.selection = .none,
+        else => {},
+    }
     try self.ctx.loadScene(scene_id);
     EditorDatabase.storage().last_open_scene = scene_id;
 }

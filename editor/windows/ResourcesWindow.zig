@@ -115,7 +115,9 @@ pub fn draw(self: *Self) !void {
             const table_size = c.ImVec2{ .x = view_size.x, .y = view_size.y - 12 };
             const cursor = c.ImGui_GetCursorPos();
             c.ImGui_SetNextItemAllowOverlap();
-            _ = c.ImGui_InvisibleButton("resources-background", table_size, 0);
+            if (c.ImGui_InvisibleButton("resources-background", table_size, 0)) {
+                try self.setSelected(null);
+            }
             try self.drawBackgroundContextMenu();
             c.ImGui_SetCursorPos(cursor);
             const draw_table = c.ImGui_BeginTableEx(
