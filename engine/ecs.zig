@@ -481,6 +481,10 @@ pub const World = struct {
         return Query.from(c.ecs_query_init(self.inner, q));
     }
 
+    pub inline fn isAlive(self: Self, ent: Entity) bool {
+        return c.ecs_is_alive(self.inner, ent);
+    }
+
     pub inline fn modified(self: Self, ent: Entity, comptime T: type) void {
         c.ecs_modified_id(self.inner, ent, typeId(T));
     }

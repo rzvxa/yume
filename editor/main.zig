@@ -6,12 +6,12 @@ const yume = @import("yume");
 const GameApp = yume.GameApp;
 
 const Editor = @import("Editor.zig");
-const AssetsDatabase = @import("AssetsDatabase.zig");
+const Resources = @import("Resources.zig");
 
 const log_harness = @import("logs_harness.zig");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 30 }){};
     defer if (gpa.deinit() == .leak) {
         @panic("Leaked memory");
     };
@@ -21,10 +21,10 @@ pub fn main() !void {
     const cwd = std.process.getCwd(cwd_buff[0..]) catch @panic("cwd_buff too small");
     std.log.info("Running from: {s}", .{cwd});
 
-    try AssetsDatabase.init(allocator);
-    defer AssetsDatabase.deinit();
+    try Resources.init(allocator);
+    defer Resources.deinit() catch {};
 
-    var app = GameApp.init(allocator, AssetsDatabase.readAssetAlloc, "Yume Editor");
+    var app = GameApp.init(allocator, Resources.readAssetAlloc, "Yume Editor");
     defer app.deinit();
 
     try app.run(Editor);

@@ -6,14 +6,14 @@ const Assets = @import("yume").Assets;
 const GameApp = @import("yume").GameApp;
 const Vec3 = @import("yume").Vec3;
 
-const AssetsDatabase = @import("../AssetsDatabase.zig");
+const Resources = @import("../Resources.zig");
 
 const Project = @import("../Project.zig");
 const Editor = @import("../Editor.zig");
 
 const Self = @This();
 
-pub fn init(_: *GameApp) Self {
+pub fn init(_: std.mem.Allocator) Self {
     return .{};
 }
 
@@ -163,7 +163,10 @@ fn drawHierarchyNode(self: *Self, world: ecs.World, entity: ecs.Entity, level: u
     }
 
     c.ImGui_SameLine();
-    c.ImGui_Image(Editor.object_icon_ds, c.ImVec2{ .x = c.ImGui_GetFontSize(), .y = c.ImGui_GetFontSize() });
+    c.ImGui_Image(try Editor.getImGuiTexture("editor://icons/object.png"), c.ImVec2{
+        .x = c.ImGui_GetFontSize(),
+        .y = c.ImGui_GetFontSize(),
+    });
     c.ImGui_SameLine();
     c.ImGui_Text(name);
     if (open) {
@@ -186,19 +189,19 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) !bool {
             c.ImGui_Separator();
             if (c.ImGui_MenuItem("Cube")) {
                 const new_entity = ctx.world.entity(.{ .name = "Cube", .parent = entity });
-                ctx.world.set(new_entity, ecs.components.Mesh, (try Assets.getOrLoadMesh(try AssetsDatabase.getResourceId("builtin://cube.obj"))).*);
-                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try AssetsDatabase.getResourceId("builtin://materials/pbr.mat"))).*);
+                ctx.world.set(new_entity, ecs.components.Mesh, (try Assets.getOrLoadMesh(try Resources.getResourceId("builtin://cube.obj"))).*);
+                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try Resources.getResourceId("builtin://materials/pbr.mat"))).*);
             }
             if (c.ImGui_MenuItem("Sphere")) {
                 const new_entity = ctx.world.entity(.{ .name = "Sphere", .parent = entity });
-                ctx.world.set(new_entity, ecs.components.Mesh, (try Assets.getOrLoadMesh(try AssetsDatabase.getResourceId("builtin://sphere.obj"))).*);
-                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try AssetsDatabase.getResourceId("builtin://materials/pbr.mat"))).*);
+                ctx.world.set(new_entity, ecs.components.Mesh, (try Assets.getOrLoadMesh(try Resources.getResourceId("builtin://sphere.obj"))).*);
+                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try Resources.getResourceId("builtin://materials/pbr.mat"))).*);
             }
             _ = c.ImGui_MenuItem("Plane*");
             if (c.ImGui_MenuItem("Suzanne")) {
                 const new_entity = ctx.world.entity(.{ .name = "Suzanne", .parent = entity });
-                ctx.world.set(new_entity, ecs.components.Mesh, (try Assets.getOrLoadMesh(try AssetsDatabase.getResourceId("builtin://suzanne.obj"))).*);
-                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try AssetsDatabase.getResourceId("builtin://materials/pbr.mat"))).*);
+                ctx.world.set(new_entity, ecs.components.Mesh, (try Assets.getOrLoadMesh(try Resources.getResourceId("builtin://suzanne.obj"))).*);
+                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try Resources.getResourceId("builtin://materials/pbr.mat"))).*);
             }
             c.ImGui_Separator();
             if (c.ImGui_MenuItem("Camera")) {

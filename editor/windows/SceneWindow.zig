@@ -180,7 +180,11 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 if (self.active_tool == .move) active_col else normal_col,
             );
 
-            clicked = c.ImGui_ImageButton("##move-tool", Editor.move_tool_icon_ds, icon_sz);
+            clicked = c.ImGui_ImageButton(
+                "##move-tool",
+                try Editor.getImGuiTexture("editor://icons/move-tool.png"),
+                icon_sz,
+            );
             c.ImGui_PopStyleColor();
             if (clicked) {
                 self.active_tool = .move;
@@ -190,7 +194,11 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 c.ImGuiCol_Button,
                 if (self.active_tool == .rotate) active_col else normal_col,
             );
-            clicked = c.ImGui_ImageButton("##rotate-tool", Editor.rotate_tool_icon_ds, icon_sz);
+            clicked = c.ImGui_ImageButton(
+                "##rotate-tool",
+                try Editor.getImGuiTexture("editor://icons/rotate-tool.png"),
+                icon_sz,
+            );
             c.ImGui_PopStyleColor();
             if (clicked) {
                 self.active_tool = .rotate;
@@ -200,7 +208,11 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 c.ImGuiCol_Button,
                 if (self.active_tool == .scale) active_col else normal_col,
             );
-            clicked = c.ImGui_ImageButton("##scale-tool", Editor.scale_tool_icon_ds, icon_sz);
+            clicked = c.ImGui_ImageButton(
+                "##scale-tool",
+                try Editor.getImGuiTexture("editor://icons/scale-tool.png"),
+                icon_sz,
+            );
             c.ImGui_PopStyleColor();
             if (clicked) {
                 self.active_tool = .scale;
@@ -210,7 +222,11 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 c.ImGuiCol_Button,
                 if (self.active_tool == .transform) active_col else normal_col,
             );
-            clicked = c.ImGui_ImageButton("##transform-tool", Editor.transform_tool_icon_ds, icon_sz);
+            clicked = c.ImGui_ImageButton(
+                "##transform-tool",
+                try Editor.getImGuiTexture("editor://icons/transform-tool.png"),
+                icon_sz,
+            );
             c.ImGui_PopStyleColor();
             if (clicked) {
                 self.active_tool = .transform;
@@ -259,10 +275,10 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                     }
 
                     if (ctx.world.get(selection, components.Mesh)) |mesh| {
-                        // try gizmo.drawBoundingBox(mesh.bounds, transform.?.value);
                         try gizmo.drawBoundingBoxCorners(mesh.bounds, transform.?.value);
                     }
-                    c.ImGuizmo_PushID_Int(@intCast(selection));
+                    var selection_id_buf = std.mem.zeroes([19:0]u8);
+                    c.ImGuizmo_PushID_Str((try std.fmt.bufPrintZ(&selection_id_buf, "{d}", .{selection})).ptr);
                     if (try gizmo.editTransform(&transform.?.value, self.active_tool)) {
                         ctx.world.modified(selection, components.Transform);
                     }
@@ -295,7 +311,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                             if (gizmo.drawBillboardIcon(
                                 (try std.fmt.bufPrintZ(&id_buf, "{d}", .{comp_id})).ptr,
                                 transform.position(),
-                                try Editor.getImGuiTexture(std.mem.span(billboard), &ctx.engine),
+                                try Editor.getImGuiTexture(std.mem.span(billboard)),
                                 32,
                             )) {
                                 Editor.instance().selection = .{ .entity = entity };
@@ -565,7 +581,7 @@ fn sys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mes
             .ubo_set = me.d.editor_camera_and_scene_set,
             .cam = &me.d.camera,
             .cam_pos = me.d.camera_pos,
-            .directional_light = directional_light,
+            .directional_light = if (me.d.render_lights) directional_light else std.mem.zeroes(Engine.GPUSceneData.GPULightData),
             .point_lights = lights,
         },
     );

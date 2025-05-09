@@ -7,12 +7,14 @@ const ecs = @import("yume").ecs;
 const utils = @import("yume").utils;
 
 const Editor = @import("../Editor.zig");
-const AssetsDatabase = @import("../AssetsDatabase.zig");
+const Resources = @import("../Resources.zig");
 
 const Self = @This();
 
-pub fn init(_: *GameApp) Self {
-    return .{};
+allocator: std.mem.Allocator,
+
+pub fn init(allocator: std.mem.Allocator) Self {
+    return .{ .allocator = allocator };
 }
 
 pub fn deinit(_: *Self) void {}
@@ -20,14 +22,15 @@ pub fn deinit(_: *Self) void {}
 pub fn draw(self: *Self, ctx: *GameApp) !void {
     if (c.ImGui_Begin("Properties", null, c.ImGuiWindowFlags_NoCollapse)) {
         switch (Editor.instance().selection) {
-            .entity => |e| try self.drawProperties(e, ctx),
+            .entity => |e| try self.drawEntityProperties(e, ctx),
+            .resource => |r| try self.drawResourceProperties(r),
             else => {},
         }
     }
     c.ImGui_End();
 }
 
-fn drawProperties(_: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
+fn drawEntityProperties(_: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
     var buf: [256]u8 = undefined;
     const gui_id = try std.fmt.bufPrint(&buf, "{}", .{entity});
     c.ImGui_PushID(gui_id.ptr);
@@ -157,9 +160,9 @@ fn drawProperties(_: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
                     const label_pad_y = (btnsz.y - label_size.y) / 2;
 
                     const icon = if (def.icon) |icon_path|
-                        try Editor.getImGuiTexture(std.mem.span(icon_path), &ctx.engine)
+                        try Editor.getImGuiTexture(std.mem.span(icon_path))
                     else
-                        Editor.file_icon_ds;
+                        try Editor.getImGuiTexture("editor://icons/file.png");
 
                     const icon_pad_y = (btnsz.y - icon_size) / 2;
 
@@ -196,7 +199,7 @@ fn drawProperties(_: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
                             const ref = c.ecs_get_mut_id(ctx.world.inner, e, def.id);
                             std.debug.assert(def.default.?(ref.?, e, ctx, extern struct {
                                 fn f(path: [*:0]const u8) callconv(.C) ecs.ResourceResolverResult {
-                                    const uuid = AssetsDatabase.getResourceId(std.mem.span(path)) catch return .{
+                                    const uuid = Resources.getResourceId(std.mem.span(path)) catch return .{
                                         .found = false,
                                         .uuid = .{ .raw = 0 },
                                     };
@@ -219,4 +222,24 @@ fn drawProperties(_: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
         }
         c.ImGui_EndPopup();
     }
+}
+
+fn drawResourceProperties(self: *Self, resource_id: Uuid) !void {
+    var buf: [256]u8 = undefined;
+    const gui_id = try std.fmt.bufPrint(&buf, "{s}", .{resource_id.urn()});
+    c.ImGui_PushID(gui_id.ptr);
+    defer c.ImGui_PopID();
+
+    var sfa = std.heap.stackFallback(2048, self.allocator);
+    const allocator = sfa.get();
+
+    const resource = try Resources.getResource(allocator, resource_id) orelse {
+        std.log.err("Invalid resource selection, resource \"{s}\" is not registered.", .{resource_id.urn()});
+        return;
+    };
+
+    c.ImGui_Text(try std.fmt.allocPrintZ(allocator, "{s}", .{std.fs.path.basename(resource.path())}));
+    c.ImGui_Separator();
+
+    for (0..2) |_| c.ImGui_Spacing();
 }

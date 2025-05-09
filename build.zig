@@ -16,7 +16,7 @@ pub fn build(b: *std.Build) !void {
     yume.addOptions("cfg", cfg);
 
     const engine_c_libs = b.addTranslateC(.{
-        .root_source_file = b.path("engine/clibs.c"),
+        .root_source_file = b.path("engine/c/clibs.c"),
         .target = target,
         .optimize = optimize,
     });
@@ -34,7 +34,7 @@ pub fn build(b: *std.Build) !void {
     });
     ufbx_lib.addIncludePath(b.path("vendor/ufbx/"));
     ufbx_lib.linkLibC();
-    ufbx_lib.root_module.addCMacro("UFBX_CONFIG_HEADER", "\"ufbx_cfg.h\"");
+    ufbx_lib.root_module.addCMacro("UFBX_CONFIG_HEADER", "\"ufbx_config.h\"");
     ufbx_lib.addCSourceFiles(.{
         .files = &.{
             "vendor/ufbx/ufbx.c",
@@ -59,8 +59,8 @@ pub fn build(b: *std.Build) !void {
         yume.addIncludePath(.{ .cwd_relative = try std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) });
         engine_c_libs.addIncludeDir(try std.fmt.allocPrint(b.allocator, "{s}/include", .{path}));
     }
-    yume.addCSourceFile(.{ .file = b.path("engine/vk_mem_alloc.cpp"), .flags = &.{""} });
-    yume.addCSourceFile(.{ .file = b.path("engine/stb_image.c"), .flags = &.{""} });
+    yume.addCSourceFile(.{ .file = b.path("engine/c/vk_mem_alloc.cpp"), .flags = &.{""} });
+    yume.addCSourceFile(.{ .file = b.path("engine/c/stb_image.c"), .flags = &.{""} });
 
     yume.addIncludePath(.{ .cwd_relative = "vendor/vma/" });
     yume.addIncludePath(.{ .cwd_relative = "vendor/stb/" });
@@ -80,7 +80,8 @@ pub fn build(b: *std.Build) !void {
         flecs_lib.root_module.addCMacro("FLECS_SANITIZE", "1");
     }
     flecs_lib.addIncludePath(b.path("vendor/flecs/flecs.h"));
-    flecs_lib.addIncludePath(b.path("vendor/flecs/flecs_cfg.h"));
+    flecs_lib.addIncludePath(b.path("vendor/flecs/flecs_config.h"));
+    flecs_lib.root_module.addCMacro("FLECS_CONFIG_HEADER", "1");
     flecs_lib.linkLibC();
     flecs_lib.addCSourceFiles(.{
         .files = &.{
@@ -187,11 +188,11 @@ pub fn build(b: *std.Build) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    try build_all_assets(b, .prefix, "assets", "assets");
+    try build_all_resources(b, .prefix, "resources", "resources");
     try build_all_shaders(b, .prefix, "shaders", "shaders");
 }
 
-fn build_all_assets(
+fn build_all_resources(
     b: *std.Build,
     installdir: std.Build.InstallDir,
     srcdir: []const u8,
@@ -209,7 +210,7 @@ fn build_all_assets(
                 b.getInstallStep().dependOn(&b.addInstallFileWithDir(.{ .cwd_relative = src }, installdir, out).step);
             },
             .directory => {
-                try build_all_assets(b, installdir, src, out);
+                try build_all_resources(b, installdir, src, out);
             },
             else => {},
         }

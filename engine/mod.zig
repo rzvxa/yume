@@ -4,6 +4,9 @@ pub const Uuid = @import("uuid.zig").Uuid;
 
 pub const ecs = @import("ecs.zig");
 
+pub const collections = @import("collections.zig");
+pub const StringSentinelArrayHashMap = collections.StringSentinelArrayHashMap;
+
 pub const GameApp = @import("GameApp.zig");
 pub const VulkanEngine = @import("VulkanEngine.zig");
 pub const vki = @import("vulkan_init.zig");

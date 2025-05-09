@@ -21,7 +21,7 @@ const utils = @import("yume").utils;
 const imutils = @import("imutils.zig");
 const Editor = @import("Editor.zig");
 const Project = @import("Project.zig");
-const AssetsDatabase = @import("AssetsDatabase.zig");
+const Resources = @import("Resources.zig");
 const EditorDatabase = @import("EditorDatabase.zig");
 
 const Self = @This();
@@ -67,7 +67,7 @@ pub fn close(self: *Self) void {
     self.is_open = false;
 }
 
-pub fn show(self: *Self, ctx: *GameApp) void {
+pub fn show(self: *Self, ctx: *GameApp) !void {
     if (!self.is_open) return;
     c.ImGui_PushID("new-project-modal");
     defer c.ImGui_PopID();
@@ -88,7 +88,11 @@ pub fn show(self: *Self, ctx: *GameApp) void {
         const close_btn_size = 32;
         c.ImGui_SetCursorPosX(avail.x - (padding_x + close_btn_size));
         c.ImGui_SetCursorPosY(cursor.y + (padding_y + close_btn_size));
-        if (c.ImGui_ImageButton("##close-btn", Editor.close_icon_ds, c.ImVec2{ .x = close_btn_size, .y = close_btn_size })) {
+        if (c.ImGui_ImageButton(
+            "##close-btn",
+            try Editor.getImGuiTexture("editor://icons/close.png"),
+            c.ImVec2{ .x = close_btn_size, .y = close_btn_size },
+        )) {
             self.close();
         }
 
@@ -141,7 +145,7 @@ pub fn show(self: *Self, ctx: *GameApp) void {
         c.ImGui_SetCursorPosX(avail.x - (padding_x + create_label_size.x));
         c.ImGui_SetCursorPosY(end_y);
         if (c.ImGui_Button(create_label)) {
-            self.onCreateClick(ctx) catch @panic("failed to create the template project");
+            try self.onCreateClick(ctx);
         }
         c.ImGui_PopFont();
         for (0..3) |_| c.ImGui_Unindent();
@@ -151,61 +155,90 @@ pub fn show(self: *Self, ctx: *GameApp) void {
 }
 
 fn onCreateClick(self: *Self, ctx: *GameApp) !void {
+    var arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     const project_name = self.project_name.span();
     const project_path = self.project_path.span();
-    const fullpath = try std.fs.path.resolve(self.allocator, &[_][]const u8{
+    const fullpath = try std.fs.path.resolve(allocator, &[_][]const u8{
         project_path,
         project_name,
     });
-    defer self.allocator.free(fullpath);
-    const scene_directory_path = try std.fs.path.join(self.allocator, &[_][]const u8{
+    const scene_directory_path = try std.fs.path.join(allocator, &[_][]const u8{
         fullpath,
         "scenes",
     });
-    defer self.allocator.free(scene_directory_path);
-    const projfile = try std.fs.path.join(self.allocator, &[_][]const u8{ fullpath, "yume.json" });
-    defer self.allocator.free(projfile);
-    const default_scene_file = try std.fs.path.join(self.allocator, &[_][]const u8{ fullpath, "scenes", "Default.scene" });
-    defer self.allocator.free(default_scene_file);
+    const projfile = try std.fs.path.join(allocator, &[_][]const u8{ fullpath, "yume.json" });
+    const default_scene_file = try std.fs.path.join(allocator, &[_][]const u8{ fullpath, "scenes", "Default.scene" });
 
     try std.fs.cwd().makePath(scene_directory_path);
 
+    const project_id = Uuid.new();
+
+    var resources = std.AutoHashMap(Uuid, Resources.Resource).init(allocator);
     var project = Project{
         .allocator = self.allocator,
 
         .project_name = try self.allocator.dupe(u8, project_name),
         .scenes = std.ArrayList(Uuid).init(self.allocator),
         .default_scene = Uuid.new(),
-
-        .resources = std.AutoHashMap(Uuid, AssetsDatabase.Resource).init(self.allocator),
-
-        .resources_index = undefined,
-        .resources_builtins = undefined,
     };
     defer project.unload();
 
-    try project.resources.put(
+    try resources.put(
         project.default_scene,
-        AssetsDatabase.Resource{
+        Resources.Resource{
             .id = project.default_scene,
-            .path = try self.allocator.dupe(u8, "scenes/Default.scene"),
+            .uri = try Resources.Uri.initWithProtocolLen(
+                allocator,
+                "project://scenes/Default.scene",
+                "project".len,
+            ),
+            .type = .scene,
+        },
+    );
+    try resources.put(
+        project_id,
+        Resources.Resource{
+            .id = project_id,
+            .uri = try Resources.Uri.initWithProtocolLen(
+                allocator,
+                "project://yume.json",
+                "project".len,
+            ),
+            .type = .project,
         },
     );
 
-    var scene = try Scene.init(self.allocator);
+    var scene = try Scene.init(allocator);
     defer scene.deinit();
 
-    const scene_json = try std.json.stringifyAlloc(self.allocator, scene, .{ .whitespace = .indent_4 });
-    defer self.allocator.free(scene_json);
-    var scene_file = try std.fs.cwd().createFile(default_scene_file, .{});
-    defer scene_file.close();
-    try scene_file.writeAll(scene_json);
+    {
+        const scene_json = try std.json.stringifyAlloc(allocator, scene, .{ .whitespace = .indent_4 });
+        var scene_file = try std.fs.cwd().createFile(default_scene_file, .{});
+        defer scene_file.close();
+        try scene_file.writeAll(scene_json);
+    }
 
-    const json = try std.json.stringifyAlloc(self.allocator, project, .{ .whitespace = .indent_4 });
-    defer self.allocator.free(json);
-    var file = try std.fs.cwd().createFile(projfile, .{});
-    defer file.close();
-    try file.writeAll(json);
+    {
+        const json = try std.json.stringifyAlloc(allocator, project, .{ .whitespace = .indent_4 });
+        var file = try std.fs.cwd().createFile(projfile, .{});
+        defer file.close();
+        try file.writeAll(json);
+    }
+
+    {
+        var iter = resources.valueIterator();
+        while (iter.next()) |it| {
+            const filename = try std.fmt.allocPrint(allocator, "{s}/{s}{s}", .{ fullpath, it.path(), Resources.yume_meta_extension_name });
+
+            const content = try std.json.stringifyAlloc(allocator, it.*, .{ .whitespace = .indent_4 });
+            var file = try std.fs.cwd().createFile(filename, .{});
+            defer file.close();
+            try file.writeAll(content);
+        }
+        resources.deinit();
+    }
 
     Editor.instance().selection = .{ .none = {} };
     try Project.load(self.allocator, projfile);

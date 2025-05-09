@@ -10,12 +10,12 @@ const check_vk = @import("yume").vki.check_vk;
 const Uuid = @import("yume").Uuid;
 const EditorDatabase = @import("EditorDatabase.zig");
 const Editors = @import("editors/editors.zig");
-const AssetsDatabase = @import("AssetsDatabase.zig");
+const Resources = @import("Resources.zig");
 const Project = @import("Project.zig");
 const Assets = @import("yume").Assets;
 
 const HierarchyWindow = @import("windows/HierarchyWindow.zig");
-const ProjectExplorerWindow = @import("windows/ProjectExplorerWindow.zig");
+const ResourcesWindow = @import("windows/ResourcesWindow.zig");
 const PropertiesWindow = @import("windows/PropertiesWindow.zig");
 const SceneWindow = @import("windows/SceneWindow.zig");
 const GameWindow = @import("windows/GameWindow.zig");
@@ -59,30 +59,57 @@ const ManipulationTool = enum {
     scale,
 };
 
-const SelectionKind = enum { none, entity, many };
+const SelectionKind = enum { none, entity, resource, many };
 const Selection = union(SelectionKind) {
-    none: void,
+    none,
     entity: ecs.Entity,
+    resource: Uuid,
     many: []Selection,
 
-    pub fn is(self: *const Selection, comptime kind: SelectionKind, other: anytype) bool {
+    pub fn is(self: *const Selection, comptime kind: SelectionKind, other: switch (kind) {
+        .none => void,
+        .entity => ecs.Entity,
+        .resource => Uuid,
+        .many => []Selection,
+    }) bool {
         if (kind != std.meta.activeTag(self.*)) {
             return false;
         }
 
-        switch (self.*) {
+        switch (kind) {
             .none => return true,
-            .entity => |e| return e == other,
+            .entity => return self.entity == other,
+            .resource => return self.resource.raw == other.raw,
             .many => return false,
         }
     }
 
     pub fn contains(self: *const Selection, comptime kind: SelectionKind, other: anytype) bool {
         switch (self.*) {
-            .none, .entity => return self.is(kind, other),
+            .none, .entity, .resource => return self.is(kind, other),
             .many => |ms| return ms.len > 0 and blk: {
                 for (ms) |m| {
                     if (m.is(kind, other)) {
+                        break :blk true;
+                    }
+                }
+                break :blk false;
+            },
+        }
+    }
+
+    pub fn remove(self: *Selection, comptime kind: SelectionKind, other: anytype) bool {
+        switch (self.*) {
+            .none, .entity, .resource => if (self.is(kind, other)) {
+                self.* = .none;
+                return true;
+            } else {
+                return false;
+            },
+            .many => |ms| return ms.len > 0 and blk: {
+                for (ms) |*m| {
+                    if (m.is(kind, other)) {
+                        m.* = .{ .none = {} };
                         break :blk true;
                     }
                 }
@@ -112,7 +139,7 @@ new_project_modal: NewProjectModal,
 open_project_modal: OpenProjectModal,
 
 hierarchy_window: HierarchyWindow,
-project_explorer: ProjectExplorerWindow,
+resources_window: ResourcesWindow,
 properties_window: PropertiesWindow,
 scene_window: SceneWindow,
 game_window: GameWindow,
@@ -153,6 +180,11 @@ pub fn init(ctx: *GameApp) *Self {
 
     const home_dir = std.fs.selfExeDirPathAlloc(ctx.allocator) catch @panic("OOM");
     defer ctx.allocator.free(home_dir);
+    std.debug.print("{s}\n", .{home_dir});
+    std.debug.print("{s}\n", .{home_dir});
+    std.debug.print("{s}\n", .{home_dir});
+    std.debug.print("{s}\n", .{home_dir});
+    std.debug.print("{s}\n", .{home_dir});
     const db_path = std.fs.path.join(ctx.allocator, &[_][]const u8{ home_dir, ".user-data", "db.json" }) catch @panic("OOM");
     defer ctx.allocator.free(db_path);
 
@@ -164,17 +196,17 @@ pub fn init(ctx: *GameApp) *Self {
         .hello_modal = HelloModal.init() catch @panic("Failed to initialize `HelloModal`"),
         .new_project_modal = NewProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `NewProjectModal`"),
         .open_project_modal = OpenProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `OpenProjectModal`"),
-        .hierarchy_window = HierarchyWindow.init(ctx),
-        .project_explorer = ProjectExplorerWindow{},
-        .properties_window = PropertiesWindow.init(ctx),
+        .hierarchy_window = HierarchyWindow.init(ctx.allocator),
+        .resources_window = ResourcesWindow.init(ctx.allocator) catch @panic("Failed to initialize `ResourcesWindow`"),
+        .properties_window = PropertiesWindow.init(ctx.allocator),
         .game_window = GameWindow.init(ctx),
-        .logs_windows = LogsWindow.init(ctx),
+        .logs_windows = LogsWindow.init(ctx.allocator),
         .scene_window = undefined,
     };
     singleton.scene_window = SceneWindow.init(ctx, @ptrCast(&Editors.onDrawGizmos), &singleton.editors);
     singleton.bootstrapEditorPipeline(ctx.world);
-    singleton.init_descriptors(&ctx.engine);
-    init_imgui(&ctx.engine) catch @panic("failed to init imgui");
+    singleton.initDescriptors(&ctx.engine);
+    initImGui(&ctx.engine) catch @panic("failed to init imgui");
 
     if (EditorDatabase.storage().last_open_project) |lop| {
         Project.load(ctx.allocator, lop) catch {
@@ -182,8 +214,14 @@ pub fn init(ctx: *GameApp) *Self {
         };
 
         if (EditorDatabase.storage().last_open_scene) |los| {
-            ctx.loadScene(los) catch |e| {
-                log.err("Failed to load previously loaded project {s} {?}\n", .{ lop, e });
+            singleton.openScene(los) catch |e| {
+                log.err("Failed to load previously loaded scene {s} {?}\n", .{ lop, e });
+                if (Project.current()) |proj| {
+                    EditorDatabase.storage().last_open_scene = proj.default_scene;
+                    singleton.openScene(proj.default_scene) catch |e2| {
+                        log.err("Failed to load project's default scene {s} {?}\n", .{ lop, e2 });
+                    };
+                }
             };
         }
     }
@@ -210,9 +248,11 @@ pub fn deinit(self: *Self) void {
     self.logs_windows.deinit();
     self.hierarchy_window.deinit();
     self.properties_window.deinit();
+    self.resources_window.deinit();
     if (Project.current()) |p| {
         p.unload();
     }
+    self.ctx.allocator.free(std.mem.span(c.ImGui_GetIO().*.IniFilename));
     loaded_imgui_images.deinit();
     check_vk(c.vkDeviceWaitIdle(self.ctx.engine.device)) catch @panic("Failed to wait for device idle");
     c.cImGui_ImplVulkan_Shutdown();
@@ -226,7 +266,7 @@ pub fn windowTitle(self: *Self) ![]u8 {
         if (self.ctx.scene_handle) |scene| {
             return try std.fmt.allocPrint(self.ctx.allocator, "{s} - {s} - {s}", .{
                 proj.project_name,
-                try AssetsDatabase.getResourcePath(scene.uuid),
+                Resources.getResourcePath(scene.uuid) catch "UNKNOWN",
                 title,
             });
         } else {
@@ -264,8 +304,36 @@ pub fn processEvent(self: *Self, event: *c.SDL_Event) bool {
 }
 
 pub fn update(self: *Self) !bool {
+    Resources.update(self.ctx.delta, self.ctx);
+    self.sanitizeSelection(&self.selection);
     try self.scene_window.update(self.ctx);
     return self.ctx.world.progress(self.ctx.delta);
+}
+
+pub fn sanitizeSelection(self: *Self, sel: *Selection) void {
+    switch (sel.*) {
+        .entity => |it| if (!self.ctx.world.isAlive(it)) {
+            sel.* = .{ .none = {} };
+        },
+        .resource => |it| {
+            if (!Resources.resourceExists(it)) {
+                sel.* = .{ .none = {} };
+            }
+        },
+        .many => |items| {
+            var tail: usize = 0;
+            for (0..items.len) |i| {
+                var it = items[i];
+                self.sanitizeSelection(&it);
+                if (!it.is(.none, {})) {
+                    items[tail] = it;
+                    tail += 1;
+                }
+            }
+            std.debug.assert(self.ctx.allocator.resize(items, tail));
+        },
+        .none => {},
+    }
 }
 
 pub fn draw(self: *Self) !void {
@@ -303,7 +371,11 @@ pub fn draw(self: *Self) !void {
                 if (self.ctx.scene_handle) |hndl| {
                     const scene = self.ctx.snapshotLiveScene() catch @panic("Faield to serialize scene");
                     defer scene.deinit();
-                    const path = AssetsDatabase.getResourcePath(hndl.uuid) catch @panic("Scene not found!");
+                    var resource_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                    const path = Resources.bufResourceFullpath(
+                        hndl.uuid,
+                        &resource_path_buf,
+                    ) catch @panic("Scene not found!");
                     const json = std.json.stringifyAlloc(self.ctx.allocator, scene, .{ .whitespace = .indent_4 }) catch @panic("Failed to serialize the scene");
                     defer self.ctx.allocator.free(json);
                     log.info("saving scene \"{s}\" to save to \"{s}\"\n", .{ hndl.uuid.urn(), path });
@@ -334,13 +406,17 @@ pub fn draw(self: *Self) !void {
             c.ImGui_EndMenu();
         }
         c.ImGui_SetCursorPosX((c.ImGui_GetCursorPosX() - (13 * 3)) + (GameApp.window_extent.width / 2) - c.ImGui_GetCursorPosX());
-        if (c.ImGui_ImageButton("Play", if (self.play) stop_icon_ds else play_icon_ds, c.ImVec2{ .x = 13, .y = 13 })) {
+        if (c.ImGui_ImageButton(
+            "Play",
+            try getImGuiTexture(if (self.play) "editor://icons/stop.png" else "editor://icons/play.png"),
+            c.ImVec2{ .x = 13, .y = 13 },
+        )) {
             self.play = !self.play;
             self.ctx.world.enable(ecs.typeId(Playing), self.play);
             self.bootstrapEditorPipeline(self.ctx.world);
         }
-        _ = c.ImGui_ImageButton("Pause", pause_icon_ds, c.ImVec2{ .x = 13, .y = 13 });
-        _ = c.ImGui_ImageButton("Next", fast_forward_icon_ds, c.ImVec2{ .x = 13, .y = 13 });
+        _ = c.ImGui_ImageButton("Pause", try getImGuiTexture("editor://icons/pause.png"), c.ImVec2{ .x = 13, .y = 13 });
+        _ = c.ImGui_ImageButton("Next", try getImGuiTexture("editor://icons/fast-forward.png"), c.ImVec2{ .x = 13, .y = 13 });
         c.ImGui_EndMainMenuBar();
     }
 
@@ -393,7 +469,7 @@ pub fn draw(self: *Self) !void {
 
             // we now dock our windows into the docking node we made above
             c.ImGui_DockBuilderDockWindow("Logs", dock_id_down);
-            c.ImGui_DockBuilderDockWindow("Project", dock_id_down);
+            c.ImGui_DockBuilderDockWindow("Resources", dock_id_down);
             c.ImGui_DockBuilderDockWindow("Hierarchy", dock_id_left);
             c.ImGui_DockBuilderDockWindow("Properties", dock_id_right);
             c.ImGui_DockBuilderDockWindow("Game", dockspace_id);
@@ -405,15 +481,15 @@ pub fn draw(self: *Self) !void {
     c.ImGui_End();
 
     self.hierarchy_window.draw(self.ctx);
-    self.properties_window.draw(self.ctx) catch @panic("err");
-    self.project_explorer.draw();
+    try self.properties_window.draw(self.ctx);
+    try self.resources_window.draw();
     try self.scene_window.draw(cmd, self.ctx);
     self.game_window.draw(cmd, self.ctx);
-    self.logs_windows.draw();
+    try self.logs_windows.draw();
 
     self.hello_modal.show();
-    self.new_project_modal.show(self.ctx);
-    self.open_project_modal.show(self.ctx);
+    try self.new_project_modal.show(self.ctx);
+    try self.open_project_modal.show(self.ctx);
 
     c.ImGui_Render();
 
@@ -425,7 +501,7 @@ pub fn draw(self: *Self) !void {
     self.ctx.engine.endFrame(cmd);
 }
 
-fn init_descriptors(self: *Self, engine: *Engine) void {
+fn initDescriptors(self: *Self, engine: *Engine) void {
     const camera_and_scene_buffer_size =
         FRAME_OVERLAP * engine.padUniformBufferSize(@sizeOf(GPUCameraData)) +
         FRAME_OVERLAP * engine.padUniformBufferSize(@sizeOf(GPUSceneData));
@@ -485,7 +561,7 @@ fn init_descriptors(self: *Self, engine: *Engine) void {
     c.vkUpdateDescriptorSets(engine.device, @as(u32, @intCast(editor_camera_and_scene_writes.len)), &editor_camera_and_scene_writes[0], 0, null);
 }
 
-fn init_imgui(engine: *Engine) !void {
+fn initImGui(engine: *Engine) !void {
     const pool_sizes = [_]c.VkDescriptorPoolSize{
         .{
             .type = c.VK_DESCRIPTOR_TYPE_SAMPLER,
@@ -561,45 +637,26 @@ fn init_imgui(engine: *Engine) !void {
     });
 
     const io = c.ImGui_GetIO();
-    roboto14 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/editor/fonts/roboto.ttf", 14, null, null);
-    roboto24 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/editor/fonts/roboto.ttf", 24, null, null);
-    roboto32 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "assets/editor/fonts/roboto.ttf", 32, null, null);
+    // TODO: load fonts as assets similar to imgui textures
+    roboto14 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "resources/editor/fonts/roboto.ttf", 14, null, null);
+    roboto24 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "resources/editor/fonts/roboto.ttf", 24, null, null);
+    roboto32 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "resources/editor/fonts/roboto.ttf", 32, null, null);
 
     _ = c.cImGui_ImplVulkan_Init(&init_info);
     _ = c.cImGui_ImplVulkan_CreateFontsTexture();
 
     loaded_imgui_images = std.StringHashMap(c.ImTextureID).init(engine.allocator);
 
-    play_icon_ds = try getImGuiTexture("editor://icons/play.png", engine);
-    pause_icon_ds = try getImGuiTexture("editor://icons/pause.png", engine);
-    stop_icon_ds = try getImGuiTexture("editor://icons/stop.png", engine);
-    fast_forward_icon_ds = try getImGuiTexture("editor://icons/fast-forward.png", engine);
-    folder_icon_ds = try getImGuiTexture("editor://icons/folder.png", engine);
-    file_icon_ds = try getImGuiTexture("editor://icons/file.png", engine);
-    object_icon_ds = try getImGuiTexture("editor://icons/object.png", engine);
-    move_tool_icon_ds = try getImGuiTexture("editor://icons/move-tool.png", engine);
-    rotate_tool_icon_ds = try getImGuiTexture("editor://icons/rotate-tool.png", engine);
-    scale_tool_icon_ds = try getImGuiTexture("editor://icons/scale-tool.png", engine);
-    transform_tool_icon_ds = try getImGuiTexture("editor://icons/transform-tool.png", engine);
-    close_icon_ds = try getImGuiTexture("editor://icons/close.png", engine);
-    browse_icon_ds = try getImGuiTexture("editor://icons/browse.png", engine);
-
-    error_icon_ds = try getImGuiTexture("editor://icons/error.png", engine);
-    warning_icon_ds = try getImGuiTexture("editor://icons/warning.png", engine);
-    info_icon_ds = try getImGuiTexture("editor://icons/info.png", engine);
-    debug_icon_ds = try getImGuiTexture("editor://icons/debug.png", engine);
-
-    error_mono_icon_ds = try getImGuiTexture("editor://icons/error-mono.png", engine);
-    warning_mono_icon_ds = try getImGuiTexture("editor://icons/warning-mono.png", engine);
-    info_mono_icon_ds = try getImGuiTexture("editor://icons/info-mono.png", engine);
-    debug_mono_icon_ds = try getImGuiTexture("editor://icons/debug-mono.png", engine);
-
-    yume_logo_ds = try getImGuiTexture("editor://icons/yume.png", engine);
+    yume_logo_ds = try getImGuiTexture("editor://icons/yume.png");
 
     engine.deletion_queue.append(VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool)) catch @panic("Out of memory");
 
     io.*.ConfigFlags |= c.ImGuiConfigFlags_DockingEnable;
     io.*.ConfigWindowsMoveFromTitleBarOnly = true;
+
+    const root_dir = try rootDir(engine.allocator);
+    defer engine.allocator.free(root_dir);
+    io.*.IniFilename = try std.fs.path.joinZ(engine.allocator, &[_][]const u8{ root_dir, "imgui.ini" });
 
     styles.visualStudioStyles();
 }
@@ -614,6 +671,15 @@ pub fn newProject(self: *Self) void {
 
 pub fn openProject(self: *Self) void {
     self.open_project_modal.open();
+}
+
+pub fn openScene(self: *Self, scene_id: Uuid) !void {
+    switch (self.selection) {
+        .entity => self.selection = .none,
+        else => {},
+    }
+    try self.ctx.loadScene(scene_id);
+    EditorDatabase.storage().last_open_scene = scene_id;
 }
 
 pub fn trySetParentKeepUniquePathName(world: ecs.World, entity: ecs.Entity, new_parent: ecs.Entity, allocator: std.mem.Allocator) !void {
@@ -751,12 +817,16 @@ pub fn messageBox(opts: struct {
     return @intCast(button);
 }
 
-pub fn getImGuiTexture(uri: []const u8, engine: *Engine) !c.ImTextureID {
+pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
+    var engine = &instance().ctx.engine;
     const entry = try loaded_imgui_images.getOrPut(uri);
+    errdefer if (!entry.found_existing) {
+        _ = loaded_imgui_images.remove(uri);
+    };
     if (entry.found_existing) {
         return entry.value_ptr.*;
     }
-    const image = try Assets.getOrLoadImage(try AssetsDatabase.getResourceId(uri));
+    const image = try Assets.getOrLoadImage(try Resources.getResourceId(uri));
 
     // Create the Image View
     var image_view: c.VkImageView = undefined;
@@ -823,11 +893,6 @@ fn bootstrapEditorPipeline(self: *const Self, world: ecs.World) void {
 const RunInEditor = extern struct {};
 const Playing = extern struct {};
 
-fn flecs_bootstrap_phase_(world: ecs.World, phase: ecs.Entity, depends_on: ecs.Entity) void {
-    c.ecs_add_id(world.inner, phase, ecs.systems.Phase);
-    world.addPair(phase, ecs.relations.DependsOn, depends_on);
-}
-
 fn flecs_entity_compare(e1: c.ecs_entity_t, _: ?*const anyopaque, e2: c.ecs_entity_t, _: ?*const anyopaque) callconv(.C) c_int {
     return @as(c_int, @intCast(@intFromBool((e1 > e2)))) - @intFromBool((e1 < e2));
 }
@@ -842,69 +907,16 @@ pub var roboto14: *c.ImFont = undefined;
 pub var roboto24: *c.ImFont = undefined;
 pub var roboto32: *c.ImFont = undefined;
 
-// assets
-
 pub var loaded_imgui_images: std.StringHashMap(c.ImTextureID) = undefined;
-
-pub var play_icon_ds: c.ImTextureID = undefined;
-pub var pause_icon_ds: c.ImTextureID = undefined;
-pub var stop_icon_ds: c.ImTextureID = undefined;
-pub var fast_forward_icon_ds: c.ImTextureID = undefined;
-pub var folder_icon_ds: c.ImTextureID = undefined;
-pub var file_icon_ds: c.ImTextureID = undefined;
-pub var object_icon_ds: c.ImTextureID = undefined;
-pub var move_tool_icon_ds: c.ImTextureID = undefined;
-pub var rotate_tool_icon_ds: c.ImTextureID = undefined;
-pub var scale_tool_icon_ds: c.ImTextureID = undefined;
-pub var transform_tool_icon_ds: c.ImTextureID = undefined;
-pub var close_icon_ds: c.ImTextureID = undefined;
-pub var browse_icon_ds: c.ImTextureID = undefined;
-
-pub var error_icon_ds: c.ImTextureID = undefined;
-pub var warning_icon_ds: c.ImTextureID = undefined;
-pub var info_icon_ds: c.ImTextureID = undefined;
-pub var debug_icon_ds: c.ImTextureID = undefined;
-
-pub var error_mono_icon_ds: c.ImTextureID = undefined;
-pub var warning_mono_icon_ds: c.ImTextureID = undefined;
-pub var info_mono_icon_ds: c.ImTextureID = undefined;
-pub var debug_mono_icon_ds: c.ImTextureID = undefined;
 
 pub var yume_logo_ds: c.ImTextureID = undefined;
 
-fn frustum(left: f32, right: f32, bottom: f32, top: f32, znear: f32, zfar: f32, m16: *[16]f32) void {
-    const temp = 2 * znear;
-    const temp2 = right - left;
-    const temp3 = top - bottom;
-    const temp4 = zfar - znear;
-    m16.*[0] = temp / temp2;
-    m16.*[1] = 0.0;
-    m16.*[2] = 0.0;
-    m16.*[3] = 0.0;
-    m16.*[4] = 0.0;
-    m16.*[5] = temp / temp3;
-    m16.*[6] = 0.0;
-    m16.*[7] = 0.0;
-    m16.*[8] = (right + left) / temp2;
-    m16.*[9] = (top + bottom) / temp3;
-    m16.*[10] = (-zfar - znear) / temp4;
-    m16.*[11] = -1;
-    m16.*[12] = 0.0;
-    m16.*[13] = 0.0;
-    m16.*[14] = (-temp * zfar) / temp4;
-    m16.*[15] = 0.0;
+pub fn rootDir(allocator: std.mem.Allocator) ![]const u8 {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    return allocator.dupe(u8, try bufRootDir(&buf));
 }
 
-fn perspective(fovyInDegrees: f32, aspectRatio: f32, znear: f32, zfar: f32, m16: *[16]f32) void {
-    const ymax = znear * @tan(fovyInDegrees * 3.141592 / 180);
-    const xmax = ymax * aspectRatio;
-    frustum(-xmax, xmax, -ymax, ymax, znear, zfar, m16);
-}
-
-fn getForwardDirection(transformMatrix: Mat4) Vec3 {
-    // Extract the basis vectors directly from the rotation part of the transform matrix.
-    const forward = Vec3.make(-transformMatrix.unnamed[2][0], // Negative Z in world space
-        -transformMatrix.unnamed[2][1], -transformMatrix.unnamed[2][2]);
-
-    return forward.normalized(); // Normalize the vector to ensure unit length
+pub fn bufRootDir(buf: []u8) ![]const u8 {
+    const exe_path = try std.fs.selfExeDirPath(buf);
+    return std.fs.path.dirname(exe_path) orelse return error.InvalidPath;
 }

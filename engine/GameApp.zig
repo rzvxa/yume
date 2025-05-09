@@ -93,6 +93,7 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) !void {
     var quit = false;
     var event: c.SDL_Event = undefined;
     var d = Dispatcher.init(self);
+    defer d.deinit();
     while (!quit) {
         self.newFrame();
         if (comptime std.meta.hasMethod(Dispatcher, "newFrame")) {
@@ -147,8 +148,6 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) !void {
             d.endFrame();
         }
     }
-
-    d.deinit();
 }
 
 pub fn deinit(self: *Self) void {
@@ -243,6 +242,10 @@ pub fn snapshotLiveScene(self: *Self) !*Scene {
 pub fn registerComponent(self: *Self, comptime T: type) void {
     const comp = self.world.component(T);
     self.components.put(ecs.typeName(T), comp) catch @panic("OOM");
+}
+
+pub fn isFocused(self: *Self) bool {
+    return c.SDL_GetWindowFlags(self.window) & c.SDL_WINDOW_INPUT_FOCUS != 0;
 }
 
 fn newFrame(self: *Self) void {

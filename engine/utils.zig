@@ -116,3 +116,111 @@ pub fn levenshtein(a: []const u8, b: []const u8, allocator: std.mem.Allocator) u
 
     return result;
 }
+
+pub fn tryOpenWithOsDefaultApplication(allocator: std.mem.Allocator, path: []const u8) !void {
+    _ = switch (builtin.os.tag) {
+        .windows => std.process.Child.run(.{ .allocator = allocator, .argv = &.{
+            "cmd",
+            "/c",
+            "start",
+            "\"\"",
+            path,
+        } }) catch return error.FailedToOpen,
+        .macos => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "open", path } }) catch return error.FailedToOpen,
+        .linux => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "xdg-open", path } }) catch return error.LauncherNotFound,
+        else => |p| @compileError("Unsupported platform: " ++ p),
+    };
+}
+
+pub fn tryRevealPathInOsFileManager(allocator: std.mem.Allocator, path: []const u8) !void {
+    _ = switch (builtin.os.tag) {
+        .windows => {
+            const cmd_head = "explorer /select,";
+            var buf: [std.fs.max_path_bytes + cmd_head.len]u8 = undefined;
+            const cmd = try std.fmt.bufPrint(&buf, "{s}{s}", .{ cmd_head, path });
+            _ = OsifyPathSep(cmd[cmd_head.len..]);
+            _ = std.process.Child.run(.{
+                .allocator = allocator,
+                .argv = &.{
+                    "cmd",
+                    "/c",
+                    cmd,
+                },
+            }) catch return error.FailedToReveal;
+        },
+        .macos => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "open -R", path } }) catch return error.FailedToReveal,
+        .linux => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "xdg-open", path } }) catch return error.FileManagerNotFound,
+        else => |p| @compileError("Unsupported platform: " ++ p),
+    };
+}
+
+pub const BaseExtensionSplitResult = struct {
+    base: []const u8,
+    ext: []const u8,
+    index_of_dot: ?usize, // if null, path has no extension part
+};
+
+// splits the path into extension and everything but the extension
+// both slices are always guaranteed to be in valid range of the path
+// similar to the standard library's extension method,
+// the extension includes the preceding dot.
+// Example: 'a/b/c/d.zig' => { base: 'a/b/c/d', ext: '.zig' }
+// Example: 'a/b/c/d.zig.zag' => { base: 'a/b/c/d.zig', ext: '.zag' }
+pub fn baseExtensionSplit(path: []const u8) BaseExtensionSplitResult {
+    const index = std.mem.lastIndexOfScalar(u8, path, '.') orelse return .{
+        .base = path,
+        .ext = path[path.len..],
+        .index_of_dot = null,
+    };
+    return if (index == 0) .{ // dot file (e.g. `.bashrc`)
+        .base = path[0..],
+        .ext = path[path.len..],
+        .index_of_dot = null,
+    } else .{
+        .ext = path[index..],
+        .base = path[0..index],
+        .index_of_dot = index,
+    };
+}
+
+// mutates the path in-place and returns it
+// this function replaces `\\` with `/` in-place and therefore path is guaranteed
+// to always have enough room for the result.
+pub fn normalizePathSep(path: []u8) []u8 {
+    if (builtin.os.tag == .windows) {
+        for (path, 0..) |char, i| {
+            if (char == '\\') {
+                path[i] = '/';
+            }
+        }
+    }
+    return path;
+}
+
+pub fn normalizePathSepZ(path: [*:0]u8) [*:0]u8 {
+    if (builtin.os.tag == .windows) {
+        var i: usize = 0;
+        while (true) : (i += 1) {
+            if (path[i] == 0) {
+                break;
+            }
+
+            if (path[i] == '\\') {
+                path[i] = '/';
+            }
+        }
+    }
+    return path;
+}
+
+// similar to normalizePath but works in reverse, on windows turns '/' to '\'
+pub fn OsifyPathSep(path: []u8) []u8 {
+    if (builtin.os.tag == .windows) {
+        for (path, 0..) |char, i| {
+            if (char == '/') {
+                path[i] = '\\';
+            }
+        }
+    }
+    return path;
+}
