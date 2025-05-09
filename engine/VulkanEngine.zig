@@ -231,6 +231,7 @@ pub fn init(a: std.mem.Allocator, window: *c.SDL_Window) Self {
     check_vk(c.vmaCreateAllocator(&allocator_ci, &engine.vma_allocator)) catch @panic("Failed to create VMA allocator");
 
     engine.initSwapchain();
+    engine.initDepthImage();
     engine.initCommands();
     engine.initDefaultRenderpass();
     engine.initFramebuffers();
@@ -330,12 +331,19 @@ fn initSwapchain(self: *Self) void {
     self.swapchain_images = swapchain.images;
     self.swapchain_image_views = swapchain.image_views;
 
-    for (self.swapchain_image_views) |view|
-        self.deletion_queue.append(VulkanDeleter.make(view, c.vkDestroyImageView)) catch @panic("Out of memory");
-    self.deletion_queue.append(VulkanDeleter.make(swapchain.handle, c.vkDestroySwapchainKHR)) catch @panic("Out of memory");
-
     log.info("Created swapchain", .{});
+}
 
+fn deinitSwapchain(self: *Self) void {
+    for (self.swapchain_image_views) |view|
+        c.vkDestroyImageView(self.device, view, vk_alloc_cbs);
+    c.vkDestroySwapchainKHR(self.device, self.swapchain, vk_alloc_cbs);
+
+    self.allocator.free(self.swapchain_image_views);
+    self.allocator.free(self.swapchain_images);
+}
+
+fn initDepthImage(self: *Self) void {
     // Create depth image to associate with the swapchain
     const extent = c.VkExtent3D{
         .width = self.swapchain_extent.width,
@@ -383,10 +391,23 @@ fn initSwapchain(self: *Self) void {
 
     check_vk(c.vkCreateImageView(self.device, &depth_image_view_ci, vk_alloc_cbs, &self.depth_image_view)) catch @panic("Failed to create depth image view");
 
-    self.deletion_queue.append(VulkanDeleter.make(self.depth_image_view, c.vkDestroyImageView)) catch @panic("Out of memory");
-    self.image_deletion_queue.append(VmaImageDeleter{ .image = self.depth_image }) catch @panic("Out of memory");
-
     log.info("Created depth image", .{});
+}
+
+fn deinitDepthImage(self: *Self) void {
+    c.vkDestroyImageView(self.device, self.depth_image_view, vk_alloc_cbs);
+    c.vmaDestroyImage(self.vma_allocator, self.depth_image.image, self.depth_image.allocation);
+}
+
+fn recreateSwapchain(self: *Self) void {
+    check_vk(c.vkDeviceWaitIdle(self.device)) catch @panic("Failed to wait device idle");
+    self.deinitSwapchain();
+    self.deinitDepthImage();
+    self.deinitFramebuffers();
+
+    self.initSwapchain();
+    self.initDepthImage();
+    self.initFramebuffers();
 }
 
 fn initCommands(self: *Self) void {
@@ -665,10 +686,17 @@ fn initFramebuffers(self: *Self) void {
         };
         framebuffer_ci.pAttachments = &attachements[0];
         check_vk(c.vkCreateFramebuffer(self.device, &framebuffer_ci, vk_alloc_cbs, framebuffer)) catch @panic("Failed to create framebuffer");
-        self.deletion_queue.append(VulkanDeleter.make(framebuffer.*, c.vkDestroyFramebuffer)) catch @panic("Out of memory");
     }
 
     log.info("Created {} framebuffers", .{self.framebuffers.len});
+}
+
+fn deinitFramebuffers(self: *Self) void {
+    for (self.framebuffers) |framebuffer| {
+        c.vkDestroyFramebuffer(self.device, framebuffer, vk_alloc_cbs);
+    }
+
+    self.allocator.free(self.framebuffers);
 }
 
 fn initSyncStructures(self: *Self) void {
@@ -1041,9 +1069,9 @@ pub fn deinit(self: *Self) void {
     }
     self.deletion_queue.deinit();
 
-    self.allocator.free(self.framebuffers);
-    self.allocator.free(self.swapchain_image_views);
-    self.allocator.free(self.swapchain_images);
+    self.deinitSwapchain();
+    self.deinitDepthImage();
+    self.deinitFramebuffers();
 
     c.vmaDestroyAllocator(self.vma_allocator);
 
@@ -1135,7 +1163,20 @@ pub fn beginFrame(self: *Self) RenderCommand {
     check_vk(c.vkResetFences(self.device, 1, &frame.render_fence)) catch @panic("Failed to reset render fence");
 
     var swapchain_image_index: u32 = undefined;
-    check_vk(c.vkAcquireNextImageKHR(self.device, self.swapchain, timeout, frame.present_semaphore, null, &swapchain_image_index)) catch @panic("Failed to acquire swapchain image");
+    check_vk(c.vkAcquireNextImageKHR(
+        self.device,
+        self.swapchain,
+        timeout,
+        frame.present_semaphore,
+        null,
+        &swapchain_image_index,
+    )) catch |err| switch (err) {
+        error.vk_error_out_of_date_khr => {
+            self.recreateSwapchain();
+            return self.beginFrame();
+        },
+        else => @panic("Failed to acquire swapchain image"),
+    };
 
     self.current_image_idx = swapchain_image_index;
     const cmd = frame.main_command_buffer;
@@ -1216,8 +1257,11 @@ pub fn endFrame(self: *Self, cmd: RenderCommand) void {
         .pSwapchains = &self.swapchain,
         .pImageIndices = &self.current_image_idx,
     });
-    check_vk(c.vkQueuePresentKHR(self.present_queue, &present_info)) catch @panic("Failed to present swapchain image");
 
+    check_vk(c.vkQueuePresentKHR(self.present_queue, &present_info)) catch |err| switch (err) {
+        error.vk_error_out_of_date_khr => self.recreateSwapchain(),
+        else => @panic("Failed to present swapchain image"),
+    };
     self.frame_number +%= 1;
     self.object_buffer_offset = 0;
 }
