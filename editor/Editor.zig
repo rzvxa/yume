@@ -892,11 +892,6 @@ fn bootstrapEditorPipeline(self: *const Self, world: ecs.World) void {
 const RunInEditor = extern struct {};
 const Playing = extern struct {};
 
-fn flecs_bootstrap_phase_(world: ecs.World, phase: ecs.Entity, depends_on: ecs.Entity) void {
-    c.ecs_add_id(world.inner, phase, ecs.systems.Phase);
-    world.addPair(phase, ecs.relations.DependsOn, depends_on);
-}
-
 fn flecs_entity_compare(e1: c.ecs_entity_t, _: ?*const anyopaque, e2: c.ecs_entity_t, _: ?*const anyopaque) callconv(.C) c_int {
     return @as(c_int, @intCast(@intFromBool((e1 > e2)))) - @intFromBool((e1 < e2));
 }
@@ -911,48 +906,9 @@ pub var roboto14: *c.ImFont = undefined;
 pub var roboto24: *c.ImFont = undefined;
 pub var roboto32: *c.ImFont = undefined;
 
-// assets
-
 pub var loaded_imgui_images: std.StringHashMap(c.ImTextureID) = undefined;
 
 pub var yume_logo_ds: c.ImTextureID = undefined;
-
-fn frustum(left: f32, right: f32, bottom: f32, top: f32, znear: f32, zfar: f32, m16: *[16]f32) void {
-    const temp = 2 * znear;
-    const temp2 = right - left;
-    const temp3 = top - bottom;
-    const temp4 = zfar - znear;
-    m16.*[0] = temp / temp2;
-    m16.*[1] = 0.0;
-    m16.*[2] = 0.0;
-    m16.*[3] = 0.0;
-    m16.*[4] = 0.0;
-    m16.*[5] = temp / temp3;
-    m16.*[6] = 0.0;
-    m16.*[7] = 0.0;
-    m16.*[8] = (right + left) / temp2;
-    m16.*[9] = (top + bottom) / temp3;
-    m16.*[10] = (-zfar - znear) / temp4;
-    m16.*[11] = -1;
-    m16.*[12] = 0.0;
-    m16.*[13] = 0.0;
-    m16.*[14] = (-temp * zfar) / temp4;
-    m16.*[15] = 0.0;
-}
-
-fn perspective(fovyInDegrees: f32, aspectRatio: f32, znear: f32, zfar: f32, m16: *[16]f32) void {
-    const ymax = znear * @tan(fovyInDegrees * 3.141592 / 180);
-    const xmax = ymax * aspectRatio;
-    frustum(-xmax, xmax, -ymax, ymax, znear, zfar, m16);
-}
-
-fn getForwardDirection(transformMatrix: Mat4) Vec3 {
-    // Extract the basis vectors directly from the rotation part of the transform matrix.
-    const forward = Vec3.make(-transformMatrix.unnamed[2][0], // Negative Z in world space
-        -transformMatrix.unnamed[2][1], -transformMatrix.unnamed[2][2]);
-
-    return forward.normalized(); // Normalize the vector to ensure unit length
-}
 
 pub fn rootDir(allocator: std.mem.Allocator) ![]const u8 {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
