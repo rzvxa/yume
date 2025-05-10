@@ -8,7 +8,7 @@ const GameApp = @import("yume").GameApp;
 
 const Editor = @import("Editor.zig");
 
-const log = std.log.scoped(.AssetsDatabase);
+const log = std.log.scoped(.Resources);
 
 pub const yume_meta_extension_name = ".ym";
 
@@ -626,15 +626,13 @@ pub fn move(old_path: []const u8, new_path: []const u8) !void {
             std.fs.path.basename(new_meta),
         );
     }
-    // const id = try registerFromMeta(.{ .path = new_path });
-    // return (try findResourceNodeByUri(getResourcePtr(id).?.uri)).?;
 }
 
 pub fn readAssetAlloc(allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) ![]u8 {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const resource = getResourcePtr(id) orelse return error.ResourceNotFound;
     const fullpath = resource.bufLoadPath(&buf) catch return error.FailedToOpenResource;
-    log.debug("readAssetAlloc ({s}) :: {s}\n", .{ id.urn(), fullpath });
+    log.debug("readAssetAlloc ({s}) :: {s}", .{ id.urn(), fullpath });
     var file = std.fs.cwd().openFile(fullpath, .{}) catch return error.FailedToOpenResource;
     defer file.close();
     return file.readToEndAlloc(allocator, max_bytes) catch return error.FailedToReadResource;
@@ -722,7 +720,7 @@ pub fn register(opts: struct {
             val.deinit(self.allocator);
         }
 
-        log.warn("Duplicate resource being registered to the Assets Database, Replacing the old asset. {s}:{s}", .{ index_entry.value_ptr.urn(), uri });
+        log.warn("Duplicate resource being registered to the Resource index, Replacing the old asset. {s}:{s}", .{ index_entry.value_ptr.urn(), uri });
     }
 
     const parsed_path = try parseUri(self.allocator, uri);

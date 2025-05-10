@@ -13,7 +13,6 @@ const VulkanDeleter = @import("yume").VulkanDeleter;
 const check_vk = @import("yume").vki.check_vk;
 const Camera = @import("yume").Camera;
 const MeshRenderer = @import("yume").MeshRenderer;
-const AssetsDatabase = @import("yume").AssetsDatabase;
 const Vec3 = @import("yume").Vec3;
 const Mat4 = @import("yume").Mat4;
 
