@@ -1116,7 +1116,9 @@ pub const Uri = extern struct {
     protocol_len: usize,
 
     pub fn parse(allocator: std.mem.Allocator, slice: []const u8) !Uri {
-        return parseOwnedSlice(try allocator.dupeZ(u8, slice));
+        const owned = try allocator.dupeZ(u8, slice);
+        errdefer allocator.free(owned);
+        return parseOwnedSlice(owned);
     }
 
     pub fn parseOwnedSlice(slice: [:0]u8) !Uri {
