@@ -23,6 +23,9 @@ selected_file: ?ResourceNode.Node = null,
 entering_renaming: bool = false,
 is_focused: bool = false,
 sort_by_name: bool = true,
+editable_uri: bool = false,
+entering_editable_uri: bool = false,
+uri_str: imutils.ImString,
 name_str: imutils.ImString,
 
 pub fn init(allocator: std.mem.Allocator) !Self {
@@ -31,6 +34,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .state = .normal,
         .uri = try Resources.Uri.parse(allocator, "project://"),
         .name_str = try imutils.ImString.init(allocator),
+        .uri_str = try imutils.ImString.init(allocator),
     };
 }
 
@@ -42,6 +46,7 @@ pub fn deinit(self: *Self) void {
     }
 
     self.name_str.deinit();
+    self.uri_str.deinit();
     self.uri.deinit(self.allocator);
 }
 
@@ -204,9 +209,6 @@ fn drawItem(
         c.ImGui_PopStyleColor();
     var result: ItemResult = .none;
     if (clicked) {
-        if (!is_root) {
-            std.log.debug("click: {s}", .{node.uri() catch @panic("We")});
-        }
         result = .click;
     }
     if (c.ImGui_IsItemHovered(c.ImGuiHoveredFlags_None) and c.ImGui_IsMouseDoubleClicked(0)) {
@@ -235,7 +237,6 @@ fn drawItem(
         );
         if (c.ImGui_IsItemDeactivated()) {
             if (c.ImGui_IsItemDeactivatedAfterEdit() and !c.ImGui_IsKeyPressed(c.ImGuiKey_Escape)) {
-                std.log.info("new name: {s}", .{self.name_str.buf});
                 const old_path = try node.path();
                 var new_name_buf: [std.fs.max_path_bytes]u8 = undefined;
                 const new_path = try std.fmt.bufPrint(&new_name_buf, "{s}/{s}{s}", .{
@@ -243,7 +244,6 @@ fn drawItem(
                     self.name_str.span(),
                     if (typ != .unknown) std.fs.path.extension(old_path) else "",
                 });
-                std.log.err("old_path: {s}, new_path: {s}", .{ old_path, new_path });
                 Resources.move(old_path, new_path) catch |err| {
                     std.log.err("failed to rename from \"{s}\" to \"{s}\", err: {}", .{ old_path, new_path, err });
                 };
@@ -309,9 +309,45 @@ fn drawBreadCrumbs(self: *Self, bread_crumb_height: f32) !void {
         const cursor = c.ImGui_GetCursorPos();
         defer c.ImGui_SetCursorPos(cursor);
         c.ImGui_SetNextItemAllowOverlap();
-        if (c.ImGui_InvisibleButton("bread-crumb-frame-btn", .{ .x = crumb_total_avail.x, .y = bread_crumb_height - 8 }, 0)) {
-            std.log.debug("Clicked!!!!", .{});
+        _ = c.ImGui_InvisibleButton("bread-crumb-frame-btn", .{ .x = crumb_total_avail.x, .y = bread_crumb_height - 8 }, 0);
+        if (c.ImGui_IsItemHovered(c.ImGuiHoveredFlags_None) and c.ImGui_IsMouseDoubleClicked(0)) {
+            try self.editableUri(true);
         }
+    }
+
+    if (self.editable_uri) {
+        if (self.entering_editable_uri) {
+            c.ImGui_SetKeyboardFocusHere();
+            self.entering_editable_uri = false;
+        }
+        _ = c.ImGui_InputTextWithHintAndSizeEx(
+            "##uri-input",
+            null,
+            self.uri_str.buf,
+            @intCast(self.uri_str.size()),
+            .{ .x = crumb_total_avail.x - 8, .y = crumb_total_avail.y - 8 },
+            c.ImGuiInputTextFlags_CallbackResize | c.ImGuiInputTextFlags_EnterReturnsTrue | c.ImGuiInputTextFlags_AutoSelectAll,
+            &imutils.ImString.InputTextCallback,
+            &self.uri_str,
+        );
+
+        if (c.ImGui_IsItemDeactivated()) {
+            defer self.editableUri(false) catch {};
+            if (c.ImGui_IsItemDeactivatedAfterEdit() and !c.ImGui_IsKeyPressed(c.ImGuiKey_Escape)) {
+                const new_uri_span = self.uri_str.span();
+                var new_uri = Resources.Uri.parse(self.allocator, new_uri_span) catch |err| {
+                    std.log.err("{}, URI: \"{s}\"", .{ err, new_uri_span });
+                    return;
+                };
+                if (try Resources.findResourceNodeByUri(&new_uri)) |_| {
+                    self.setUri(new_uri);
+                } else {
+                    std.log.err("URI does not exists: \"{s}\"", .{new_uri.span()});
+                    new_uri.deinit(self.allocator);
+                }
+            }
+        }
+        return;
     }
 
     // draw the root button independent of number of crumbs, it never gets collapsed and is always present
@@ -441,7 +477,7 @@ fn drawBreadCrumbs(self: *Self, bread_crumb_height: f32) !void {
             switch (drawBreadCrumb(@intCast(i), name, i > 0)) {
                 .none => {},
                 .click => self.setUri(try Resources.Uri.parse(self.allocator, crumb.uri)),
-                .double_click => std.log.debug("TODO", .{}),
+                .double_click => try self.editableUri(true),
             }
         }
     }
@@ -466,7 +502,9 @@ fn drawBreadCrumbs(self: *Self, bread_crumb_height: f32) !void {
         }
 
         c.ImGui_SameLineEx(0, 0);
+        c.ImGui_BeginDisabled(true);
         _ = c.ImGui_ArrowButton("sep", c.ImGuiDir_Right);
+        c.ImGui_EndDisabled();
     }
 
     { // draw tail items
@@ -477,7 +515,7 @@ fn drawBreadCrumbs(self: *Self, bread_crumb_height: f32) !void {
             switch (drawBreadCrumb(@intCast(i), name, i > 0)) {
                 .none => {},
                 .click => self.setUri(try Resources.Uri.parse(self.allocator, crumb.uri)),
-                .double_click => std.log.debug("TODO", .{}),
+                .double_click => try self.editableUri(true),
             }
         }
     }
@@ -491,6 +529,9 @@ fn drawBreadCrumb(id: c_int, name: [*:0]const u8, arrow_sep: bool) DrawBreadCrum
     defer c.ImGui_PopID();
     if (c.ImGui_Button(name)) {
         result = .click;
+    }
+    if (c.ImGui_IsItemHovered(c.ImGuiHoveredFlags_None) and c.ImGui_IsMouseDoubleClicked(0)) {
+        result = .double_click;
     }
     c.ImGui_SameLineEx(0, 0);
     c.ImGui_BeginDisabled(true);
@@ -547,7 +588,6 @@ fn drawBackgroundContextMenu(self: *Self) !void {
                 const explorer_fullpath = try self.uri.bufFullpath(&buf2);
                 const possible_path = try std.fmt.bufPrintZ(&buf3, "{s}/{s}", .{ explorer_fullpath, possible_name });
 
-                std.log.debug("path: {s}", .{possible_path});
                 std.fs.cwd().makeDir(possible_path) catch |err| switch (err) {
                     error.PathAlreadyExists => continue,
                     else => return err,
@@ -607,8 +647,18 @@ fn reveal(self: *Self, node: *const Node) !void {
     }
 }
 
+fn editableUri(self: *Self, editable: bool) !void {
+    if (editable) {
+        try self.uri_str.set(self.uri.span());
+        self.editable_uri = true;
+        self.entering_editable_uri = true;
+    } else {
+        self.editable_uri = false;
+        self.entering_editable_uri = false;
+    }
+}
+
 fn setUri(self: *Self, uri: Resources.Uri) void {
-    std.log.debug("setUri: {s}", .{uri});
     var old_mem = self.uri;
     defer old_mem.deinit(self.allocator);
     self.normal();
