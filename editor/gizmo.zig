@@ -12,6 +12,11 @@ const Rect = yume.Rect;
 
 const BoundingBox = @import("yume").ecs.components.mesh.BoundingBox;
 
+pub const ManipulationMode = enum(c_uint) {
+    local = c.IMGUIZMO_LOCAL,
+    global = c.IMGUIZMO_WORLD,
+};
+
 pub const ManipulationTool = enum(c_uint) {
     move_x = c.IMGUIZMO_TRANSLATE_X,
     move_y = c.IMGUIZMO_TRANSLATE_Y,
@@ -96,13 +101,23 @@ pub inline fn isUsingAny() bool {
     return c.ImGuizmo_IsUsingAny();
 }
 
-pub fn editTransform(matrix: *Mat4, tool: ManipulationTool) !bool {
+pub fn editTransform(matrix: *Mat4, tool: ManipulationTool, mode: ManipulationMode) !bool {
     try drawSanityCheck(&context);
 
     c.ImGuizmo_SetRect(c.ImGui_GetWindowPos().x, c.ImGui_GetWindowPos().y, context.viewport.width, context.viewport.height);
     var view = context.view;
     var proj = context.projection;
-    const result = c.ImGuizmo_Manipulate(&view.values, &proj.values, @intFromEnum(tool), c.IMGUIZMO_WORLD, &matrix.values, null, null, null, null);
+    const result = c.ImGuizmo_Manipulate(
+        &view.values,
+        &proj.values,
+        @intFromEnum(tool),
+        @intFromEnum(mode),
+        &matrix.values,
+        null,
+        null,
+        null,
+        null,
+    );
     context.is_over_any = context.is_over_any or c.ImGuizmo_IsOver_Nil();
     return result;
 }

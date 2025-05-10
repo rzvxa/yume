@@ -44,6 +44,7 @@ target_pos: Vec3 = Vec3.ZERO,
 distance: f32 = default_cam_distance,
 
 active_tool: gizmo.ManipulationTool = .move,
+active_mode: gizmo.ManipulationMode = .global,
 
 is_perspective: bool = true,
 render_lights: bool = true,
@@ -173,7 +174,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
         const active_col = c.ImGui_GetStyle().*.Colors[c.ImGuiCol_ButtonHovered];
         if (c.ImGui_BeginChildFrame(c.ImGui_GetID("##toolbox"), c.ImVec2{
             .x = icon_sz.x + (c.ImGui_GetStyle().*.FramePadding.x * 4),
-            .y = (icon_sz.y + c.ImGui_GetStyle().*.FramePadding.y * 4) * 4,
+            .y = ((icon_sz.y + c.ImGui_GetStyle().*.FramePadding.y * 4) * 6) - 2,
         })) {
             var clicked = false;
             c.ImGui_PushStyleColorImVec4(
@@ -233,6 +234,34 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 self.active_tool = .transform;
             }
 
+            c.ImGui_Separator();
+
+            const styles = c.ImGui_GetStyle();
+            const letter_sz = c.ImVec2{
+                .x = icon_sz.x + styles.*.FramePadding.x * 2,
+                .y = icon_sz.y + styles.*.FramePadding.y * 2,
+            };
+
+            c.ImGui_PushStyleColorImVec4(
+                c.ImGuiCol_Button,
+                if (self.active_mode == .global) active_col else normal_col,
+            );
+            clicked = c.ImGui_ButtonEx("G##global-mode", letter_sz);
+            c.ImGui_PopStyleColor();
+            if (clicked) {
+                self.active_mode = .global;
+            }
+
+            c.ImGui_PushStyleColorImVec4(
+                c.ImGuiCol_Button,
+                if (self.active_mode == .local) active_col else normal_col,
+            );
+            clicked = c.ImGui_ButtonEx("L##local-mode", letter_sz);
+            c.ImGui_PopStyleColor();
+            if (clicked) {
+                self.active_mode = .local;
+            }
+
             c.ImGui_EndChildFrame();
         }
 
@@ -280,7 +309,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                     }
                     var selection_id_buf = std.mem.zeroes([19:0]u8);
                     c.ImGuizmo_PushID_Str((try std.fmt.bufPrintZ(&selection_id_buf, "{d}", .{selection})).ptr);
-                    if (try gizmo.editTransform(&transform.?.value, self.active_tool)) {
+                    if (try gizmo.editTransform(&transform.?.value, self.active_tool, self.active_mode)) {
                         ctx.world.modified(selection, components.Transform);
                     }
                     c.ImGuizmo_PopID();
