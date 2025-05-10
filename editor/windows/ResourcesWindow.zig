@@ -45,14 +45,14 @@ pub fn deinit(self: *Self) void {
     self.uri.deinit(self.allocator);
 }
 
-pub const ItemResult = union(enum) {
+const ItemResult = union(enum) {
     none,
     click,
     double_click,
     name_double_click,
 };
 
-pub const OrderedItem = struct {
+const OrderedItem = struct {
     key: []const u8,
     res: *ResourceNode,
     type: Resources.Resource.Type,
@@ -67,8 +67,6 @@ pub const OrderedItem = struct {
 };
 
 pub fn draw(self: *Self) !void {
-    var sfa_heap = std.heap.stackFallback(2048, self.allocator);
-    const allocator = sfa_heap.get();
     const window_open = c.ImGui_Begin("Resources", null, c.ImGuiWindowFlags_NoCollapse);
     self.is_focused = c.ImGui_IsWindowFocused(0);
     defer c.ImGui_End();
@@ -79,10 +77,10 @@ pub fn draw(self: *Self) !void {
     }
     const item_sz: f32 = 64;
     const style = c.ImGui_GetStyle().*;
-    const bread_crumb_height = c.ImGui_GetFrameHeight() + style.FramePadding.y;
+    const bread_crumb_height = c.ImGui_GetFrameHeight() + (style.FramePadding.y * 2);
     const avail = c.ImGui_GetContentRegionAvail();
     const col_count = @max(1, avail.x / (item_sz + 32));
-    const view_size = c.ImVec2{ .x = avail.x, .y = avail.y - bread_crumb_height - 1 };
+    const view_size = c.ImVec2{ .x = avail.x, .y = avail.y - bread_crumb_height - 4 };
 
     const resource_node = (try Resources.findResourceNodeByUri(&self.uri)) orelse {
         self.setUri(try Resources.Uri.parse(self.allocator, "project://"));
@@ -145,40 +143,7 @@ pub fn draw(self: *Self) !void {
             }
         }
     }
-
-    const home_height = c.ImGui_GetTextLineHeight();
-    if (c.ImGui_ImageButton("root", try Editor.getImGuiTexture("editor://icons/home.png"), .{ .x = home_height, .y = home_height })) {
-        self.setUri(try Resources.Uri.parse(self.allocator, ":://"));
-    }
-    {
-        var uri = try self.uri.clone(allocator);
-        defer uri.deinit(allocator);
-        c.ImGui_SameLineEx(0, 0);
-        var crumbs = uri.componentIterator();
-        var i: c_int = 0;
-        while (crumbs.next()) |crumb| : (i += 1) {
-            // don't draw the `:` segment in `:://`
-            if (i == 0 and crumb.name.len == 1 and crumb.name[0] == ':') {
-                continue;
-            }
-            c.ImGui_PushIDInt(i);
-            defer c.ImGui_PopID();
-            const name = try allocator.dupeZ(u8, crumb.name);
-            defer allocator.free(name);
-            if (c.ImGui_Button(name)) {
-                self.setUri(try Resources.Uri.parse(self.allocator, crumb.uri));
-            }
-            c.ImGui_SameLineEx(0, 0);
-            c.ImGui_BeginDisabled(true);
-            if (i == 0) {
-                _ = c.ImGui_Button("://");
-            } else {
-                _ = c.ImGui_ArrowButton("sep", c.ImGuiDir_Right);
-            }
-            c.ImGui_EndDisabled();
-            c.ImGui_SameLineEx(0, 0);
-        }
-    }
+    try self.drawBreadCrumbs(bread_crumb_height);
 }
 
 fn drawItem(
@@ -334,8 +299,214 @@ fn drawItem(
     return result;
 }
 
+fn drawBreadCrumbs(self: *Self, bread_crumb_height: f32) !void {
+    var sfa_heap = std.heap.stackFallback(2048, self.allocator);
+    const allocator = sfa_heap.get();
+    const crumb_total_avail = c.ImGui_GetContentRegionAvail();
+    _ = c.ImGui_BeginChildFrame(c.ImGui_GetID("bread-crumb-frame"), .{ .x = crumb_total_avail.x, .y = bread_crumb_height });
+    defer c.ImGui_EndChildFrame();
+    {
+        const cursor = c.ImGui_GetCursorPos();
+        defer c.ImGui_SetCursorPos(cursor);
+        c.ImGui_SetNextItemAllowOverlap();
+        if (c.ImGui_InvisibleButton("bread-crumb-frame-btn", .{ .x = crumb_total_avail.x, .y = bread_crumb_height - 8 }, 0)) {
+            std.log.debug("Clicked!!!!", .{});
+        }
+    }
+
+    // draw the root button independent of number of crumbs, it never gets collapsed and is always present
+    const home_height = c.ImGui_GetTextLineHeight();
+    if (c.ImGui_ImageButton("root", try Editor.getImGuiTexture("editor://icons/home.png"), .{ .x = home_height, .y = home_height })) {
+        self.setUri(try Resources.Uri.parse(self.allocator, ":://"));
+    }
+
+    var uri = try self.uri.clone(allocator);
+    defer uri.deinit(allocator);
+
+    var crumbs = std.ArrayList(Resources.Uri.ComponentIterator.Result).init(allocator);
+    defer crumbs.deinit();
+    var crumb_widths = std.ArrayList(f32).init(allocator);
+    defer crumb_widths.deinit();
+
+    const button_padding = 10;
+    const sep_padding: f32 = 8.0;
+    const sep_first_width = c.ImGui_CalcTextSize("://").x;
+    const sep_width: f32 = c.ImGui_GetFrameHeight();
+
+    { // sizing
+        var iter = uri.componentIterator();
+        var i: usize = 0;
+
+        while (iter.next()) |crumb| : (i += 1) {
+            // skip the root protocol `:` in `:://a/b/c` URIs we use the home button for it
+            if (i == 0 and uri.isInRoot()) {
+                continue;
+            }
+
+            try crumbs.append(crumb);
+
+            const name = try allocator.dupeZ(u8, crumb.name);
+            defer allocator.free(name);
+            const text_size = c.ImGui_CalcTextSize(name);
+            var btn_width = text_size.x + button_padding;
+            if (iter.peek()) |_| {
+                if ((i == 1 and uri.isInRoot()) or i == 0) {
+                    btn_width += sep_first_width;
+                } else {
+                    btn_width += sep_width;
+                }
+                btn_width += sep_padding;
+            }
+            try crumb_widths.append(btn_width);
+        }
+    }
+
+    // nothing to draw
+    if (crumbs.items.len == 0) {
+        return;
+    }
+
+    var head_len: usize = 0;
+    // by default collapse everything but last item
+    var collapsed_len: usize = crumb_widths.items.len - 1;
+
+    const min_prefered_tail = 2; // it is always one more, since last item is drawn regardless
+    const min_prefered_head = 2;
+    const min_ellipsis_width = c.ImGui_CalcTextSize("...").x + c.ImGui_GetStyle().*.FramePadding.x + sep_width + sep_padding;
+
+    const empty_room = visibility_checks: {
+        if (crumbs.items.len <= 1) { // not enough items to need a visibility check
+            break :visibility_checks 0;
+        }
+        var avail_width = crumb_total_avail.x - home_height - crumb_widths.getLast() - min_ellipsis_width;
+
+        { // in the first pass, we make sure `min_prefered_tail` items are visible
+            var i = @as(isize, @intCast(crumbs.items.len)) - 2;
+            var j: usize = 1;
+            while (i >= 0 and j < min_prefered_tail) : ({
+                i -= 1;
+                j += 1;
+            }) {
+                const crumb_width = crumb_widths.items[@intCast(i)];
+                if (crumb_width > avail_width) {
+                    break :visibility_checks avail_width;
+                }
+
+                avail_width -= crumb_width;
+                collapsed_len -= 1;
+            }
+        }
+
+        { // the second pass, makes sure `min_prefered_head` items are visible
+            const start_of_tail = collapsed_len;
+            for (0..start_of_tail) |i| {
+                if (i >= min_prefered_head) {
+                    break;
+                }
+
+                const crumb_width = crumb_widths.items[i];
+                if (crumb_width > avail_width) {
+                    break :visibility_checks avail_width;
+                }
+
+                avail_width -= crumb_width;
+                collapsed_len -= 1;
+                head_len += 1;
+            }
+        }
+
+        // finally we visit everything in between in reverse order
+        // segments closer to the tail are higher priorities for visibility
+
+        var i = @as(isize, @intCast(head_len + collapsed_len)) - 1;
+        while (i >= head_len) : (i -= 1) {
+            const crumb_width = crumb_widths.items[@intCast(i)];
+            // can't display anymore crumbs
+            if (crumb_width > avail_width) {
+                break :visibility_checks avail_width;
+            }
+
+            avail_width -= crumb_width;
+            collapsed_len -= 1;
+        }
+
+        break :visibility_checks avail_width;
+    };
+
+    { // draw head items
+        c.ImGui_SameLineEx(0, 0);
+        for (crumbs.items[0..head_len], 0..) |crumb, i| {
+            const name = try allocator.dupeZ(u8, crumb.name);
+            defer allocator.free(name);
+            switch (drawBreadCrumb(@intCast(i), name, i > 0)) {
+                .none => {},
+                .click => self.setUri(try Resources.Uri.parse(self.allocator, crumb.uri)),
+                .double_click => std.log.debug("TODO", .{}),
+            }
+        }
+    }
+
+    if (collapsed_len > 0) { // draw the ellipsis and collapsed popup
+        c.ImGui_SameLineEx(0, 0);
+        const size = c.ImVec2{
+            .x = min_ellipsis_width + empty_room - sep_width - sep_padding,
+            .y = c.ImGui_GetFrameHeight(),
+        };
+        _ = c.ImGui_ButtonEx("...", size);
+        if (c.ImGui_BeginPopupContextItemEx("bread-crumb-collapsed-menu", c.ImGuiPopupFlags_MouseButtonLeft)) {
+            defer c.ImGui_EndPopup();
+            const last_head_uri_len = if (head_len > 0) crumbs.items[head_len - 1].uri.len else 0;
+            for (crumbs.items[head_len .. head_len + collapsed_len]) |crumb| {
+                const name = try allocator.dupeZ(u8, crumb.uri[last_head_uri_len..]);
+                defer allocator.free(name);
+                if (c.ImGui_MenuItem(name)) {
+                    self.setUri(try Resources.Uri.parse(self.allocator, crumb.uri));
+                }
+            }
+        }
+
+        c.ImGui_SameLineEx(0, 0);
+        _ = c.ImGui_ArrowButton("sep", c.ImGuiDir_Right);
+    }
+
+    { // draw tail items
+        c.ImGui_SameLineEx(0, 0);
+        for (crumbs.items[head_len + collapsed_len ..], head_len + collapsed_len..) |crumb, i| {
+            const name = try allocator.dupeZ(u8, crumb.name);
+            defer allocator.free(name);
+            switch (drawBreadCrumb(@intCast(i), name, i > 0)) {
+                .none => {},
+                .click => self.setUri(try Resources.Uri.parse(self.allocator, crumb.uri)),
+                .double_click => std.log.debug("TODO", .{}),
+            }
+        }
+    }
+}
+
+const DrawBreadCrumbResult = enum { none, click, double_click };
+
+fn drawBreadCrumb(id: c_int, name: [*:0]const u8, arrow_sep: bool) DrawBreadCrumbResult {
+    var result = DrawBreadCrumbResult.none;
+    c.ImGui_PushIDInt(@intCast(id));
+    defer c.ImGui_PopID();
+    if (c.ImGui_Button(name)) {
+        result = .click;
+    }
+    c.ImGui_SameLineEx(0, 0);
+    c.ImGui_BeginDisabled(true);
+    if (arrow_sep) {
+        _ = c.ImGui_ArrowButton("sep", c.ImGuiDir_Right);
+    } else {
+        _ = c.ImGui_Button("://");
+    }
+    c.ImGui_EndDisabled();
+    c.ImGui_SameLineEx(0, 0);
+    return result;
+}
+
 fn drawItemContextMenu(self: *Self, node: *const Node, ty: Resources.Resource.Type) !void {
     if (c.ImGui_BeginPopupContextItemEx("context-menu", c.ImGuiPopupFlags_MouseButtonRight)) {
+        defer c.ImGui_EndPopup();
         if (c.ImGui_MenuItem("Open")) {
             try self.open(node, ty);
         }
@@ -352,7 +523,6 @@ fn drawItemContextMenu(self: *Self, node: *const Node, ty: Resources.Resource.Ty
         if (c.ImGui_MenuItem("Paste*")) {}
 
         if (c.ImGui_MenuItem("Delete*")) {}
-        c.ImGui_EndPopup();
     }
 }
 

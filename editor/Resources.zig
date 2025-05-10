@@ -1271,6 +1271,11 @@ pub const Uri = extern struct {
         return std.mem.eql(u8, uri.span(), ":://");
     }
 
+    // shortthand for checking if URI is starting with `:://`
+    pub inline fn isInRoot(uri: *const Uri) bool {
+        return std.mem.eql(u8, uri.protocol(), ":");
+    }
+
     // includes the `://` portion as well
     pub inline fn protocolWithSeperator(uri: *const Uri) []const u8 {
         return uri.buf[0 .. uri.protocol_len + "://".len];
@@ -1369,27 +1374,31 @@ pub const Uri = extern struct {
         cursor: usize = 0,
         next_token_type: enum { protocol, segment, last } = .protocol,
 
-        pub fn next(iter: *ComponentIterator) ?Result {
+        pub fn peek(iter: *const ComponentIterator) ?Result {
             if (iter.next_len == 0) {
                 return null;
             }
 
             const name_slice = iter.buf[iter.cursor .. iter.cursor + iter.next_len];
-            iter.cursor += iter.next_len;
-            const it = switch (iter.next_token_type) {
+            const cursor = iter.cursor + iter.next_len;
+            return switch (iter.next_token_type) {
                 .protocol => Result{
                     .name = name_slice,
-                    .uri = iter.buf[0 .. iter.cursor + "://".len],
+                    .uri = iter.buf[0 .. cursor + "://".len],
                 },
                 .segment => Result{
                     .name = name_slice,
-                    .uri = iter.buf[0 .. iter.cursor + "/".len],
+                    .uri = iter.buf[0 .. cursor + "/".len],
                 },
                 .last => Result{
                     .name = name_slice,
-                    .uri = iter.buf[0..iter.cursor],
+                    .uri = iter.buf[0..cursor],
                 },
             };
+        }
+
+        pub fn next(iter: *ComponentIterator) ?Result {
+            const it = iter.peek() orelse return null;
 
             iter.cursor = it.uri.len;
             var i: usize = iter.cursor;
