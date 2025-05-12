@@ -126,7 +126,9 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) !void {
             quit = quit or !cont;
         }
         if (comptime std.meta.hasMethod(Dispatcher, "draw")) {
-            try d.draw();
+            if ((c.SDL_GetWindowFlags(self.window) & c.SDL_WINDOW_MINIMIZED) == 0) {
+                try d.draw();
+            }
         }
 
         self.delta = @floatCast(@as(f64, @floatFromInt(timer.lap())) / 1_000_000_000.0);
