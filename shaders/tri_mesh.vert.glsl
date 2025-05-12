@@ -25,11 +25,6 @@ layout(std140, set = 1, binding = 0) readonly buffer ObjectBuffer {
 	ObjectData objects[];
 } object_buffer;
 
-layout (push_constant) uniform PushConstants {
-	vec4 data;
-	mat4 render_matrix;
-} push_constants;
-
 void main() {
 	mat4 model = object_buffer.objects[gl_BaseInstance].model;
 	vec4 world_pos = model * vec4(in_position, 1.0f);

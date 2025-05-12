@@ -150,33 +150,10 @@ pub fn init(ctx: *GameApp) *Self {
     ctx.world.tag(Playing);
     ctx.world.addSingleton(Playing);
     ctx.world.enable(ecs.typeId(Playing), false);
-    // const tmu_entity = ctx.world.systemFn("transform-matrix-update", ecs.systems.PostUpdate, ecs.systems.transformMatrices);
-    // ctx.world.add(tmu_entity, RunInEditor);
-    // _ = ctx.world.observerFn(&ecs.ObserverDesc{
-    //     .query = std.mem.zeroInit(ecs.QueryDesc, .{ .terms = .{
-    //         .{ .id = ecs.typeId(components.Position) },
-    //         .{ .id = ecs.typeId(components.Rotation) },
-    //         .{ .id = ecs.typeId(components.Scale) },
-    //         .{ .id = ecs.typeId(components.TransformMatrix) },
-    //     } }),
-    //     .events = [_]ecs.Entity{c.EcsOnSet} ++ [_]ecs.Entity{0} ** 7,
-    //     .callback = &struct {
-    //         fn f(it: *ecs.Iter) callconv(.C) void {
-    //             if (it.event_id == ecs.typeId(components.Position) or
-    //                 it.event_id == ecs.typeId(components.Rotation) or
-    //                 it.event_id == ecs.typeId(components.Scale))
-    //             {
-    //                 const positions = ecs.field(@ptrCast(it), components.Position, @alignOf(components.Position), 0).?;
-    //                 const rotations = ecs.field(@ptrCast(it), components.Rotation, @alignOf(components.Rotation), 1).?;
-    //                 const scales = ecs.field(@ptrCast(it), components.Scale, @alignOf(components.Scale), 2).?;
-    //                 const transformMatrices = ecs.field(@ptrCast(it), components.TransformMatrix, @alignOf(components.TransformMatrix), 3).?;
-    //                 for (positions, rotations, scales, transformMatrices) |p, r, s, *t| {
-    //                     t.value = Mat4.compose(p.value, Quat.fromEuler(r.value), s.value);
-    //                 }
-    //             }
-    //         }
-    //     }.f,
-    // });
+    {
+        const lt2_sys = ecs.systems.TransformSyncSystem.registerTo(ctx.world);
+        ctx.world.add(lt2_sys, RunInEditor);
+    }
 
     const home_dir = std.fs.selfExeDirPathAlloc(ctx.allocator) catch @panic("OOM");
     defer ctx.allocator.free(home_dir);

@@ -24,13 +24,13 @@ pub fn init(allocator: std.mem.Allocator, _: ecs.Entity) Self {
 pub fn deinit(_: *Self) void {}
 
 pub fn edit(_: *Self, entity: ecs.Entity, ctx: *GameApp) void {
-    const transform = ctx.world.getMut(entity, ecs.components.Transform);
+    const local_transform = ctx.world.getMut(entity, ecs.components.LocalTransform).?;
 
-    var decomposed = transform.?.value.decompose() catch Mat4.Decomposed.IDENTITY;
+    var decomposed = local_transform.matrix.decompose() catch Mat4.Decomposed.IDENTITY;
 
     var changed = false;
 
-    if (imutils.collapsingHeaderWithCheckBox("Transform", null, c.ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (imutils.collapsingHeaderWithCheckBox("LocalTransform", null, c.ImGuiTreeNodeFlags_DefaultOpen)) {
         if (inputVec3("Position", &decomposed.translation, 0.01)) {
             changed = true;
         }
@@ -47,8 +47,8 @@ pub fn edit(_: *Self, entity: ecs.Entity, ctx: *GameApp) void {
     }
 
     if (changed) {
-        transform.?.value = Mat4.recompose(decomposed);
-        ctx.world.modified(entity, ecs.components.Transform);
+        local_transform.matrix = Mat4.recompose(decomposed);
+        ctx.world.modified(entity, ecs.components.LocalTransform);
     }
 }
 

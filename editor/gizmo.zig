@@ -101,8 +101,10 @@ pub inline fn isUsingAny() bool {
     return c.ImGuizmo_IsUsingAny();
 }
 
-pub fn editTransform(matrix: *Mat4, tool: ManipulationTool, mode: ManipulationMode) !bool {
+pub fn editTransform(local_to_world_matrix: *Mat4, local_transform: *Mat4, tool: ManipulationTool, mode: ManipulationMode) !bool {
     try drawSanityCheck(&context);
+
+    const inv_orig_ltw = try local_to_world_matrix.inverse();
 
     c.ImGuizmo_SetRect(c.ImGui_GetWindowPos().x, c.ImGui_GetWindowPos().y, context.viewport.width, context.viewport.height);
     var view = context.view;
@@ -112,13 +114,16 @@ pub fn editTransform(matrix: *Mat4, tool: ManipulationTool, mode: ManipulationMo
         &proj.values,
         @intFromEnum(tool),
         @intFromEnum(mode),
-        &matrix.values,
+        &local_to_world_matrix.values,
         null,
         null,
         null,
         null,
     );
     context.is_over_any = context.is_over_any or c.ImGuizmo_IsOver_Nil();
+
+    local_transform.* = local_transform.mul(inv_orig_ltw.mul(local_to_world_matrix.*));
+
     return result;
 }
 

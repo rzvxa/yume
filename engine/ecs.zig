@@ -44,7 +44,7 @@ pub const Iterator = extern struct {
     const Self = @This();
     inner: c.ecs_iter_t,
 
-    inline fn from(raw: *c.ecs_iter_t) *Iterator {
+    pub inline fn from(raw: *c.ecs_iter_t) *Iterator {
         return @ptrCast(raw);
     }
 
@@ -66,6 +66,14 @@ pub const Iterator = extern struct {
 
     pub inline fn castMut(self: *Self) *c.ecs_iter_t {
         return @ptrCast(self);
+    }
+
+    pub inline fn world(self: *Self) World {
+        return World{ .inner = self.inner.world.? };
+    }
+
+    pub inline fn realWorld(self: *Self) World {
+        return World{ .inner = self.inner.real_world.? };
     }
 };
 
@@ -126,6 +134,31 @@ pub const World = struct {
                                 var c_ptr = @as([*c]T, @ptrCast(@alignCast(ptr)));
                                 var span = c_ptr[0..@intCast(count)];
                                 for (0..span.len) |i| T.deinit(&span[i]);
+                            }
+                        }.f else null,
+                        else => null,
+                    },
+
+                    .on_add = switch (@typeInfo(T)) {
+                        .Struct => if (@hasDecl(T, "onAdd")) struct {
+                            pub fn f(iter: [*c]c.ecs_iter_t) callconv(.C) void {
+                                T.onAdd(Iterator.from(iter));
+                            }
+                        }.f else null,
+                        else => null,
+                    },
+                    .on_set = switch (@typeInfo(T)) {
+                        .Struct => if (@hasDecl(T, "onSet")) struct {
+                            pub fn f(iter: [*c]c.ecs_iter_t) callconv(.C) void {
+                                T.onSet(Iterator.from(iter));
+                            }
+                        }.f else null,
+                        else => null,
+                    },
+                    .on_remove = switch (@typeInfo(T)) {
+                        .Struct => if (@hasDecl(T, "onRemove")) struct {
+                            pub fn f(iter: [*c]c.ecs_iter_t) callconv(.C) void {
+                                T.onRemove(Iterator.from(iter));
                             }
                         }.f else null,
                         else => null,
@@ -284,7 +317,7 @@ pub const World = struct {
         }
         self.set(ent, components.Meta, components.Meta.init(opts.name) catch @panic("Failed to create meta"));
         self.set(ent, components.Uuid, .{ .value = opts.uuid orelse Uuid.new() });
-        self.set(ent, components.Transform, components.Transform{ .value = Mat4.IDENTITY });
+        self.set(ent, components.LocalTransform, components.LocalTransform{ .matrix = Mat4.IDENTITY });
         return ent;
     }
 
@@ -493,7 +526,7 @@ pub const World = struct {
         c.ecs_enable(self.inner, ent, enabled);
     }
 
-    pub inline fn enable_component(self: Self, ent: Entity, comptime T: type, enabled: bool) void {
+    pub inline fn enableComponent(self: Self, ent: Entity, comptime T: type, enabled: bool) void {
         c.ecs_enable_id(self.inner, ent, typeId(T), enabled);
     }
 
@@ -632,7 +665,11 @@ pub fn typeId(comptime T: type) c.ecs_id_t {
     return Reflect(T).id;
 }
 
-pub fn field(it: *Iterator, comptime T: type, comptime alignment: usize, index: i8) ?[]align(alignment) T {
+pub inline fn field(it: *Iterator, comptime T: type, index: i8) ?[]T {
+    return fieldWithAlignment(it, T, @alignOf(T), index);
+}
+
+pub fn fieldWithAlignment(it: *Iterator, comptime T: type, comptime alignment: usize, index: i8) ?[]align(alignment) T {
     if (c.ecs_field_w_size(it.castMut(), @sizeOf(T), index)) |anyptr| {
         const ptr = @as([*]align(alignment) T, @ptrCast(@alignCast(anyptr)));
         return ptr[0..@intCast(it.inner.count)];
@@ -820,6 +857,17 @@ fn staticEsqueInitializer() void {
     relations.IsA = c.EcsIsA;
     relations.DependsOn = c.EcsDependsOn;
 
+    query_miscs.Self = c.EcsSelf;
+    query_miscs.Up = c.EcsUp;
+    query_miscs.Trav = c.EcsTrav;
+    query_miscs.Cascade = c.EcsCascade;
+    query_miscs.Desc = c.EcsDesc;
+    query_miscs.IsVariable = c.EcsIsVariable;
+    query_miscs.IsEntity = c.EcsIsEntity;
+    query_miscs.IsName = c.EcsIsName;
+    query_miscs.TraverseFlags = c.EcsTraverseFlags;
+    query_miscs.TermRefFlags = c.EcsTermRefFlags;
+
     operators.And = c.EcsAnd;
     operators.Or = c.EcsOr;
     operators.Not = c.EcsNot;
@@ -827,6 +875,13 @@ fn staticEsqueInitializer() void {
     operators.AndFrom = c.EcsAndFrom;
     operators.OrFrom = c.EcsOrFrom;
     operators.NotFrom = c.EcsNotFrom;
+
+    std.debug.assert(@intFromEnum(InOut.Default) == c.EcsInOutDefault);
+    std.debug.assert(@intFromEnum(InOut.None) == c.EcsInOutNone);
+    std.debug.assert(@intFromEnum(InOut.Filter) == c.EcsInOutFilter);
+    std.debug.assert(@intFromEnum(InOut.InOut) == c.EcsInOut);
+    std.debug.assert(@intFromEnum(InOut.In) == c.EcsIn);
+    std.debug.assert(@intFromEnum(InOut.Out) == c.EcsOut);
 }
 
 // Id flags
@@ -934,6 +989,19 @@ pub const relations = struct {
     pub var DependsOn: Entity = undefined;
 };
 
+pub const query_miscs = struct {
+    pub var Self: Entity = undefined;
+    pub var Up: Entity = undefined;
+    pub var Trav: Entity = undefined;
+    pub var Cascade: Entity = undefined;
+    pub var Desc: Entity = undefined;
+    pub var IsVariable: Entity = undefined;
+    pub var IsEntity: Entity = undefined;
+    pub var IsName: Entity = undefined;
+    pub var TraverseFlags: Entity = undefined;
+    pub var TermRefFlags: Entity = undefined;
+};
+
 pub const operators = struct {
     pub var And: i16 = undefined;
     pub var Or: i16 = undefined;
@@ -956,7 +1024,8 @@ pub const components = struct {
     pub const Meta = @import("components/Meta.zig").Meta;
     pub const Uuid = @import("components/Uuid.zig").Uuid;
 
-    pub const Transform = @import("components/transform.zig").Transform;
+    pub const LocalTransform = @import("components/transform.zig").LocalTransform;
+    pub const WorldTransform = @import("components/transform.zig").WorldTransform;
 
     pub const camera = @import("components/camera.zig");
 
@@ -993,7 +1062,20 @@ pub const systems = struct {
     pub var PostFrame: Entity = undefined;
     pub var Phase: Entity = undefined;
 
-    pub const transformMatrices = @import("systems/transformMatrix.zig").system;
+    pub const TransformSyncSystem = @import("systems/TransformSyncSystem.zig");
+};
+
+pub const InOut = enum(i16) {
+    Default = 0,
+    None = 1,
+    Filter = 2,
+    InOut = 3,
+    In = 4,
+    Out = 5,
+
+    pub inline fn cast(self: InOut) i16 {
+        return @intFromEnum(self);
+    }
 };
 
 /// Taken from <https://github.com/zig-gamedev/zflecs/blob/ee2cd434fa2ec2454008988a1cc1201b242f030e/src/zflecs.zig#L2652C1-L2693C2>
@@ -1039,7 +1121,7 @@ pub fn SystemImpl(comptime fn_system: anytype) type {
             inline for (start_index..fn_type.Fn.params.len) |i| {
                 const p = fn_type.Fn.params[i];
                 const info = @typeInfo(p.type.?);
-                args_tuple[i] = field(Iterator.from(it), info.Pointer.child, info.Pointer.alignment, i - start_index).?;
+                args_tuple[i] = field(Iterator.from(it), info.Pointer.child, i - start_index).?;
             }
 
             //NOTE: .always_inline seems ok, but unsure. Replace to .auto if it breaks
