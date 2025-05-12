@@ -275,14 +275,14 @@ pub const InputContext = struct {
 
     by_scancode: ScancodeStates = std.mem.zeroes(ScancodeStates),
     by_mouse_button: MouseButtonStates = std.mem.zeroes(MouseButtonStates),
-    mouse_wheel: Vec2 = Vec2.ZERO,
-    mouse_pos: Vec2 = Vec2.ZERO,
-    mouse_delta: Vec2 = Vec2.ZERO,
-    mouse_rel: Vec2 = Vec2.ZERO,
+    mouse_wheel: Vec2 = Vec2.scalar(0),
+    mouse_pos: Vec2 = Vec2.scalar(0),
+    mouse_delta: Vec2 = Vec2.scalar(0),
+    mouse_rel: Vec2 = Vec2.scalar(0),
 
     pub fn clear(self: *Self) void {
-        self.mouse_wheel = Vec2.ZERO;
-        self.mouse_delta = Vec2.ZERO;
+        self.mouse_wheel = Vec2.scalar(0);
+        self.mouse_delta = Vec2.scalar(0);
 
         // SDL doesn't repeat mouse buttons?
         for (0..self.by_mouse_button.len) |i| {

@@ -273,7 +273,7 @@ pub fn load_from_obj2(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
                 const pos1 = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_position, i_1).unnamed_0.v);
                 const pos2 = Vec3.fromArray(c.ufbx_get_vertex_vec3(&mesh.*.vertex_position, i_2).unnamed_0.v);
 
-                var computed_normal: Vec3 = Vec3.ZERO;
+                var computed_normal: Vec3 = Vec3.scalar(0);
                 if (!mesh.*.vertex_normal.exists) {
                     computedNormalsUsed = true;
                     // Compute flat (face) normal.
@@ -289,7 +289,7 @@ pub fn load_from_obj2(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
                         0 => pos0,
                         1 => pos1,
                         2 => pos2,
-                        else => Vec3.ZERO,
+                        else => Vec3.scalar(0),
                     };
 
                     var normal: Vec3 = undefined;
@@ -307,7 +307,7 @@ pub fn load_from_obj2(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
                             const handedness: f32 = if (normal.cross(tng).dot(bitangent) < 0.0) -1.0 else 1.0;
                             break :blk tng.toVec4(handedness);
                         } else {
-                            break :blk Vec4.ZERO;
+                            break :blk Vec4.scalar(0);
                         }
                     };
 
@@ -318,7 +318,7 @@ pub fn load_from_obj2(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
                     const uv = if (mesh.*.vertex_uv.exists)
                         Vec2.fromArray(c.ufbx_get_vertex_vec2(&mesh.*.vertex_uv, index).unnamed_0.v)
                     else
-                        Vec2.ZERO;
+                        Vec2.scalar(0);
 
                     vb.append(.{
                         .position = position,

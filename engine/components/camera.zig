@@ -57,8 +57,8 @@ pub const Camera = extern struct {
     opts: CameraOptions,
 
     view: Mat4 = Mat4.IDENTITY,
-    projection: Mat4 = Mat4.make(Vec4.ZERO, Vec4.ZERO, Vec4.ZERO, Vec4.ZERO),
-    view_projection: Mat4 = Mat4.make(Vec4.ZERO, Vec4.ZERO, Vec4.ZERO, Vec4.ZERO),
+    projection: Mat4 = Mat4.make(Vec4.scalar(0), Vec4.scalar(0), Vec4.scalar(0), Vec4.scalar(0)),
+    view_projection: Mat4 = Mat4.make(Vec4.scalar(0), Vec4.scalar(0), Vec4.scalar(0), Vec4.scalar(0)),
 
     pub fn editorIcon() [*:0]const u8 {
         return "editor://icons/camera.png";

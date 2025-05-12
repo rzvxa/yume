@@ -310,6 +310,7 @@ pub const World = struct {
         name: [*:0]const u8 = "New Entity",
         ident: ?[*:0]const u8 = null,
         parent: ?Entity = null,
+        transform: ?components.LocalTransform = null,
     }) Entity {
         const ent = self.create(opts.ident);
         if (opts.parent) |parent| {
@@ -317,7 +318,7 @@ pub const World = struct {
         }
         self.set(ent, components.Meta, components.Meta.init(opts.name) catch @panic("Failed to create meta"));
         self.set(ent, components.Uuid, .{ .value = opts.uuid orelse Uuid.new() });
-        self.set(ent, components.LocalTransform, components.LocalTransform{ .matrix = Mat4.IDENTITY });
+        self.set(ent, components.LocalTransform, opts.transform orelse components.LocalTransform{ .matrix = Mat4.IDENTITY });
         return ent;
     }
 

@@ -5,6 +5,8 @@ const ecs = @import("yume").ecs;
 const Assets = @import("yume").Assets;
 const GameApp = @import("yume").GameApp;
 const Vec3 = @import("yume").Vec3;
+const Quat = @import("yume").Quat;
+const Mat4 = @import("yume").Mat4;
 
 const Resources = @import("../Resources.zig");
 
@@ -214,7 +216,15 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) !bool {
             }
             c.ImGui_Separator();
             if (c.ImGui_MenuItem("Directional Light")) {
-                const new_entity = ctx.world.entity(.{ .name = "Directional Light", .parent = entity });
+                const new_entity = ctx.world.entity(.{
+                    .name = "Directional Light",
+                    .parent = entity,
+                    .transform = .{ .matrix = Mat4.compose(
+                        Vec3.scalar(0),
+                        Quat.fromEuler(Vec3.make(50, -30, 0)),
+                        Vec3.scalar(1),
+                    ) },
+                });
                 ctx.world.set(new_entity, ecs.components.DirectionalLight, ecs.components.DirectionalLight{});
             }
             if (c.ImGui_MenuItem("Point Light")) {

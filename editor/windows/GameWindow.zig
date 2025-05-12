@@ -21,7 +21,7 @@ const FrameData = struct {
     cmd: GameApp.RenderCommand,
     d: *Self,
     camera: ?*const components.Camera = null,
-    camera_pos: Vec3 = Vec3.ZERO,
+    camera_pos: Vec3 = Vec3.scalar(0),
     directional_light: GPULightData = undefined,
     point_lights: []GPULightData = undefined,
 };

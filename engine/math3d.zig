@@ -8,8 +8,6 @@ pub const Vec2 = extern struct {
     x: f32,
     y: f32,
 
-    pub const ZERO = make(0.0, 0.0);
-
     pub inline fn make(x: f32, y: f32) Vec2 {
         return .{ .x = x, .y = y };
     }
@@ -65,7 +63,6 @@ pub const Vec3 = extern struct {
 
     const Self = @This();
 
-    pub const ZERO = make(0.0, 0.0, 0.0);
     pub const UP = make(0.0, 1.0, 0.0);
 
     pub inline fn make(x: f32, y: f32, z: f32) Self {
@@ -121,7 +118,7 @@ pub const Vec3 = extern struct {
         if (l > 0) {
             return self.divf(l);
         } else {
-            return Self.ZERO;
+            return Self.scalar(0);
         }
     }
 
@@ -235,8 +232,6 @@ pub const Vec4 = extern struct {
     y: f32,
     z: f32,
     w: f32,
-
-    pub const ZERO = make(0.0, 0.0, 0.0, 0.0);
 
     // Those are not real thing, however, they match my preference for 3d coordinates:
     // - x is right;
@@ -387,7 +382,7 @@ pub const Quat = extern struct {
 
     pub fn toEuler(self: Self) Vec3 {
         const half_pi: f32 = std.math.pi / 2.0;
-        var euler = Vec3.ZERO;
+        var euler = Vec3.scalar(0);
 
         // Roll (x-axis rotation)
         const sinr_cosp = 2 * (self.w * self.x + self.y * self.z);
@@ -503,7 +498,7 @@ pub const Mat4 = extern union {
         scale: Vec3,
 
         pub const IDENTITY: Decomposed = .{
-            .translation = Vec3.ZERO,
+            .translation = Vec3.scalar(0),
             .rotation = Quat.IDENTITY,
             .scale = Vec3.scalar(1),
         };
@@ -1032,8 +1027,6 @@ pub const Vec2U = extern struct {
     const Self = @This();
     x: u32,
     y: u32,
-
-    pub const ZERO = make(0.0, 0.0);
 
     pub inline fn make(x: u32, y: u32) Vec2U {
         return .{ .x = x, .y = y };

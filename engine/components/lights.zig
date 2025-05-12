@@ -76,7 +76,7 @@ fn generic_light_serializer(comptime T: type, light: *const T, a: std.mem.Alloca
 
 fn generic_light_deserializer(comptime T: type, light: *T, value: *const Dynamic, a: std.mem.Allocator) !void {
     const obj = try value.expectObject();
-    var color = Vec3.ZERO;
+    var color = Vec3.scalar(0);
     try Vec3.deserialize(&color, &(try obj.expectField("color")).value, a);
     light.* = T{
         .color = color,

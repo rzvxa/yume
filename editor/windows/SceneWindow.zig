@@ -39,8 +39,8 @@ camera: components.Camera = components.Camera.makePerspectiveCamera(.{
     .near = 0.1,
 }),
 
-camera_pos: Vec3 = Vec3.ZERO,
-target_pos: Vec3 = Vec3.ZERO,
+camera_pos: Vec3 = Vec3.scalar(0),
+target_pos: Vec3 = Vec3.scalar(0),
 distance: f32 = default_cam_distance,
 
 active_tool: gizmo.ManipulationTool = .move,
@@ -111,7 +111,7 @@ pub fn init(ctx: *GameApp, on_draw_gizmos: *const fn (*anyopaque) void, on_draw_
         .on_draw_gizmos = on_draw_gizmos,
         .on_draw_gizmos_ctx = on_draw_gizmos_ctx,
     };
-    self.focus(Vec3.ZERO, default_cam_distance);
+    self.focus(Vec3.scalar(0), default_cam_distance);
     return self;
 }
 
@@ -406,7 +406,7 @@ pub fn update(self: *Self, ctx: *GameApp) !void {
     // handle translation inputs (W, A, S, D) relative to view
     // we don't apply it right away.
     const wasd = blk: {
-        var wasd = Vec3.ZERO;
+        var wasd = Vec3.scalar(0);
         wasd = wasd.add(forward.mulf(if (Editor.inputs.isKeyDown(.w)) 1 else 0));
         wasd = wasd.sub(forward.mulf(if (Editor.inputs.isKeyDown(.s)) 1 else 0));
         wasd = wasd.add(left.mulf(if (Editor.inputs.isKeyDown(.a)) 1 else 0));
