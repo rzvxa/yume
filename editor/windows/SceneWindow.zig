@@ -44,7 +44,7 @@ target_pos: Vec3 = Vec3.ZERO,
 distance: f32 = default_cam_distance,
 
 active_tool: gizmo.ManipulationTool = .move,
-active_mode: gizmo.ManipulationMode = .global,
+active_mode: gizmo.ManipulationMode = .world,
 
 is_perspective: bool = true,
 render_lights: bool = true,
@@ -244,12 +244,12 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
 
             c.ImGui_PushStyleColorImVec4(
                 c.ImGuiCol_Button,
-                if (self.active_mode == .global) active_col else normal_col,
+                if (self.active_mode == .world) active_col else normal_col,
             );
-            clicked = c.ImGui_ButtonEx("G##global-mode", letter_sz);
+            clicked = c.ImGui_ButtonEx("W##world-mode", letter_sz);
             c.ImGui_PopStyleColor();
             if (clicked) {
-                self.active_mode = .global;
+                self.active_mode = .world;
             }
 
             c.ImGui_PushStyleColorImVec4(

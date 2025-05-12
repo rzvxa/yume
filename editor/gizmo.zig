@@ -14,7 +14,7 @@ const BoundingBox = @import("yume").ecs.components.mesh.BoundingBox;
 
 pub const ManipulationMode = enum(c_uint) {
     local = c.IMGUIZMO_LOCAL,
-    global = c.IMGUIZMO_WORLD,
+    world = c.IMGUIZMO_WORLD,
 };
 
 pub const ManipulationTool = enum(c_uint) {
