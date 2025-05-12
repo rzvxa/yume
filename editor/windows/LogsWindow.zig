@@ -41,7 +41,10 @@ pub fn deinit(self: *Self) void {
 pub fn draw(self: *Self) !void {
     if (c.ImGui_Begin("Logs", null, c.ImGuiWindowFlags_NoCollapse)) {
         var edstore = &EditorDatabase.storage().logs;
-        logs_harness.drainInto(&self.logs) catch @panic("OOM");
+        const new_logs = logs_harness.drainInto(&self.logs) catch @panic("OOM");
+        for (self.logs.items[self.logs.items.len - new_logs ..]) |log| {
+            try self.scopes.put(log.scope, {});
+        }
 
         self
             .scopes
@@ -53,7 +56,9 @@ pub fn draw(self: *Self) !void {
 
             if (c.ImGui_Button("Clear")) {
                 logs_harness.free(self.logs.items);
-                self.logs.clearRetainingCapacity();
+                self.logs.clearAndFree();
+                self.scopes.clearRetainingCapacity();
+                edstore.scopes.clearRetainingCapacity();
             }
             c.ImGui_SameLine();
             {
@@ -182,36 +187,30 @@ pub fn draw(self: *Self) !void {
 
         const avail = c.ImGui_GetContentRegionAvail();
         if (c.ImGui_BeginChild("logs", avail, 0, 0)) {
-            self.scopes.clearRetainingCapacity();
-            var i = self.logs.items.len;
-            while (i > 0) {
-                i -= 1;
-                const log = self.logs.items[i];
-                try self.scopes.put(log.scope, {});
-                if (!edstore.scopes.contains(log.scope) or !self.filter(log)) {
-                    continue;
-                }
-                const icon = switch (log.level) {
-                    .err => try Editor.getImGuiTexture("editor://icons/error.png"),
-                    .warn => try Editor.getImGuiTexture("editor://icons/warning.png"),
-                    .info => try Editor.getImGuiTexture("editor://icons/info.png"),
-                    .debug => try Editor.getImGuiTexture("editor://icons/debug.png"),
-                };
-                c.ImGui_Image(icon, .{ .x = 28, .y = 28 });
-                c.ImGui_SameLine();
-                c.ImGui_Text(log.message);
-            }
-
-            {
-                i = edstore.scopes.keys().len;
-                while (i > 0) {
-                    i -= 1;
-                    const selected = edstore.scopes.keys()[i];
-                    if (!self.scopes.contains(selected)) {
-                        _ = edstore.scopes.orderedRemoveAt(i);
+            const total_entries: c_int = @intCast(self.logs.items.len);
+            const log_entry_height: f32 = 28;
+            var clipper = c.ImGuiListClipper{};
+            c.ImGuiListClipper_Begin(&clipper, total_entries, log_entry_height);
+            while (c.ImGuiListClipper_Step(&clipper)) {
+                var idx = clipper.DisplayStart;
+                while (idx < clipper.DisplayEnd) : (idx += 1) {
+                    const log_index: usize = @intCast((total_entries - 1) - idx);
+                    const log = self.logs.items[log_index];
+                    if (!edstore.scopes.contains(log.scope) or !self.filter(log)) {
+                        continue;
                     }
+                    const icon = switch (log.level) {
+                        .err => try Editor.getImGuiTexture("editor://icons/error.png"),
+                        .warn => try Editor.getImGuiTexture("editor://icons/warning.png"),
+                        .info => try Editor.getImGuiTexture("editor://icons/info.png"),
+                        .debug => try Editor.getImGuiTexture("editor://icons/debug.png"),
+                    };
+                    c.ImGui_Image(icon, .{ .x = 28, .y = 28 });
+                    c.ImGui_SameLine();
+                    c.ImGui_Text(log.message);
                 }
             }
+            c.ImGuiListClipper_End(&clipper);
         }
         c.ImGui_EndChild();
     }

@@ -84,7 +84,7 @@ pub fn draw(self: *Self) !void {
     const style = c.ImGui_GetStyle().*;
     const bread_crumb_height = c.ImGui_GetFrameHeight() + (style.FramePadding.y * 2);
     const avail = c.ImGui_GetContentRegionAvail();
-    const col_count = @max(1, avail.x / (item_sz + 32));
+    const col_count: c_int = @intFromFloat(@max(1, avail.x / (item_sz + 32)));
     const view_size = c.ImVec2{ .x = avail.x, .y = avail.y - bread_crumb_height - 4 };
 
     const resource_node = (try Resources.findResourceNodeByUri(&self.uri)) orelse {
@@ -125,7 +125,7 @@ pub fn draw(self: *Self) !void {
             c.ImGui_SetCursorPos(cursor);
             const draw_table = c.ImGui_BeginTableEx(
                 "node",
-                @intFromFloat(col_count),
+                col_count,
                 table_flags,
                 table_size,
                 0,
@@ -133,18 +133,29 @@ pub fn draw(self: *Self) !void {
             defer c.ImGui_EndTable();
 
             if (draw_table) {
-                var index: usize = 0;
-                for (items.items) |item| {
-                    if (index % @as(usize, @intFromFloat(col_count)) == 0) {
-                        c.ImGui_TableNextRow();
-                    }
-                    _ = c.ImGui_TableNextColumn();
+                const total_items: c_int = @intCast(items.items.len);
+                const total_rows: c_int = @divTrunc((total_items + col_count - 1), col_count);
 
-                    try self.enterItem(&item);
-                    _ = try self.drawItem(item.key, &item.res.node, item.type, item_sz, style, false);
-                    try self.leaveItem(&item);
-                    index += 1;
+                var clipper = c.ImGuiListClipper{};
+                c.ImGuiListClipper_Begin(&clipper, total_rows, item_sz);
+                while (c.ImGuiListClipper_Step(&clipper)) {
+                    var row = clipper.DisplayStart;
+                    while (row < clipper.DisplayEnd) : (row += 1) {
+                        c.ImGui_TableNextRow();
+                        var col: c_int = 0;
+                        while (col < col_count) : (col += 1) {
+                            const index = row * col_count + col;
+                            if (index >= total_items) break; // no more items to draw
+                            _ = c.ImGui_TableNextColumn();
+
+                            const item = items.items[@intCast(index)];
+                            try self.enterItem(&item);
+                            _ = try self.drawItem(item.key, &item.res.node, item.type, item_sz, style, false);
+                            try self.leaveItem(&item);
+                        }
+                    }
                 }
+                c.ImGuiListClipper_End(&clipper);
             }
         }
     }
