@@ -188,6 +188,10 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 icon_sz,
             );
             c.ImGui_PopStyleColor();
+            if (c.ImGui_BeginItemTooltip()) {
+                c.ImGui_Text("Move");
+                c.ImGui_EndTooltip();
+            }
             if (clicked) {
                 self.active_tool = .move;
             }
@@ -202,6 +206,10 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 icon_sz,
             );
             c.ImGui_PopStyleColor();
+            if (c.ImGui_BeginItemTooltip()) {
+                c.ImGui_Text("Rotate");
+                c.ImGui_EndTooltip();
+            }
             if (clicked) {
                 self.active_tool = .rotate;
             }
@@ -216,6 +224,10 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 icon_sz,
             );
             c.ImGui_PopStyleColor();
+            if (c.ImGui_BeginItemTooltip()) {
+                c.ImGui_Text("Scale");
+                c.ImGui_EndTooltip();
+            }
             if (clicked) {
                 self.active_tool = .scale;
             }
@@ -230,6 +242,10 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 icon_sz,
             );
             c.ImGui_PopStyleColor();
+            if (c.ImGui_BeginItemTooltip()) {
+                c.ImGui_Text("Transform");
+                c.ImGui_EndTooltip();
+            }
             if (clicked) {
                 self.active_tool = .transform;
             }
@@ -248,6 +264,10 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
             );
             clicked = c.ImGui_ButtonEx("W##world-mode", letter_sz);
             c.ImGui_PopStyleColor();
+            if (c.ImGui_BeginItemTooltip()) {
+                c.ImGui_Text("World Space");
+                c.ImGui_EndTooltip();
+            }
             if (clicked) {
                 self.active_mode = .world;
             }
@@ -258,6 +278,10 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
             );
             clicked = c.ImGui_ButtonEx("L##local-mode", letter_sz);
             c.ImGui_PopStyleColor();
+            if (c.ImGui_BeginItemTooltip()) {
+                c.ImGui_Text("Local Space");
+                c.ImGui_EndTooltip();
+            }
             if (clicked) {
                 self.active_mode = .local;
             }
