@@ -193,16 +193,16 @@ pub fn init(ctx: *GameApp) *Self {
     singleton.initDescriptors(&ctx.engine);
     initImGui(&ctx.engine) catch @panic("failed to init imgui");
 
-    if (EditorDatabase.storage().last_open_project) |lop| {
+    if (EditorDatabase.storage().project.last_open_project) |lop| {
         Project.load(ctx.allocator, lop) catch {
             log.err("Failed to load previously loaded project {s}\n", .{lop});
         };
 
-        if (EditorDatabase.storage().last_open_scene) |los| {
+        if (EditorDatabase.storage().project.last_open_scene) |los| {
             singleton.openScene(los) catch |e| {
                 log.err("Failed to load previously loaded scene {s} {?}\n", .{ lop, e });
                 if (Project.current()) |proj| {
-                    EditorDatabase.storage().last_open_scene = proj.default_scene;
+                    EditorDatabase.storage().project.last_open_scene = proj.default_scene;
                     singleton.openScene(proj.default_scene) catch |e2| {
                         log.err("Failed to load project's default scene {s} {?}\n", .{ lop, e2 });
                     };
@@ -668,7 +668,7 @@ pub fn openScene(self: *Self, scene_id: Uuid) !void {
         else => {},
     }
     try self.ctx.loadScene(scene_id);
-    EditorDatabase.storage().last_open_scene = scene_id;
+    EditorDatabase.storage().project.last_open_scene = scene_id;
 }
 
 pub fn trySetParentKeepUniquePathName(world: ecs.World, entity: ecs.Entity, new_parent: ecs.Entity, allocator: std.mem.Allocator) !void {

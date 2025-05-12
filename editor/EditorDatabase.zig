@@ -2,20 +2,78 @@ const std = @import("std");
 const log = std.log.scoped(.EditorDatabase);
 
 const Uuid = @import("yume").Uuid;
+const collections = @import("yume").collections;
 
 const Self = @This();
 
-pub const LogFilters = struct {
-    err: bool = true,
-    warn: bool = true,
-    info: bool = true,
-    debug: bool = true,
+const ProjectDatabase = struct {
+    last_open_project: ?[:0]u8 = null,
+    last_open_scene: ?Uuid = null,
+};
+
+const LogsDatabase = struct {
+    const LogFilters = struct {
+        err: bool = true,
+        warn: bool = true,
+        info: bool = true,
+        debug: bool = true,
+    };
+
+    filters: LogFilters = .{},
+    scopes: collections.StringSentinelArrayHashMap(0, void),
+
+    pub fn jsonStringify(self: @This(), jws: anytype) !void {
+        try jws.beginObject();
+
+        try jws.objectField("filters");
+        try jws.write(self.filters);
+
+        try jws.objectField("scopes");
+        try jws.write(self.scopes.keys());
+
+        try jws.endObject();
+    }
+
+    pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, opts: std.json.ParseOptions) !@This() {
+        if (try jrs.next() != .object_begin) return error.UnexpectedEndOfInput;
+
+        var result: @This() = .{
+            .scopes = collections.StringSentinelArrayHashMap(0, void).init(a),
+        };
+
+        while (true) {
+            const field_name = switch (try jrs.nextAlloc(a, .alloc_if_needed)) {
+                inline .string, .allocated_string => |slice| slice,
+                .object_end => break,
+                else => |tk| {
+                    log.err("{}\n", .{tk});
+                    return error.UnexpectedToken;
+                },
+            };
+
+            if (std.mem.eql(u8, field_name, "filters")) {
+                result.filters = try std.json.innerParse(@TypeOf(result.filters), a, jrs, opts);
+            } else if (std.mem.eql(u8, field_name, "scopes")) {
+                var inner_opts = opts;
+                inner_opts.allocate = .alloc_always;
+                const array = try std.json.innerParse([][:0]u8, a, jrs, inner_opts);
+
+                for (array) |it| {
+                    std.log.debug("HERE {s}", .{it});
+                    try result.scopes.put(it, {});
+                }
+            } else {
+                try jrs.skipValue();
+            }
+        }
+
+        return result;
+    }
 };
 
 const EditorDatabase = struct {
-    last_open_project: ?[:0]u8 = null,
-    last_open_scene: ?Uuid = null,
-    log_filters: LogFilters = .{},
+    project: ProjectDatabase = .{},
+    logs: LogsDatabase,
 };
 
 var instance: Self = undefined;
@@ -56,7 +114,7 @@ pub fn flush() !void {
 }
 
 pub fn setLastOpenProject(value: ?[]const u8) !void {
-    if (storage().last_open_project) |lop| {
+    if (storage().project.last_open_project) |lop| {
         if (value != null and value.?.ptr == lop.ptr) {
             return;
         }
@@ -64,9 +122,9 @@ pub fn setLastOpenProject(value: ?[]const u8) !void {
     }
 
     if (value != null) {
-        storage().last_open_project = try instance.db_arena.allocator().dupeZ(u8, value.?);
+        storage().project.last_open_project = try instance.db_arena.allocator().dupeZ(u8, value.?);
     } else {
-        storage().last_open_project = null;
+        storage().project.last_open_project = null;
     }
 }
 
@@ -80,7 +138,11 @@ fn load() !void {
         instance.db = parsed.value;
         new_arena = parsed.arena;
     } else {
-        instance.db = EditorDatabase{};
+        instance.db = EditorDatabase{
+            .logs = .{
+                .scopes = collections.StringSentinelArrayHashMap(0, void).init(instance.allocator),
+            },
+        };
         new_arena = try instance.allocator.create(std.heap.ArenaAllocator);
         new_arena.* = std.heap.ArenaAllocator.init(instance.allocator);
     }

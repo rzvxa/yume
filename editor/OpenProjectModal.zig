@@ -46,7 +46,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .allocator = allocator,
         .project_path = try imutils.ImString.init(allocator),
     };
-    if (EditorDatabase.storage().last_open_project) |lop| {
+    if (EditorDatabase.storage().project.last_open_project) |lop| {
         try self.project_path.set(lop);
     } else {
         try self.project_path.set(default_project_path);
@@ -132,7 +132,7 @@ pub fn show(self: *Self, ctx: *GameApp) !void {
             try Project.load(self.allocator, self.project_path.span());
             const default_scene = Project.current().?.default_scene;
             try ctx.loadScene(default_scene);
-            EditorDatabase.storage().last_open_scene = default_scene;
+            EditorDatabase.storage().project.last_open_scene = default_scene;
             self.close();
         }
         c.ImGui_PopFont();

@@ -3,6 +3,7 @@ const c = @import("clibs");
 const std = @import("std");
 
 const GameApp = @import("yume").GameApp;
+const collections = @import("yume").collections;
 
 const logs_harness = @import("../logs_harness.zig");
 const Log = logs_harness.Log;
@@ -16,6 +17,7 @@ const Self = @This();
 allocator: std.mem.Allocator,
 
 logs: std.ArrayList(Log),
+scopes: collections.StringSentinelArrayHashMap(0, void),
 
 filter_str: imutils.ImString,
 
@@ -24,6 +26,7 @@ pub fn init(allocator: std.mem.Allocator) Self {
         .allocator = allocator,
 
         .logs = std.ArrayList(Log).init(allocator),
+        .scopes = collections.StringSentinelArrayHashMap(0, void).init(allocator),
 
         .filter_str = imutils.ImString.init(allocator) catch @panic("OOM"),
     };
@@ -31,12 +34,18 @@ pub fn init(allocator: std.mem.Allocator) Self {
 
 pub fn deinit(self: *Self) void {
     self.logs.deinit();
+    self.scopes.deinit();
     self.filter_str.deinit();
 }
 
 pub fn draw(self: *Self) !void {
     if (c.ImGui_Begin("Logs", null, c.ImGuiWindowFlags_NoCollapse)) {
+        var edstore = &EditorDatabase.storage().logs;
         logs_harness.drainInto(&self.logs) catch @panic("OOM");
+
+        self
+            .scopes
+            .sort(collections.ArrayHashMapStringSentinelSortContext(0){ .keys = self.scopes.keys() });
 
         c.ImGui_BeginGroup();
         {
@@ -47,6 +56,69 @@ pub fn draw(self: *Self) !void {
                 self.logs.clearRetainingCapacity();
             }
             c.ImGui_SameLine();
+            {
+                const buf_len = 32;
+                const text_width = c.ImGui_CalcTextSize("0" ** buf_len ++ .{0}).x;
+                c.ImGui_SetNextItemWidth(text_width);
+                var preview_buf: [buf_len]u8 = undefined;
+                const preview = prv: {
+                    var preview_stream = std.io.fixedBufferStream(&preview_buf);
+                    var preview_writer = preview_stream.writer();
+                    preview_writer.print("scopes: ", .{}) catch {};
+                    const initial_pos = preview_stream.getPos() catch {};
+                    var first = true;
+                    for (edstore.scopes.keys()) |selected| {
+                        if (first) {
+                            first = false;
+                        } else {
+                            preview_writer.print(", ", .{}) catch {};
+                        }
+                        if (self.scopes.contains(selected)) {
+                            preview_writer.print("{s}", .{selected}) catch {};
+                        }
+                    }
+
+                    if (edstore.scopes.count() == self.scopes.count()) {
+                        preview_stream.seekTo(initial_pos) catch {};
+                        if (self.scopes.count() == 0) {
+                            preview_writer.print("Empty", .{}) catch {};
+                        } else {
+                            preview_writer.print("All", .{}) catch {};
+                        }
+                    } else if (edstore.scopes.count() == 0) {
+                        preview_stream.seekTo(initial_pos) catch {};
+                        preview_writer.print("None", .{}) catch {};
+                    }
+
+                    const slice = preview_stream.getWritten();
+                    if (slice.len < preview_buf.len) {
+                        preview_buf[slice.len] = 0;
+                        break :prv preview_buf[0..slice.len :0];
+                    } else {
+                        preview_buf[slice.len - 1] = 0;
+                        preview_buf[slice.len - 2] = '.';
+                        preview_buf[slice.len - 3] = '.';
+                        preview_buf[slice.len - 4] = '.';
+                        break :prv preview_buf[0 .. slice.len - 1 :0];
+                    }
+                };
+                if (c.ImGui_BeginCombo("##scopes", preview, c.ImGuiComboFlags_None)) {
+                    defer c.ImGui_EndCombo();
+                    c.ImGui_PushItemFlag(c.ImGuiItemFlags_AutoClosePopups, false);
+                    defer c.ImGui_PopItemFlag();
+                    for (self.scopes.keys()) |scope| {
+                        var selected = edstore.scopes.contains(scope);
+                        if (c.ImGui_SelectableBoolPtr(scope, &selected, c.ImGuiSelectableFlags_None)) {
+                            if (selected) {
+                                try edstore.scopes.put(scope, {});
+                            } else {
+                                _ = edstore.scopes.orderedRemove(scope);
+                            }
+                        }
+                    }
+                }
+                c.ImGui_SameLine();
+            }
 
             var cursor = c.ImGui_GetCursorPos();
             const end_of_left = cursor.x;
@@ -75,7 +147,7 @@ pub fn draw(self: *Self) !void {
 
             filterToggleButton(
                 "error",
-                &EditorDatabase.storage().log_filters.err,
+                &edstore.filters.err,
                 try Editor.getImGuiTexture("editor://icons/error.png"),
                 try Editor.getImGuiTexture("editor://icons/error-mono.png"),
             );
@@ -83,7 +155,7 @@ pub fn draw(self: *Self) !void {
             c.ImGui_SetCursorPos(cursor);
             filterToggleButton(
                 "warning",
-                &EditorDatabase.storage().log_filters.warn,
+                &edstore.filters.warn,
                 try Editor.getImGuiTexture("editor://icons/warning.png"),
                 try Editor.getImGuiTexture("editor://icons/warning-mono.png"),
             );
@@ -91,7 +163,7 @@ pub fn draw(self: *Self) !void {
             c.ImGui_SetCursorPos(cursor);
             filterToggleButton(
                 "info",
-                &EditorDatabase.storage().log_filters.info,
+                &edstore.filters.info,
                 try Editor.getImGuiTexture("editor://icons/info.png"),
                 try Editor.getImGuiTexture("editor://icons/info-mono.png"),
             );
@@ -99,7 +171,7 @@ pub fn draw(self: *Self) !void {
             c.ImGui_SetCursorPos(cursor);
             filterToggleButton(
                 "debug",
-                &EditorDatabase.storage().log_filters.debug,
+                &edstore.filters.debug,
                 try Editor.getImGuiTexture("editor://icons/debug.png"),
                 try Editor.getImGuiTexture("editor://icons/debug-mono.png"),
             );
@@ -110,11 +182,13 @@ pub fn draw(self: *Self) !void {
 
         const avail = c.ImGui_GetContentRegionAvail();
         if (c.ImGui_BeginChild("logs", avail, 0, 0)) {
+            self.scopes.clearRetainingCapacity();
             var i = self.logs.items.len;
             while (i > 0) {
                 i -= 1;
                 const log = self.logs.items[i];
-                if (!self.filter(log)) {
+                try self.scopes.put(log.scope, {});
+                if (!edstore.scopes.contains(log.scope) or !self.filter(log)) {
                     continue;
                 }
                 const icon = switch (log.level) {
@@ -127,6 +201,17 @@ pub fn draw(self: *Self) !void {
                 c.ImGui_SameLine();
                 c.ImGui_Text(log.message);
             }
+
+            {
+                i = edstore.scopes.keys().len;
+                while (i > 0) {
+                    i -= 1;
+                    const selected = edstore.scopes.keys()[i];
+                    if (!self.scopes.contains(selected)) {
+                        _ = edstore.scopes.orderedRemoveAt(i);
+                    }
+                }
+            }
         }
         c.ImGui_EndChild();
     }
@@ -135,10 +220,10 @@ pub fn draw(self: *Self) !void {
 
 inline fn filter(self: Self, log: Log) bool {
     const level_match = switch (log.level) {
-        .err => EditorDatabase.storage().log_filters.err,
-        .warn => EditorDatabase.storage().log_filters.warn,
-        .info => EditorDatabase.storage().log_filters.info,
-        .debug => EditorDatabase.storage().log_filters.debug,
+        .err => EditorDatabase.storage().logs.filters.err,
+        .warn => EditorDatabase.storage().logs.filters.warn,
+        .info => EditorDatabase.storage().logs.filters.info,
+        .debug => EditorDatabase.storage().logs.filters.debug,
     };
     if (!level_match) {
         return false;
