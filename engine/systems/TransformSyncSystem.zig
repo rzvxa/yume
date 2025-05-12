@@ -24,15 +24,15 @@ pub fn registerTo(world: ecs.World) ecs.Entity {
 
     system_desc.query.terms[0] = .{
         .id = ecs.typeId(WorldTransform),
-        .inout = ecs.InOut.InOut.cast(),
+        .inout = ecs.InOut.in_out.cast(),
     };
     system_desc.query.terms[1] = .{
         .id = ecs.typeId(LocalTransform),
-        .inout = ecs.InOut.InOut.cast(),
+        .inout = ecs.InOut.in_out.cast(),
     };
     system_desc.query.terms[2] = .{
         .id = ecs.typeId(WorldTransform),
-        .inout = ecs.InOut.In.cast(),
+        .inout = ecs.InOut.in.cast(),
         .src = .{ .id = ecs.query_miscs.Up },
     };
 
@@ -64,7 +64,7 @@ fn system(
         }
         wt.dirty = true;
         // prioritize local movements over the world movement, as it's faster to calculate
-        if (lt.dirty) {
+        if (lt.dirty or parent_wt.dirty) {
             wt.matrix = parent_wt.matrix.mul(lt.matrix);
         } else {
             const parent_inverse = parent_wt.matrix.inverse() catch Mat4.IDENTITY;

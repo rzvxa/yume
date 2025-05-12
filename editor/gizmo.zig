@@ -104,7 +104,7 @@ pub inline fn isUsingAny() bool {
 pub fn editTransform(local_to_world_matrix: *Mat4, local_transform: *Mat4, tool: ManipulationTool, mode: ManipulationMode) !bool {
     try drawSanityCheck(&context);
 
-    const inv_orig_ltw = try local_to_world_matrix.inverse();
+    const inv_orig_ltw = local_to_world_matrix.inverse() catch Mat4.IDENTITY;
 
     c.ImGuizmo_SetRect(c.ImGui_GetWindowPos().x, c.ImGui_GetWindowPos().y, context.viewport.width, context.viewport.height);
     var view = context.view;

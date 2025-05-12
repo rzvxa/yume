@@ -151,8 +151,16 @@ pub fn init(ctx: *GameApp) *Self {
     ctx.world.addSingleton(Playing);
     ctx.world.enable(ecs.typeId(Playing), false);
     {
-        const lt2_sys = ecs.systems.TransformSyncSystem.registerTo(ctx.world);
-        ctx.world.add(lt2_sys, RunInEditor);
+        const tss = ecs.systems.TransformSyncSystem.registerTo(ctx.world);
+        ctx.world.add(tss, RunInEditor);
+        ctx.world.add(
+            ecs.systems.PostTransformSystem.registerTo(ctx.world, .world, tss),
+            RunInEditor,
+        );
+        ctx.world.add(
+            ecs.systems.PostTransformSystem.registerTo(ctx.world, .local, tss),
+            RunInEditor,
+        );
     }
 
     const home_dir = std.fs.selfExeDirPathAlloc(ctx.allocator) catch @panic("OOM");
@@ -676,6 +684,7 @@ pub fn trySetParentKeepUniquePathName(world: ecs.World, entity: ecs.Entity, new_
     const old_name = world.getPathName(entity) orelse {
         world.removePair(entity, ecs.relations.ChildOf, ecs.core.Wildcard);
         world.addPair(entity, ecs.relations.ChildOf, new_parent);
+        world.modified(entity, ecs.components.WorldTransform);
         return;
     };
 
@@ -683,6 +692,7 @@ pub fn trySetParentKeepUniquePathName(world: ecs.World, entity: ecs.Entity, new_
         .base => {
             world.removePair(entity, ecs.relations.ChildOf, ecs.core.Wildcard);
             world.addPair(entity, ecs.relations.ChildOf, new_parent);
+            world.modified(entity, ecs.components.WorldTransform);
         },
         .new => |new| {
             defer allocator.free(new);
@@ -703,6 +713,7 @@ pub fn trySetParentKeepUniquePathName(world: ecs.World, entity: ecs.Entity, new_
             _ = world.setPathName(entity, null);
             _ = world.removePair(entity, ecs.relations.ChildOf, ecs.core.Wildcard);
             _ = world.addPair(entity, ecs.relations.ChildOf, new_parent);
+            world.modified(entity, ecs.components.WorldTransform);
             _ = world.setPathName(entity, new);
         },
     }
@@ -851,12 +862,33 @@ pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
 fn bootstrapEditorPipeline(self: *const Self, world: ecs.World) void {
     var query = c.ecs_query_desc_t{};
     query.terms[0] = .{ .id = ecs.core.System };
-    query.terms[1] = .{ .id = ecs.systems.Phase, .src = .{ .id = c.EcsCascade }, .trav = ecs.relations.DependsOn };
-    query.terms[2] = .{ .id = c.ecs_dependson(ecs.systems.OnStart), .trav = ecs.relations.DependsOn, .oper = c.EcsNot };
-    query.terms[3] = .{ .id = c.EcsDisabled, .src = .{ .id = c.EcsUp }, .trav = ecs.relations.DependsOn, .oper = c.EcsNot };
-    query.terms[4] = .{ .id = c.EcsDisabled, .src = .{ .id = c.EcsUp }, .trav = ecs.relations.ChildOf, .oper = c.EcsNot };
+    query.terms[1] = .{
+        .id = ecs.systems.Phase,
+        .src = .{ .id = ecs.query_miscs.Cascade },
+        .trav = ecs.relations.DependsOn,
+    };
+    query.terms[2] = .{
+        .id = c.ecs_dependson(ecs.systems.OnStart),
+        .trav = ecs.relations.DependsOn,
+        .oper = ecs.operators.Not,
+    };
+    query.terms[3] = .{
+        .id = ecs.scopes.Disabled,
+        .src = .{ .id = ecs.query_miscs.Up },
+        .trav = ecs.relations.DependsOn,
+        .oper = ecs.operators.Not,
+    };
+    query.terms[4] = .{
+        .id = ecs.scopes.Disabled,
+        .src = .{ .id = ecs.query_miscs.Up },
+        .trav = ecs.relations.ChildOf,
+        .oper = ecs.operators.Not,
+    };
     if (!self.play) {
-        query.terms[5] = .{ .id = ecs.typeId(RunInEditor), .src = .{ .id = c.EcsThis } };
+        query.terms[5] = .{
+            .id = ecs.typeId(RunInEditor),
+            .src = .{ .id = ecs.query_miscs.Self },
+        };
     }
     query.order_by_callback = flecs_entity_compare;
     query.cache_kind = c.EcsQueryCacheAuto;

@@ -54,12 +54,6 @@ pub const LocalTransform = extern struct {
         for (0..@intCast(iter.inner.count)) |i| {
             const entity = iter.inner.entities[i];
             const world = iter.realWorld();
-            if (world.has(entity, WorldTransform)) {
-                std.log.info(
-                    "\"LocalTransform\" got removed from Entity \"{d}\" leaving behind only the \"WorldTransform\"",
-                    .{entity},
-                );
-            }
             world.remove(entity, WorldTransform);
         }
     }

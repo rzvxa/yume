@@ -224,8 +224,8 @@ pub const World = struct {
         inline for (start_index..fn_type.params.len) |i| {
             const p = fn_type.params[i];
             const param_type_info = @typeInfo(p.type.?).Pointer;
-            const inout = if (param_type_info.is_const) c.EcsIn else c.EcsInOut;
-            terms[i - start_index] = .{ .id = typeId(param_type_info.child), .inout = inout };
+            const inout: InOut = if (param_type_info.is_const) .in else .in_out;
+            terms[i - start_index] = .{ .id = typeId(param_type_info.child), .inout = inout.cast() };
         }
         return terms;
     }
@@ -876,12 +876,17 @@ fn staticEsqueInitializer() void {
     operators.OrFrom = c.EcsOrFrom;
     operators.NotFrom = c.EcsNotFrom;
 
-    std.debug.assert(@intFromEnum(InOut.Default) == c.EcsInOutDefault);
-    std.debug.assert(@intFromEnum(InOut.None) == c.EcsInOutNone);
-    std.debug.assert(@intFromEnum(InOut.Filter) == c.EcsInOutFilter);
-    std.debug.assert(@intFromEnum(InOut.InOut) == c.EcsInOut);
-    std.debug.assert(@intFromEnum(InOut.In) == c.EcsIn);
-    std.debug.assert(@intFromEnum(InOut.Out) == c.EcsOut);
+    std.debug.assert(@intFromEnum(InOut.default) == c.EcsInOutDefault);
+    std.debug.assert(@intFromEnum(InOut.none) == c.EcsInOutNone);
+    std.debug.assert(@intFromEnum(InOut.filter) == c.EcsInOutFilter);
+    std.debug.assert(@intFromEnum(InOut.in_out) == c.EcsInOut);
+    std.debug.assert(@intFromEnum(InOut.in) == c.EcsIn);
+    std.debug.assert(@intFromEnum(InOut.out) == c.EcsOut);
+
+    std.debug.assert(@intFromEnum(QueryCacheKind.default) == c.EcsQueryCacheDefault);
+    std.debug.assert(@intFromEnum(QueryCacheKind.auto) == c.EcsQueryCacheAuto);
+    std.debug.assert(@intFromEnum(QueryCacheKind.all) == c.EcsQueryCacheAll);
+    std.debug.assert(@intFromEnum(QueryCacheKind.none) == c.EcsQueryCacheNone);
 }
 
 // Id flags
@@ -1063,17 +1068,29 @@ pub const systems = struct {
     pub var Phase: Entity = undefined;
 
     pub const TransformSyncSystem = @import("systems/TransformSyncSystem.zig");
+    pub const PostTransformSystem = @import("systems/PostTransformSystem.zig");
 };
 
 pub const InOut = enum(i16) {
-    Default = 0,
-    None = 1,
-    Filter = 2,
-    InOut = 3,
-    In = 4,
-    Out = 5,
+    default = 0,
+    none = 1,
+    filter = 2,
+    in_out = 3,
+    in = 4,
+    out = 5,
 
     pub inline fn cast(self: InOut) i16 {
+        return @intFromEnum(self);
+    }
+};
+
+pub const QueryCacheKind = enum(c_int) {
+    default = 0,
+    auto = 1,
+    all = 2,
+    none = 3,
+
+    pub inline fn cast(self: QueryCacheKind) i16 {
         return @intFromEnum(self);
     }
 };
@@ -1124,8 +1141,7 @@ pub fn SystemImpl(comptime fn_system: anytype) type {
                 args_tuple[i] = field(Iterator.from(it), info.Pointer.child, i - start_index).?;
             }
 
-            //NOTE: .always_inline seems ok, but unsure. Replace to .auto if it breaks
-            _ = @call(.always_inline, fn_system, args_tuple);
+            _ = @call(.auto, fn_system, args_tuple);
         }
     };
 }
