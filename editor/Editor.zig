@@ -150,33 +150,18 @@ pub fn init(ctx: *GameApp) *Self {
     ctx.world.tag(Playing);
     ctx.world.addSingleton(Playing);
     ctx.world.enable(ecs.typeId(Playing), false);
-    // const tmu_entity = ctx.world.systemFn("transform-matrix-update", ecs.systems.PostUpdate, ecs.systems.transformMatrices);
-    // ctx.world.add(tmu_entity, RunInEditor);
-    // _ = ctx.world.observerFn(&ecs.ObserverDesc{
-    //     .query = std.mem.zeroInit(ecs.QueryDesc, .{ .terms = .{
-    //         .{ .id = ecs.typeId(components.Position) },
-    //         .{ .id = ecs.typeId(components.Rotation) },
-    //         .{ .id = ecs.typeId(components.Scale) },
-    //         .{ .id = ecs.typeId(components.TransformMatrix) },
-    //     } }),
-    //     .events = [_]ecs.Entity{c.EcsOnSet} ++ [_]ecs.Entity{0} ** 7,
-    //     .callback = &struct {
-    //         fn f(it: *ecs.Iter) callconv(.C) void {
-    //             if (it.event_id == ecs.typeId(components.Position) or
-    //                 it.event_id == ecs.typeId(components.Rotation) or
-    //                 it.event_id == ecs.typeId(components.Scale))
-    //             {
-    //                 const positions = ecs.field(@ptrCast(it), components.Position, @alignOf(components.Position), 0).?;
-    //                 const rotations = ecs.field(@ptrCast(it), components.Rotation, @alignOf(components.Rotation), 1).?;
-    //                 const scales = ecs.field(@ptrCast(it), components.Scale, @alignOf(components.Scale), 2).?;
-    //                 const transformMatrices = ecs.field(@ptrCast(it), components.TransformMatrix, @alignOf(components.TransformMatrix), 3).?;
-    //                 for (positions, rotations, scales, transformMatrices) |p, r, s, *t| {
-    //                     t.value = Mat4.compose(p.value, Quat.fromEuler(r.value), s.value);
-    //                 }
-    //             }
-    //         }
-    //     }.f,
-    // });
+    {
+        const tss = ecs.systems.TransformSyncSystem.registerTo(ctx.world);
+        ctx.world.add(tss, RunInEditor);
+        ctx.world.add(
+            ecs.systems.PostTransformSystem.registerTo(ctx.world, .world, tss),
+            RunInEditor,
+        );
+        ctx.world.add(
+            ecs.systems.PostTransformSystem.registerTo(ctx.world, .local, tss),
+            RunInEditor,
+        );
+    }
 
     const home_dir = std.fs.selfExeDirPathAlloc(ctx.allocator) catch @panic("OOM");
     defer ctx.allocator.free(home_dir);
@@ -699,6 +684,7 @@ pub fn trySetParentKeepUniquePathName(world: ecs.World, entity: ecs.Entity, new_
     const old_name = world.getPathName(entity) orelse {
         world.removePair(entity, ecs.relations.ChildOf, ecs.core.Wildcard);
         world.addPair(entity, ecs.relations.ChildOf, new_parent);
+        world.modified(entity, ecs.components.WorldTransform);
         return;
     };
 
@@ -706,6 +692,7 @@ pub fn trySetParentKeepUniquePathName(world: ecs.World, entity: ecs.Entity, new_
         .base => {
             world.removePair(entity, ecs.relations.ChildOf, ecs.core.Wildcard);
             world.addPair(entity, ecs.relations.ChildOf, new_parent);
+            world.modified(entity, ecs.components.WorldTransform);
         },
         .new => |new| {
             defer allocator.free(new);
@@ -726,6 +713,7 @@ pub fn trySetParentKeepUniquePathName(world: ecs.World, entity: ecs.Entity, new_
             _ = world.setPathName(entity, null);
             _ = world.removePair(entity, ecs.relations.ChildOf, ecs.core.Wildcard);
             _ = world.addPair(entity, ecs.relations.ChildOf, new_parent);
+            world.modified(entity, ecs.components.WorldTransform);
             _ = world.setPathName(entity, new);
         },
     }
@@ -874,12 +862,33 @@ pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
 fn bootstrapEditorPipeline(self: *const Self, world: ecs.World) void {
     var query = c.ecs_query_desc_t{};
     query.terms[0] = .{ .id = ecs.core.System };
-    query.terms[1] = .{ .id = ecs.systems.Phase, .src = .{ .id = c.EcsCascade }, .trav = ecs.relations.DependsOn };
-    query.terms[2] = .{ .id = c.ecs_dependson(ecs.systems.OnStart), .trav = ecs.relations.DependsOn, .oper = c.EcsNot };
-    query.terms[3] = .{ .id = c.EcsDisabled, .src = .{ .id = c.EcsUp }, .trav = ecs.relations.DependsOn, .oper = c.EcsNot };
-    query.terms[4] = .{ .id = c.EcsDisabled, .src = .{ .id = c.EcsUp }, .trav = ecs.relations.ChildOf, .oper = c.EcsNot };
+    query.terms[1] = .{
+        .id = ecs.systems.Phase,
+        .src = .{ .id = ecs.query_miscs.Cascade },
+        .trav = ecs.relations.DependsOn,
+    };
+    query.terms[2] = .{
+        .id = c.ecs_dependson(ecs.systems.OnStart),
+        .trav = ecs.relations.DependsOn,
+        .oper = ecs.operators.Not,
+    };
+    query.terms[3] = .{
+        .id = ecs.scopes.Disabled,
+        .src = .{ .id = ecs.query_miscs.Up },
+        .trav = ecs.relations.DependsOn,
+        .oper = ecs.operators.Not,
+    };
+    query.terms[4] = .{
+        .id = ecs.scopes.Disabled,
+        .src = .{ .id = ecs.query_miscs.Up },
+        .trav = ecs.relations.ChildOf,
+        .oper = ecs.operators.Not,
+    };
     if (!self.play) {
-        query.terms[5] = .{ .id = ecs.typeId(RunInEditor), .src = .{ .id = c.EcsThis } };
+        query.terms[5] = .{
+            .id = ecs.typeId(RunInEditor),
+            .src = .{ .id = ecs.query_miscs.Self },
+        };
     }
     query.order_by_callback = flecs_entity_compare;
     query.cache_kind = c.EcsQueryCacheAuto;

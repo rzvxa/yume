@@ -58,7 +58,7 @@ pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) voi
 
 fn onGizmo(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
     var cam = ctx.world.getMut(entity, ecs.components.Camera).?;
-    var transform = ctx.world.get(entity, ecs.components.Transform).?;
+    var transform = ctx.world.get(entity, ecs.components.WorldTransform).?;
     switch (cam.opts.kind) {
         .perspective => {
             const decomposed = transform.decompose();

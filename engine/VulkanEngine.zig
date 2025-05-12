@@ -1329,7 +1329,7 @@ pub fn drawObjects(
     self: *Self,
     cmd: c.VkCommandBuffer,
     opts: struct {
-        matrices: []components.Transform,
+        transforms: []components.WorldTransform,
         meshes: []components.Mesh,
         materials: []components.Material,
         ubo_buf: AllocatedBuffer,
@@ -1369,7 +1369,7 @@ pub fn drawObjects(
     var currentFrame = self.getCurrentFrame();
     const batch_offset = self.object_buffer_offset;
 
-    const num_objects = opts.matrices.len;
+    const num_objects = opts.transforms.len;
     std.debug.assert(batch_offset + num_objects <= MAX_OBJECTS);
 
     // Map the object buffer and write GPUObjectData for the objects in this batch.
@@ -1378,10 +1378,10 @@ pub fn drawObjects(
 
     // Cast the pointer to an array pointer. We assume that object_buffer is large enough.
     var object_data_arr: [*]GPUObjectData = @ptrCast(object_data orelse unreachable);
-    for (opts.matrices, 0..) |*matrix, index| {
+    for (opts.transforms, 0..) |*transform, index| {
         // Write into the region starting at the batch_offset.
         object_data_arr[batch_offset + index] = GPUObjectData{
-            .model_matrix = matrix.value,
+            .model_matrix = transform.matrix,
         };
     }
     c.vmaUnmapMemory(self.vma_allocator, currentFrame.object_buffer.allocation);
@@ -1390,7 +1390,7 @@ pub fn drawObjects(
     self.object_buffer_offset += num_objects;
 
     // ----- Issue Draw Calls Using the Correct Buffer Region -----
-    for (opts.matrices, opts.materials, opts.meshes, 0..) |*matrix, *material, *mesh, index| {
+    for (opts.materials, opts.meshes, 0..) |*material, *mesh, index| {
         if (index == 0 or material != &opts.materials[index - 1]) {
             c.vkCmdBindPipeline(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline);
 
@@ -1408,11 +1408,11 @@ pub fn drawObjects(
             c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 2, 1, &material.rsc_descriptor_set, 0, null);
         }
 
-        const push_constants = MeshPushConstants{
-            .render_matrix = matrix.value,
-        };
-
-        c.vkCmdPushConstants(cmd, material.pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &push_constants);
+        // const push_constants = MeshPushConstants{
+        //     .render_matrix = ltw.value.mul(matrix.value),
+        // };
+        //
+        // c.vkCmdPushConstants(cmd, material.pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &push_constants);
 
         if (index == 0 or mesh != &opts.meshes[index - 1]) {
             const offset: c.VkDeviceSize = 0;

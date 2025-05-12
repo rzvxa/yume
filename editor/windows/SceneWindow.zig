@@ -44,7 +44,7 @@ target_pos: Vec3 = Vec3.ZERO,
 distance: f32 = default_cam_distance,
 
 active_tool: gizmo.ManipulationTool = .move,
-active_mode: gizmo.ManipulationMode = .global,
+active_mode: gizmo.ManipulationMode = .world,
 
 is_perspective: bool = true,
 render_lights: bool = true,
@@ -75,34 +75,34 @@ pub fn init(ctx: *GameApp, on_draw_gizmos: *const fn (*anyopaque) void, on_draw_
         .cast_query = ctx.world.query(&std.mem.zeroInit(
             c.ecs_query_desc_t,
             .{ .terms = .{
-                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.WorldTransform) },
                 .{ .id = ecs.typeId(components.Mesh) },
             } },
         )),
         .directional_light_query = ctx.world.query(&std.mem.zeroInit(
             c.ecs_query_desc_t,
             .{ .terms = .{
-                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.WorldTransform) },
                 .{ .id = ecs.typeId(components.DirectionalLight) },
             } },
         )),
         .point_lights_query = ctx.world.query(&std.mem.zeroInit(
             c.ecs_query_desc_t,
             .{ .terms = .{
-                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.WorldTransform) },
                 .{ .id = ecs.typeId(components.PointLight) },
             } },
         )),
         .transform_query = ctx.world.query(&std.mem.zeroInit(
             c.ecs_query_desc_t,
             .{ .terms = .{
-                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.WorldTransform) },
             } },
         )),
         .render_system = ctx.world.systemEx(&.{
             .entity = ctx.world.create("Editor Render System"),
             .query = std.mem.zeroInit(c.ecs_query_desc_t, .{ .terms = .{
-                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.WorldTransform) },
                 .{ .id = ecs.typeId(components.Mesh) },
                 .{ .id = ecs.typeId(components.Material) },
             } }),
@@ -244,12 +244,12 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
 
             c.ImGui_PushStyleColorImVec4(
                 c.ImGuiCol_Button,
-                if (self.active_mode == .global) active_col else normal_col,
+                if (self.active_mode == .world) active_col else normal_col,
             );
-            clicked = c.ImGui_ButtonEx("G##global-mode", letter_sz);
+            clicked = c.ImGui_ButtonEx("W##world-mode", letter_sz);
             c.ImGui_PopStyleColor();
             if (clicked) {
-                self.active_mode = .global;
+                self.active_mode = .world;
             }
 
             c.ImGui_PushStyleColorImVec4(
@@ -295,22 +295,26 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
         blk: {
             switch (Editor.instance().selection) {
                 .entity => |selection| {
-                    const transform = ctx.world.getMut(selection, components.Transform);
-                    if (transform == null) {
-                        break :blk;
-                    }
+                    const local_transform = ctx.world.getMut(selection, components.LocalTransform) orelse break :blk;
+
+                    const world_transform = ctx.world.getMut(selection, components.WorldTransform).?;
 
                     if (c.ImGui_IsKeyPressed(c.ImGuiKey_F)) {
-                        self.focus(transform.?.position(), default_cam_distance);
+                        self.focus(world_transform.position(), default_cam_distance);
                     }
 
                     if (ctx.world.get(selection, components.Mesh)) |mesh| {
-                        try gizmo.drawBoundingBoxCorners(mesh.bounds, transform.?.value);
+                        try gizmo.drawBoundingBoxCorners(mesh.bounds, world_transform.matrix);
                     }
                     var selection_id_buf = std.mem.zeroes([19:0]u8);
                     c.ImGuizmo_PushID_Str((try std.fmt.bufPrintZ(&selection_id_buf, "{d}", .{selection})).ptr);
-                    if (try gizmo.editTransform(&transform.?.value, self.active_tool, self.active_mode)) {
-                        ctx.world.modified(selection, components.Transform);
+                    if (try gizmo.editTransform(
+                        &world_transform.matrix,
+                        &local_transform.matrix,
+                        self.active_tool,
+                        self.active_mode,
+                    )) {
+                        ctx.world.modified(selection, components.LocalTransform);
                     }
                     c.ImGuizmo_PopID();
                 },
@@ -322,7 +326,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
             self.on_draw_gizmos(self.on_draw_gizmos_ctx);
             var iter = self.transform_query.iter();
             while (iter.next()) {
-                const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
+                const transforms = ecs.field(&iter, components.WorldTransform, 0).?;
                 for (transforms, 0..) |transform, i| {
                     const entity = iter.inner.entities[i];
                     var entity_id_buf = std.mem.zeroes([19:0]u8);
@@ -548,15 +552,15 @@ fn focus(self: *Self, target: Vec3, distance: f32) void {
     self.target_pos = target;
 }
 
-fn sys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mesh, materials: []components.Material) void {
+fn sys(it: *ecs.Iter, transforms: []components.WorldTransform, meshes: []components.Mesh, materials: []components.Material) void {
     const me: *FrameData = @ptrCast(@alignCast(it.param));
 
     const directional_light: GPULightData = blk: {
         var iter = me.d.directional_light_query.iter();
         while (iter.next()) {
-            const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
-            const lights = ecs.field(&iter, components.DirectionalLight, @alignOf(components.DirectionalLight), 1).?;
-            for (lights, transforms) |light, transform| {
+            const wts = ecs.field(&iter, components.WorldTransform, 0).?;
+            const lights = ecs.field(&iter, components.DirectionalLight, 1).?;
+            for (lights, wts) |light, transform| {
                 iter.deinit();
                 break :blk .{
                     .pos = transform.rotation().toBasisVectors().forward,
@@ -575,9 +579,9 @@ fn sys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mes
         var iter = me.d.point_lights_query.iter();
         var lights = std.ArrayList(GPULightData).init(a);
         while (iter.next()) {
-            const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
-            const point_lights = ecs.field(&iter, components.PointLight, @alignOf(components.PointLight), 1).?;
-            for (point_lights, transforms) |light, transform| {
+            const wts = ecs.field(&iter, components.WorldTransform, 0).?;
+            const point_lights = ecs.field(&iter, components.PointLight, 1).?;
+            for (point_lights, wts) |light, transform| {
                 lights.append(.{
                     .pos = transform.position(),
                     .color = light.color,
@@ -604,7 +608,7 @@ fn sys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mes
     me.app.engine.drawObjects(
         me.cmd,
         .{
-            .matrices = matrices,
+            .transforms = transforms,
             .meshes = meshes,
             .materials = materials,
             .ubo_buf = me.d.editor_camera_and_scene_buffer,
@@ -632,13 +636,13 @@ fn raycast(self: *Self, ray: Raycast, distance: f32, allocator: std.mem.Allocato
 
     var iter = self.cast_query.iter();
     while (iter.next()) {
-        const transforms_ptr = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
-        const meshes_ptr = ecs.field(&iter, components.Mesh, @alignOf(components.Mesh), 1).?;
+        const transforms_ptr = ecs.field(&iter, components.WorldTransform, 0).?;
+        const meshes_ptr = ecs.field(&iter, components.Mesh, 1).?;
         for (iter.inner.entities, meshes_ptr, transforms_ptr) |entity, *mesh, transform| {
             const bb = mesh.bounds;
 
-            // Transform the ray into the mesh's local space.
-            const inv = transform.value.inverse() catch Mat4.IDENTITY;
+            // transform the ray into the mesh's local space.
+            const inv = transform.matrix.inverse() catch Mat4.IDENTITY;
             const local_origin = inv.mulVec3(ray.origin);
 
             const world_target = ray.origin.add(ray.dir);
@@ -650,7 +654,7 @@ fn raycast(self: *Self, ray: Raycast, distance: f32, allocator: std.mem.Allocato
             if (maybeT) |t_local| {
                 if (t_local >= 0) {
                     const localHit = local_origin.add(local_dir.mulf(t_local));
-                    const worldHit = transform.value.mulVec3(localHit);
+                    const worldHit = transform.matrix.mulVec3(localHit);
                     if (ray.origin.distanceTo(worldHit) <= distance) {
                         try intersections.append(.{ .entity = entity, .position = worldHit });
                     }

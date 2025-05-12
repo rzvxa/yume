@@ -43,7 +43,7 @@ pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) voi
 }
 
 fn onGizmo(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
-    var transform = ctx.world.get(entity, ecs.components.Transform).?;
+    var transform = ctx.world.get(entity, ecs.components.WorldTransform).?;
     const decomposed = transform.decompose();
     const basis = decomposed.rotation.toBasisVectors();
     const origin = decomposed.translation;

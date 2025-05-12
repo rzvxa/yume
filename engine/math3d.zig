@@ -991,6 +991,11 @@ pub const Mat4 = extern union {
         return m16;
     }
 
+    // imprecise, doesn't use epsilon
+    pub fn eql(rhs: *const Self, lhs: *const Self) bool {
+        return std.mem.eql(f32, &rhs.values, &lhs.values);
+    }
+
     pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
         const elements = try allocator.alloc(Dynamic, 4);
         elements[0] = try Vec4.serialize(&self.vec4[0], allocator);

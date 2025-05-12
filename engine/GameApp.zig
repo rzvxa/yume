@@ -84,7 +84,8 @@ pub fn init(opts: struct {
     self.registerComponent(ecs.components.Meta);
     self.registerComponent(ecs.components.HierarchyOrder);
 
-    self.registerComponent(ecs.components.Transform);
+    self.registerComponent(ecs.components.LocalTransform);
+    self.registerComponent(ecs.components.WorldTransform);
 
     self.registerComponent(ecs.components.Camera);
     self.registerComponent(ecs.components.DirectionalLight);
@@ -92,6 +93,8 @@ pub fn init(opts: struct {
 
     self.registerComponent(ecs.components.Mesh);
     self.registerComponent(ecs.components.Material);
+
+    self.world.set(self.scene_root, ecs.components.WorldTransform, .{ .matrix = math3d.Mat4.IDENTITY });
 
     return self;
 }
@@ -184,14 +187,14 @@ pub fn loadScene(self: *Self, scene_id: Uuid) !void {
         old_scene.deinit();
     }
 
-    self.world.clear(self.scene_root);
     self.world.deleteWith(ecs.pair(ecs.relations.ChildOf, self.scene_root));
+    self.world.clear(self.scene_root);
+    self.world.set(self.scene_root, ecs.components.WorldTransform, .{ .matrix = math3d.Mat4.IDENTITY, .dirty = true });
 
     var dfs = try self.scene.dfs();
     defer dfs.deinit();
     var entity_map = std.AutoHashMap(Uuid, ecs.Entity).init(self.allocator);
     defer entity_map.deinit();
-    self.world.clear(self.scene_root);
     if (try dfs.next()) |root| {
         try entity_map.put(root.uuid, self.scene_root);
         self.world.setUuid(self.scene_root, root.uuid);
@@ -251,6 +254,10 @@ pub fn snapshotLiveScene(self: *Self) !*Scene {
 pub fn registerComponent(self: *Self, comptime T: type) void {
     const comp = self.world.component(T);
     self.components.put(ecs.typeName(T), comp) catch @panic("OOM");
+}
+
+pub fn registerTag(self: *Self, comptime T: type) void {
+    self.world.tag(T);
 }
 
 pub fn isFocused(self: *const Self) bool {

@@ -43,28 +43,28 @@ pub fn init(ctx: *GameApp) Self {
         .camera_query = ctx.world.query(&std.mem.zeroInit(
             c.ecs_query_desc_t,
             .{ .terms = .{
-                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.WorldTransform) },
                 .{ .id = ecs.typeId(components.Camera) },
             } },
         )),
         .directional_light_query = ctx.world.query(&std.mem.zeroInit(
             c.ecs_query_desc_t,
             .{ .terms = .{
-                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.WorldTransform) },
                 .{ .id = ecs.typeId(components.DirectionalLight) },
             } },
         )),
         .point_lights_query = ctx.world.query(&std.mem.zeroInit(
             c.ecs_query_desc_t,
             .{ .terms = .{
-                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.WorldTransform) },
                 .{ .id = ecs.typeId(components.PointLight) },
             } },
         )),
         .render_system = ctx.world.systemEx(&.{
             .entity = ctx.world.create("Render System"),
             .query = std.mem.zeroInit(c.ecs_query_desc_t, .{ .terms = .{
-                .{ .id = ecs.typeId(components.Transform) },
+                .{ .id = ecs.typeId(components.WorldTransform) },
                 .{ .id = ecs.typeId(components.Mesh) },
                 .{ .id = ecs.typeId(components.Material) },
             } }),
@@ -114,8 +114,8 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                 const directional_light: GPULightData = blk: {
                     var iter = me.d.directional_light_query.iter();
                     while (iter.next()) {
-                        const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
-                        const lights = ecs.field(&iter, components.DirectionalLight, @alignOf(components.DirectionalLight), 1).?;
+                        const transforms = ecs.field(&iter, components.WorldTransform, 0).?;
+                        const lights = ecs.field(&iter, components.DirectionalLight, 1).?;
                         for (lights, transforms) |light, transform| {
                             iter.deinit();
                             break :blk .{
@@ -135,8 +135,8 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                     var iter = me.d.point_lights_query.iter();
                     var point_lights = std.ArrayList(GPULightData).init(a);
                     while (iter.next()) {
-                        const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
-                        const pls = ecs.field(&iter, components.PointLight, @alignOf(components.PointLight), 1).?;
+                        const transforms = ecs.field(&iter, components.WorldTransform, 0).?;
+                        const pls = ecs.field(&iter, components.PointLight, 1).?;
                         for (pls, transforms) |light, transform| {
                             point_lights.append(.{
                                 .pos = transform.position(),
@@ -153,8 +153,8 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                 var iter = me.d.camera_query.iter();
                 const aspect = me.d.game_view_size.x / me.d.game_view_size.y;
                 while (iter.next()) {
-                    const transforms = ecs.field(&iter, components.Transform, @alignOf(components.Transform), 0).?;
-                    const cameras = ecs.field(&iter, components.Camera, @alignOf(components.Camera), 1).?;
+                    const transforms = ecs.field(&iter, components.WorldTransform, 0).?;
+                    const cameras = ecs.field(&iter, components.Camera, 1).?;
                     for (cameras, transforms) |*camera, transform| {
                         const decomposed = transform.decompose();
                         camera.updateMatrices(decomposed.translation, decomposed.rotation.toEuler(), aspect);
@@ -197,7 +197,12 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
     c.ImGui_End();
 }
 
-fn renderSys(it: *ecs.Iter, matrices: []components.Transform, meshes: []components.Mesh, materials: []components.Material) void {
+fn renderSys(
+    it: *ecs.Iter,
+    transforms: []components.WorldTransform,
+    meshes: []components.Mesh,
+    materials: []components.Material,
+) void {
     const me: *FrameData = @ptrCast(@alignCast(it.param));
     var point_lights = std.mem.zeroes([4]Engine.GPUSceneData.GPULightData);
     std.debug.assert(me.point_lights.len < 4);
@@ -205,7 +210,7 @@ fn renderSys(it: *ecs.Iter, matrices: []components.Transform, meshes: []componen
     me.app.engine.drawObjects(
         me.cmd,
         .{
-            .matrices = matrices,
+            .transforms = transforms,
             .meshes = meshes,
             .materials = materials,
             .ubo_buf = me.app.engine.camera_and_scene_buffer,
