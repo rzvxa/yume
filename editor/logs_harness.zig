@@ -36,13 +36,17 @@ pub fn logFn(
     std.log.defaultLog(level, scope, format, args);
 }
 
-pub fn drainInto(buf: *std.ArrayList(Log)) !void {
+// returns number of drained items
+pub fn drainInto(buf: *std.ArrayList(Log)) !usize {
     init.call();
     mutex.lock();
     defer mutex.unlock();
 
+    const n = logs.items.len;
     try buf.appendSlice(logs.items);
     logs.clearRetainingCapacity();
+
+    return n;
 }
 
 pub fn free(slice: []Log) void {
