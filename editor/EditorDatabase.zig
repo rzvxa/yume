@@ -59,7 +59,6 @@ const LogsDatabase = struct {
                 const array = try std.json.innerParse([][:0]u8, a, jrs, inner_opts);
 
                 for (array) |it| {
-                    std.log.debug("HERE {s}", .{it});
                     try result.scopes.put(it, {});
                 }
             } else {

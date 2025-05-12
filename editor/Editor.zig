@@ -132,8 +132,6 @@ dockspace_flags: c.ImGuiDockNodeFlags = 0,
 
 editors: Editors,
 
-first_time: bool = true,
-
 hello_modal: HelloModal,
 new_project_modal: NewProjectModal,
 open_project_modal: OpenProjectModal,
@@ -328,8 +326,6 @@ pub fn draw(self: *Self) !void {
     c.cImGui_ImplSDL3_NewFrame();
     c.ImGui_NewFrame();
 
-    const io = c.ImGui_GetIO();
-
     c.ImGuizmo_SetOrthographic(!self.scene_window.is_perspective);
     c.ImGuizmo_BeginFrame();
 
@@ -409,69 +405,32 @@ pub fn draw(self: *Self) !void {
         c.ImGui_EndMainMenuBar();
     }
 
-    // We are using the ImGuiWindowFlags_NoDocking flag to make the parent window not dockable into,
-    // because it would be confusing to have two docking targets within each others.
-    var window_flags = c.ImGuiWindowFlags_MenuBar | c.ImGuiWindowFlags_NoDocking;
-
     const viewport = c.ImGui_GetMainViewport();
-    c.ImGui_SetNextWindowPos(viewport.*.Pos, 0);
-    c.ImGui_SetNextWindowSize(viewport.*.Size, 0);
-    c.ImGui_SetNextWindowViewport(viewport.*.ID);
-    c.ImGui_PushStyleVar(c.ImGuiStyleVar_WindowRounding, 0);
-    c.ImGui_PushStyleVar(c.ImGuiStyleVar_WindowBorderSize, 0);
-    window_flags |= c.ImGuiWindowFlags_NoTitleBar | c.ImGuiWindowFlags_NoCollapse | c.ImGuiWindowFlags_NoResize | c.ImGuiWindowFlags_NoMove;
-    window_flags |= c.ImGuiWindowFlags_NoBringToFrontOnFocus | c.ImGuiWindowFlags_NoNavFocus;
+    const dockspace_id = c.ImGui_GetID("MainDockSpace");
 
-    // When using ImGuiDockNodeFlags_PassthruCentralNode, DockSpace() will render our background and handle the pass-thru hole, so we ask Begin() to not render a background.
-    if ((self.dockspace_flags & c.ImGuiDockNodeFlags_PassthruCentralNode) > 0) {
-        window_flags |= c.ImGuiWindowFlags_NoBackground;
+    if (c.ImGui_DockBuilderGetNode(dockspace_id) == null) {
+        _ = c.ImGui_DockBuilderAddNodeEx(dockspace_id, self.dockspace_flags | c.ImGuiDockNodeFlags_DockSpace);
+        c.ImGui_DockBuilderSetNodeSize(dockspace_id, viewport.*.Size);
+
+        var dockspace_id_copy = dockspace_id;
+        const dock_id_left = c.ImGui_DockBuilderSplitNode(dockspace_id_copy, c.ImGuiDir_Left, 0.2, null, &dockspace_id_copy);
+        const dock_id_right = c.ImGui_DockBuilderSplitNode(dockspace_id_copy, c.ImGuiDir_Right, 0.2, null, &dockspace_id_copy);
+        const dock_id_down = c.ImGui_DockBuilderSplitNode(dockspace_id_copy, c.ImGuiDir_Down, 0.25, null, &dockspace_id_copy);
+
+        c.ImGui_DockBuilderDockWindow("Resources", dock_id_down);
+        c.ImGui_DockBuilderDockWindow("Logs", dock_id_down);
+        c.ImGui_DockBuilderDockWindow("Hierarchy", dock_id_left);
+        c.ImGui_DockBuilderDockWindow("Properties", dock_id_right);
+        c.ImGui_DockBuilderDockWindow("Game", dockspace_id_copy);
+        c.ImGui_DockBuilderDockWindow("Scene", dockspace_id_copy);
+        c.ImGui_DockBuilderFinish(dockspace_id_copy);
     }
 
-    // Important: note that we proceed even if Begin() returns false (aka window is collapsed).
-    // This is because we want to keep our DockSpace() active. If a DockSpace() is inactive,
-    // all active windows docked into it will lose their parent and become undocked.
-    // We cannot preserve the docking relationship between an active window and an inactive docking, otherwise
-    // any change of dockspace/settings would lead to windows being stuck in limbo and never being visible.
-    c.ImGui_PushStyleVarImVec2(c.ImGuiStyleVar_WindowPadding, c.ImVec2{ .x = 0, .y = 0 });
-    _ = c.ImGui_Begin("DockSpace", null, window_flags);
-    c.ImGui_PopStyleVar();
-    c.ImGui_PopStyleVarEx(2);
+    _ = c.ImGui_DockSpaceOverViewportEx(dockspace_id, viewport, 0, null);
 
-    // DockSpace
-    if ((io.*.ConfigFlags & c.ImGuiConfigFlags_DockingEnable) > 0) {
-        var dockspace_id = c.ImGui_GetID("MyDockSpace");
-        _ = c.ImGui_DockSpaceEx(dockspace_id, c.ImVec2{ .x = 0, .y = 0 }, self.dockspace_flags, null);
-
-        if (self.first_time) {
-            self.first_time = false;
-
-            c.ImGui_DockBuilderRemoveNode(dockspace_id); // clear any previous layout
-            _ = c.ImGui_DockBuilderAddNodeEx(dockspace_id, self.dockspace_flags | c.ImGuiDockNodeFlags_DockSpace);
-            c.ImGui_DockBuilderSetNodeSize(dockspace_id, viewport.*.Size);
-
-            // split the dockspace into 2 nodes -- DockBuilderSplitNode takes in the following args in the following order
-            //   window ID to split, direction, fraction (between 0 and 1), the final two setting let's us choose which id we want (which ever one we DON'T set as NULL, will be returned by the function)
-            //                                                              out_id_at_dir is the id of the node in the direction we specified earlier, out_id_at_opposite_dir is in the opposite direction
-            const dock_id_left = c.ImGui_DockBuilderSplitNode(dockspace_id, c.ImGuiDir_Left, 0.2, null, &dockspace_id);
-            const dock_id_right = c.ImGui_DockBuilderSplitNode(dockspace_id, c.ImGuiDir_Right, 0.2, null, &dockspace_id);
-            const dock_id_down = c.ImGui_DockBuilderSplitNode(dockspace_id, c.ImGuiDir_Down, 0.25, null, &dockspace_id);
-
-            // we now dock our windows into the docking node we made above
-            c.ImGui_DockBuilderDockWindow("Logs", dock_id_down);
-            c.ImGui_DockBuilderDockWindow("Resources", dock_id_down);
-            c.ImGui_DockBuilderDockWindow("Hierarchy", dock_id_left);
-            c.ImGui_DockBuilderDockWindow("Properties", dock_id_right);
-            c.ImGui_DockBuilderDockWindow("Game", dockspace_id);
-            c.ImGui_DockBuilderDockWindow("Scene", dockspace_id);
-            c.ImGui_DockBuilderFinish(dockspace_id);
-        }
-    }
-
-    c.ImGui_End();
-
+    try self.resources_window.draw();
     self.hierarchy_window.draw(self.ctx);
     try self.properties_window.draw(self.ctx);
-    try self.resources_window.draw();
     try self.scene_window.draw(cmd, self.ctx);
     self.game_window.draw(cmd, self.ctx);
     try self.logs_windows.draw();
