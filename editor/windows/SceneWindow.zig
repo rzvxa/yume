@@ -387,6 +387,10 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
 }
 
 pub fn update(self: *Self, ctx: *GameApp) !void {
+    const inversed = self.camera.view.inverse() catch Mat4.IDENTITY;
+    var decomposed = inversed.decompose() catch Mat4.Decomposed.IDENTITY;
+    self.camera_pos = decomposed.translation;
+
     if (!self.is_hovered and !self.state.inUse()) {
         return;
     }
@@ -394,9 +398,6 @@ pub fn update(self: *Self, ctx: *GameApp) !void {
     var input: Vec3 = Vec3.make(0, 0, 0);
     var input_rot: Vec3 = Vec3.make(0, 0, 0);
 
-    const inversed = self.camera.view.inverse() catch Mat4.IDENTITY;
-    var decomposed = inversed.decompose() catch Mat4.Decomposed.IDENTITY;
-    self.camera_pos = decomposed.translation;
     const basis = decomposed.rotation.toBasisVectors();
 
     const left = basis.right.mulf(-1);
