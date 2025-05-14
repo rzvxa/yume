@@ -794,7 +794,7 @@ pub const Mat4 = extern union {
         var m = self;
 
         // Normalize the matrix.
-        if (epsilonEqual(m.unnamed[3][3], 0.0)) {
+        if (epsilonEql(m.unnamed[3][3], 0.0)) {
             return error.InvalidMatrix;
         }
         for (0..4) |i| {
@@ -811,14 +811,14 @@ pub const Mat4 = extern union {
         }
         perspectiveMatrix.unnamed[3][3] = 1;
 
-        if (epsilonEqual(determinant3x3(perspectiveMatrix), 0)) {
+        if (epsilonEql(determinant3x3(perspectiveMatrix), 0)) {
             return error.InvalidMatrix;
         }
 
         var per: Vec4 = Vec4.make(0, 0, 0, 1);
-        if (epsilonNotEqual(m.unnamed[0][3], 0) or
-            epsilonNotEqual(m.unnamed[1][3], 0) or
-            epsilonNotEqual(m.unnamed[2][3], 0))
+        if (epsilonNotEql(m.unnamed[0][3], 0) or
+            epsilonNotEql(m.unnamed[1][3], 0) or
+            epsilonNotEql(m.unnamed[2][3], 0))
         {
             // Build the right-hand side vector.
             const rhs = Vec4.make(m.unnamed[0][3], m.unnamed[1][3], m.unnamed[2][3], m.unnamed[3][3]);
@@ -849,7 +849,6 @@ pub const Mat4 = extern union {
         // Compute X scale factor and normalize the first row.
         var sc: Vec3 = undefined;
         sc.x = row[0].len();
-        if (sc.x < epsilon) return error.InvalidMatrix;
         row[0] = row[0].normalized();
 
         // Compute XY shear factor and make 2nd row orthogonal to 1st.
@@ -859,7 +858,7 @@ pub const Mat4 = extern union {
 
         // Compute Y scale and normalize 2nd row.
         sc.y = row[1].len();
-        if (sc.y < epsilon) return error.InvalidMatrix;
+        if (epsilonEql(sc.y, 0)) return error.InvalidMatrix;
         row[1] = row[1].normalized();
         skew.z /= sc.y;
 
@@ -871,7 +870,7 @@ pub const Mat4 = extern union {
 
         // Compute Z scale and normalize 3rd row.
         sc.z = row[2].len();
-        if (sc.z < epsilon) return error.InvalidMatrix;
+        if (epsilonEql(sc.z, 0)) return error.InvalidMatrix;
         row[2] = row[2].normalized();
         skew.y /= sc.z;
         skew.x /= sc.z;
@@ -1070,12 +1069,16 @@ pub const Vec2U = extern struct {
     pub inline fn toArray(self: Self) [2]u32 {
         return @as(*const [2]u32, @ptrCast(&self)).*;
     }
+
+    pub inline fn toVec2(self: Self) Vec2 {
+        return Vec2.make(@floatFromInt(self.x), @floatFromInt(self.y));
+    }
 };
 
-pub fn epsilonEqual(a: f32, b: f32) bool {
+pub fn epsilonEql(a: f32, b: f32) bool {
     return @abs(a - b) <= epsilon;
 }
 
-pub fn epsilonNotEqual(a: f32, b: f32) bool {
+pub fn epsilonNotEql(a: f32, b: f32) bool {
     return @abs(a - b) > epsilon;
 }

@@ -316,34 +316,29 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
             c.ImGui_SetCursorPos(cursor);
         }
 
-        blk: {
-            switch (Editor.instance().selection) {
-                .entity => |selection| {
-                    const local_transform = ctx.world.getMut(selection, components.LocalTransform) orelse break :blk;
+        switch (Editor.instance().selection) {
+            .entity => |selection| {
+                const world_transform = ctx.world.getMut(selection, components.WorldTransform).?;
 
-                    const world_transform = ctx.world.getMut(selection, components.WorldTransform).?;
+                if (c.ImGui_IsKeyPressed(c.ImGuiKey_F)) {
+                    self.focus(world_transform.position(), default_cam_distance);
+                }
 
-                    if (c.ImGui_IsKeyPressed(c.ImGuiKey_F)) {
-                        self.focus(world_transform.position(), default_cam_distance);
-                    }
-
-                    if (ctx.world.get(selection, components.Mesh)) |mesh| {
-                        try gizmo.drawBoundingBoxCorners(mesh.bounds, world_transform.matrix);
-                    }
-                    var selection_id_buf = std.mem.zeroes([19:0]u8);
-                    c.ImGuizmo_PushID_Str((try std.fmt.bufPrintZ(&selection_id_buf, "{d}", .{selection})).ptr);
-                    if (try gizmo.editTransform(
-                        &world_transform.matrix,
-                        &local_transform.matrix,
-                        self.active_tool,
-                        self.active_mode,
-                    )) {
-                        ctx.world.modified(selection, components.LocalTransform);
-                    }
-                    c.ImGuizmo_PopID();
-                },
-                else => {},
-            }
+                if (ctx.world.get(selection, components.Mesh)) |mesh| {
+                    try gizmo.drawBoundingBoxCorners(mesh.bounds, world_transform.matrix);
+                }
+                var selection_id_buf = std.mem.zeroes([19:0]u8);
+                c.ImGuizmo_PushID_Str((try std.fmt.bufPrintZ(&selection_id_buf, "{d}", .{selection})).ptr);
+                if (try gizmo.editTransform(
+                    &world_transform.matrix,
+                    self.active_tool,
+                    self.active_mode,
+                )) {
+                    ctx.world.modified(selection, components.WorldTransform);
+                }
+                c.ImGuizmo_PopID();
+            },
+            else => {},
         }
 
         {
