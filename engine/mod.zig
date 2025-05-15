@@ -2,6 +2,8 @@ pub const version = @import("cfg").version;
 
 pub const Uuid = @import("uuid.zig").Uuid;
 
+pub const Event = @import("event.zig").Event;
+
 pub const ecs = @import("ecs.zig");
 
 pub const collections = @import("collections.zig");
