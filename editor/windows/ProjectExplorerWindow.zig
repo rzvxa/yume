@@ -86,7 +86,7 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
     const input_height = 50;
     // if there is search text, add extra height for the gallery.
     const target_window_height = if (self.find_str.length() > 0)
-        input_height + app_window_extent.y * 0.4
+        input_height + app_window_extent.y * 0.4 + 40
     else
         input_height;
 
@@ -102,7 +102,7 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
         // center the window horizontally and position it at 20% from the top.
         c.ImGui_SetNextWindowPos(.{ .x = app_window_extent.x / 2 - input_width / 2, .y = app_window_extent.y * 0.2 }, c.ImGuiCond_Appearing);
         c.ImGui_SetNextWindowSize(.{
-            .x = self.anim_window_width + window_padding.x - 2,
+            .x = self.anim_window_width + window_padding.x * 3,
             .y = self.anim_window_height + window_padding.y + 2,
         }, c.ImGuiCond_Always);
         c.ImGui_PushStyleColorImVec4(
@@ -197,7 +197,7 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
     {
         const open = c.ImGui_BeginChild(
             "gallery-frame",
-            .{ .x = input_width, .y = app_window_extent.y * 0.4 },
+            .{ .x = input_width + window_padding.x, .y = app_window_extent.y * 0.4 },
             0,
             0,
         );
@@ -280,7 +280,7 @@ fn updateQueries(self: *Self) void {
         if (ranges.len == 0) continue;
 
         const score = utils.levenshtein(it.key_ptr.*, patt, self.allocator);
-        self.matches.append(.{ .score = score, .ranges = ranges_buf, .entry = it.value_ptr }) catch {};
+        self.matches.append(.{ .score = score, .ranges = ranges_buf, .range_count = ranges.len, .entry = it.value_ptr }) catch {};
     }
 }
 
@@ -315,7 +315,7 @@ fn drawList(self: *Self) void {
                     .height = 28,
                 };
                 c.ImGui_SetCursorPosX(c.ImGui_GetCursorPos().x + 32 + padding.x);
-                _ = c.ImGui_Button(match.entry.kind.resource.path());
+                imutils.drawTextWithHighlight(match.entry.kind.resource.uri.spanZ(), match.ranges[0..match.range_count], 0);
                 const child_drawlist = c.ImGui_GetWindowDrawList();
                 match.entry.preview.call(.{ child_drawlist, match.entry, rect });
             }
@@ -328,72 +328,83 @@ fn drawList(self: *Self) void {
 
 fn drawGrid(self: *Self) void {
     const avail = c.ImGui_GetContentRegionAvail();
-    const padding = c.ImGui_GetStyle().*.FramePadding;
+    const style = c.ImGui_GetStyle().*;
+    const padding = style.FramePadding;
     const total_entries: usize = self.matches.items.len;
 
-    // Set a fixed cell size. Adjust cell_width as needed.
-    const cell_width: f32 = 128;
-    const cell_height: f32 = 32;
-    // Compute how many columns fit in the available space.
-    const col_count: usize = @max(1, @as(usize, @intFromFloat(avail.x / cell_width)));
-    // Compute the necessary number of rows (rounding up).
-    const row_count: usize = (total_entries + col_count - 1) / col_count;
+    const columns: usize = 5;
 
-    var clipper = c.ImGuiListClipper{};
-    c.ImGuiListClipper_Begin(&clipper, @intCast(row_count), cell_height);
-    while (c.ImGuiListClipper_Step(&clipper)) {
-        // Set the cursor position for the start of the visible row.
-        // (Optional: if you want the clipper to auto-adjust, this call may not be needed.)
-        c.ImGui_SetCursorPosY(clipper.StartPosY);
+    const effective_avail_x: f32 = avail.x - style.ScrollbarSize;
+    const cell_width: f32 = effective_avail_x / columns;
 
-        var row: isize = clipper.DisplayStart;
-        while (row < clipper.DisplayEnd) : (row += 1) {
-            c.ImGui_BeginGroup(); // Begin a horizontal grouping for this row
+    const row_count: usize = (total_entries + columns - 1) / columns;
 
+    var row: usize = 0;
+    while (row < row_count) : (row += 1) {
+        const row_start = row * columns;
+        const row_end = if (row_start + columns < total_entries)
+            row_start + columns
+        else
+            total_entries;
+
+        var row_max_height: f32 = 0;
+        {
+            var i: usize = row_start;
+            while (i < row_end) : (i += 1) {
+                const match = self.matches.items[i];
+                const icon_size: f32 = cell_width - 2 * padding.x;
+                const text_avail: f32 = cell_width - 2 * padding.x;
+                const text_size = c.ImGui_CalcTextSizeEx(match.entry.kind.resource.uri.spanZ(), null, false, text_avail);
+                const cell_req_height = padding.y + icon_size + 4 + text_size.y + padding.y;
+                if (cell_req_height > row_max_height) row_max_height = cell_req_height;
+            }
+        }
+
+        c.ImGui_BeginGroup();
+        {
             var col: usize = 0;
-            while (col < col_count) : (col += 1) {
-                const index = @as(usize, @intCast(row)) * col_count + col;
+            while (col < columns) : (col += 1) {
+                const index = row * columns + col;
                 if (index >= total_entries) break;
                 const match = self.matches.items[index];
 
                 c.ImGui_PushID(&match.entry.kind.resource.id.urnZ());
+                if (c.ImGui_BeginChildFrameEx(
+                    c.ImGui_GetID("grid_cell"),
+                    .{ .x = cell_width, .y = row_max_height },
+                    c.ImGuiWindowFlags_NoScrollbar | c.ImGuiWindowFlags_NoScrollWithMouse,
+                )) {
+                    const cell_pos = c.ImGui_GetCursorScreenPos();
+                    const icon_size: f32 = cell_width - 2 * padding.x;
+                    const icon_rect = Rect{
+                        .x = cell_pos.x + (cell_width - icon_size) * 0.5,
+                        .y = cell_pos.y + padding.y,
+                        .width = icon_size,
+                        .height = icon_size,
+                    };
 
-                // Get the screen position for the cell.
-                const cell_screen_pos = c.ImGui_GetCursorScreenPos();
-                // Create a preview rect using the screen position and padding.
-                const rect = Rect{
-                    .x = cell_screen_pos.x + padding.x,
-                    .y = cell_screen_pos.y + padding.y,
-                    .width = 28,
-                    .height = 28,
-                };
+                    const cell_drawlist = c.ImGui_GetWindowDrawList();
+                    match.entry.preview.call(.{ cell_drawlist, match.entry, icon_rect });
 
-                // Render the preview image.
-                const cell_drawlist = c.ImGui_GetWindowDrawList();
-                match.entry.preview.call(.{ cell_drawlist, match.entry, rect });
-
-                // Offset the cursor within the cell so that the button appears to the right of the preview.
-                c.ImGui_SameLine();
-                _ = c.ImGui_Button(match.entry.kind.resource.path());
-
+                    const res_text = match.entry.kind.resource.uri.spanZ();
+                    const text_avail: f32 = cell_width - 2 * padding.x;
+                    const wrapped_text_size = c.ImGui_CalcTextSizeEx(res_text, null, false, text_avail);
+                    c.ImGui_SetCursorPosY(row_max_height - padding.y - wrapped_text_size.y);
+                    c.ImGui_SetCursorPosX((cell_width - wrapped_text_size.x) * 0.5);
+                    imutils.drawTextWithHighlight(res_text, match.ranges[0..match.range_count], text_avail);
+                }
+                c.ImGui_EndChildFrame();
                 c.ImGui_PopID();
 
-                // Force a fixed cell width by inserting spacing if this isn’t the last column.
-                if (col < col_count - 1) {
+                if (col < columns - 1) {
                     c.ImGui_SameLine();
-                    // Optional: You could call ImGui_Spacing() if you’d like extra space.
                 }
             }
-            c.ImGui_EndGroup();
-
-            // Advance cursor to the next row.
-            // If not the last visible row, add vertical spacing.
-            if (row < clipper.DisplayEnd - 1) {
-                c.ImGui_Spacing();
-            }
         }
+        c.ImGui_EndGroup();
+        c.ImGui_Spacing();
     }
-    c.ImGuiListClipper_End(&clipper);
+    c.ImGui_Dummy(.{ .x = 0, .y = padding.y });
 }
 
 const Kind = union(enum) {
@@ -408,5 +419,6 @@ const Entry = struct {
 const Match = struct {
     score: usize,
     ranges: [4]Range,
+    range_count: usize,
     entry: *const Entry,
 };
