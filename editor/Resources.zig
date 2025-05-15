@@ -2,6 +2,7 @@ const std = @import("std");
 
 const Uuid = @import("yume").Uuid;
 const utils = @import("yume").utils;
+const Event = @import("yume").Event;
 const Watch = @import("Watch.zig");
 
 const GameApp = @import("yume").GameApp;
@@ -153,6 +154,10 @@ pub const Resource = struct {
 
 const ResourceStorage = std.AutoHashMap(Uuid, Resource);
 
+pub const OnRegisterEvent = Event(.{ *const Resource, *const ResourceNode });
+pub const OnUnregisterEvent = Event(.{ *const Resource, *const ResourceNode });
+pub const OnReinitEvent = Event(.{});
+
 const Self = @This();
 
 var singleton: ?Self = null;
@@ -166,6 +171,10 @@ resource_tree: ResourceNode,
 
 watcher: ?*Watch = null,
 watcher_counter: f32 = 0,
+
+on_register: OnRegisterEvent.List,
+on_unregister: OnUnregisterEvent.List,
+on_reinit: OnReinitEvent.List,
 
 pub const ResourceNode = struct {
     pub const Node = union(enum) {
@@ -408,6 +417,10 @@ pub fn init(allocator: std.mem.Allocator) !void {
         .resource_tree = ResourceNode.init(allocator, .root),
 
         .watcher = if (Watch.supported_platform) try Watch.init(allocator, ".") else null,
+
+        .on_register = OnRegisterEvent.List.init(allocator),
+        .on_unregister = OnUnregisterEvent.List.init(allocator),
+        .on_reinit = OnReinitEvent.List.init(allocator),
     };
 
     errdefer deinit() catch {};
@@ -480,16 +493,40 @@ pub fn init(allocator: std.mem.Allocator) !void {
 }
 
 pub fn reinit(new_allocator: std.mem.Allocator) !void {
-    if (singleton != null) {
+    var reg_cbs = OnRegisterEvent.List.init(new_allocator);
+    errdefer reg_cbs.deinit();
+    var unreg_cbs = OnRegisterEvent.List.init(new_allocator);
+    errdefer unreg_cbs.deinit();
+    var reinit_cbs = OnReinitEvent.List.init(new_allocator);
+    errdefer reinit_cbs.deinit();
+
+    if (singleton) |s| {
+        try reg_cbs.appendSlice(s.on_register.cbs.items);
+        try unreg_cbs.appendSlice(s.on_unregister.cbs.items);
+        try reinit_cbs.appendSlice(s.on_reinit.cbs.items);
         try deinit();
         singleton = null;
     }
     try init(new_allocator);
+
+    singleton.?.on_register.deinit();
+    singleton.?.on_register = reg_cbs;
+
+    singleton.?.on_unregister.deinit();
+    singleton.?.on_unregister = unreg_cbs;
+
+    singleton.?.on_reinit.deinit();
+    singleton.?.on_reinit = reinit_cbs;
+    singleton.?.on_reinit.fire(.{});
 }
 
 pub fn deinit() !void {
     var self = instance();
     if (self.watcher) |w| w.deinit();
+    self.on_register.deinit();
+    self.on_unregister.deinit();
+    self.on_reinit.deinit();
+
     {
         var it = self.resources_index.iterator();
         while (it.next()) |kv| {
@@ -738,7 +775,21 @@ pub fn register(opts: struct {
     index_entry.value_ptr.* = id;
     res_ptr.value_ptr.save(self.allocator, opts.ensure_meta) catch |err| if (opts.ensure_meta) return err else log.warn("something went wrong while saving the resource's meta {}", .{err});
 
+    self.on_register.fire(.{ res_ptr.value_ptr, res_node.value });
+
     return res_ptr.key_ptr.*;
+}
+
+pub fn onRegister() *OnRegisterEvent.List {
+    return &instance().on_register;
+}
+
+pub fn onUnregister() *OnUnregisterEvent.List {
+    return &instance().on_unregister;
+}
+
+pub fn onReinit() *OnReinitEvent.List {
+    return &instance().on_reinit;
 }
 
 // TODO: shaders should register like any other resource

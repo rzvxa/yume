@@ -21,6 +21,8 @@ const SceneWindow = @import("windows/SceneWindow.zig");
 const GameWindow = @import("windows/GameWindow.zig");
 const LogsWindow = @import("windows/LogsWindow.zig");
 
+const ProjectExplorerWindow = @import("windows/ProjectExplorerWindow.zig");
+
 const imutils = @import("imutils.zig");
 
 const textures = @import("yume").textures;
@@ -143,6 +145,8 @@ scene_window: SceneWindow,
 game_window: GameWindow,
 logs_windows: LogsWindow,
 
+project_explorer_window: ProjectExplorerWindow,
+
 pub fn init(ctx: *GameApp) *Self {
     ctx.world.tag(RunInEditor);
     ctx.world.tag(Playing);
@@ -163,11 +167,6 @@ pub fn init(ctx: *GameApp) *Self {
 
     const home_dir = std.fs.selfExeDirPathAlloc(ctx.allocator) catch @panic("OOM");
     defer ctx.allocator.free(home_dir);
-    std.debug.print("{s}\n", .{home_dir});
-    std.debug.print("{s}\n", .{home_dir});
-    std.debug.print("{s}\n", .{home_dir});
-    std.debug.print("{s}\n", .{home_dir});
-    std.debug.print("{s}\n", .{home_dir});
     const db_path = std.fs.path.join(ctx.allocator, &[_][]const u8{ home_dir, ".user-data", "db.json" }) catch @panic("OOM");
     defer ctx.allocator.free(db_path);
 
@@ -184,8 +183,10 @@ pub fn init(ctx: *GameApp) *Self {
         .properties_window = PropertiesWindow.init(ctx.allocator),
         .game_window = GameWindow.init(ctx),
         .logs_windows = LogsWindow.init(ctx.allocator),
+        .project_explorer_window = ProjectExplorerWindow.init(ctx.allocator) catch @panic("Failed to initialize `Project Explorer`"),
         .scene_window = undefined,
     };
+    singleton.project_explorer_window.setup() catch @panic("Failed to start project explorer indexing");
     singleton.scene_window = SceneWindow.init(ctx, @ptrCast(&Editors.onDrawGizmos), &singleton.editors);
     singleton.bootstrapEditorPipeline(ctx.world);
     singleton.initDescriptors(&ctx.engine);
@@ -229,6 +230,7 @@ pub fn deinit(self: *Self) void {
     self.open_project_modal.deinit();
     self.game_window.deinit();
     self.logs_windows.deinit();
+    self.project_explorer_window.deinit();
     self.hierarchy_window.deinit();
     self.properties_window.deinit();
     self.resources_window.deinit();
@@ -427,6 +429,8 @@ pub fn draw(self: *Self) !void {
     }
 
     _ = c.ImGui_DockSpaceOverViewportEx(dockspace_id, viewport, 0, null);
+
+    try self.project_explorer_window.draw(self.ctx);
 
     try self.resources_window.draw();
     self.hierarchy_window.draw(self.ctx);
