@@ -460,6 +460,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
         _ = try register(.{ .urn = "4bf6d06c-2d96-4b12-8c20-f9a03a5152e1", .path = "icons/transform-tool.png", .category = "editor" });
         _ = try register(.{ .urn = "eab7824b-f71c-4b90-a468-a5d91f4a3f7b", .path = "icons/close.png", .category = "editor" });
         _ = try register(.{ .urn = "715b644d-f9a5-4aad-9cf9-6328cc849006", .path = "icons/browse.png", .category = "editor" });
+        _ = try register(.{ .urn = "dc031587-841a-4665-99f2-65be5007a1ab", .path = "icons/search.png", .category = "editor" });
         _ = try register(.{ .urn = "48d0e511-cdaf-4111-8ffa-f7e31fbe9636", .path = "icons/home.png", .category = "editor" });
         _ = try register(.{ .urn = "55cfea70-2c07-470f-a60c-7e8269ee2497", .path = "icons/editor.png", .category = "editor" });
         _ = try register(.{ .urn = "dd8f5337-cf79-489e-849c-5331a044a578", .path = "icons/library.png", .category = "editor" });
@@ -469,6 +470,9 @@ pub fn init(allocator: std.mem.Allocator) !void {
         _ = try register(.{ .urn = "849d928a-a459-4df7-97c4-49877fba782c", .path = "icons/material.png", .category = "editor" });
         _ = try register(.{ .urn = "e54f4382-dc55-4380-89db-0475bc02dd03", .path = "icons/point-light.png", .category = "editor" });
         _ = try register(.{ .urn = "e17a74c7-cb8e-4cd3-90f2-d76ee499a13e", .path = "icons/sun.png", .category = "editor" });
+
+        _ = try register(.{ .urn = "6be190a7-d244-4d7e-976b-0f3d4ab622d1", .path = "icons/list.png", .category = "editor" });
+        _ = try register(.{ .urn = "28e44106-f545-4fa3-9ce9-387dbdee4f57", .path = "icons/grid.png", .category = "editor" });
 
         _ = try register(.{ .urn = "d16bc474-c896-4aec-b35d-fcdfac790fbb", .path = "icons/filetypes/fbx.png", .category = "editor" });
         _ = try register(.{ .urn = "825643b1-6054-49a8-8ec1-fce29767e512", .path = "icons/filetypes/mat.png", .category = "editor" });
