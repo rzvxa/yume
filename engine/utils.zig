@@ -141,9 +141,11 @@ pub fn approximateMatch(buffer: []Range, haystack: []const u8, pattern: []const 
     var last_match_index: usize = 0;
     var in_match: bool = false;
 
+    const toLower = std.ascii.toLower;
+
     // iterate over each character (and its index) in the haystack.
     for (haystack, 0..) |char, i| {
-        if (patt_idx < pattern.len and char == pattern[patt_idx]) {
+        if (patt_idx < pattern.len and toLower(char) == toLower(pattern[patt_idx])) {
             if (!in_match) {
                 // start a new match.
                 in_match = true;

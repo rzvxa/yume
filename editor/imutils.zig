@@ -267,3 +267,6 @@ pub fn drawTextWithHighlight(
     }
     c.ImGui_SetCursorScreenPos(cursor);
 }
+
+// pub fn fromRainbow(n: anytype) c.ImU32 {
+// }
