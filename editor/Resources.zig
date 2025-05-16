@@ -473,6 +473,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
         _ = try register(.{ .urn = "6be190a7-d244-4d7e-976b-0f3d4ab622d1", .path = "icons/list.png", .category = "editor" });
         _ = try register(.{ .urn = "28e44106-f545-4fa3-9ce9-387dbdee4f57", .path = "icons/grid.png", .category = "editor" });
+        _ = try register(.{ .urn = "841c688a-b205-4db2-b6a8-6bed87b3e46c", .path = "icons/filter.png", .category = "editor" });
 
         _ = try register(.{ .urn = "d16bc474-c896-4aec-b35d-fcdfac790fbb", .path = "icons/filetypes/fbx.png", .category = "editor" });
         _ = try register(.{ .urn = "825643b1-6054-49a8-8ec1-fce29767e512", .path = "icons/filetypes/mat.png", .category = "editor" });
