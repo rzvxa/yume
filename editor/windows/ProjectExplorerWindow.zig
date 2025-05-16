@@ -36,6 +36,7 @@ find_str: imutils.ImString,
 
 index: collections.StringSentinelArrayHashMap(0, Entry),
 matches: std.ArrayList(Match),
+selected: usize = 0,
 
 pub fn init(allocator: std.mem.Allocator) !Self {
     return .{
@@ -348,6 +349,8 @@ fn invalidateCaches(self: *Self, comptime opts: struct { hard: bool = false }) v
     } else {
         self.matches.clearRetainingCapacity();
     }
+
+    self.selected = 0;
 }
 
 fn drawList(self: *Self) void {
@@ -361,7 +364,8 @@ fn drawList(self: *Self) void {
     while (c.ImGuiListClipper_Step(&clipper)) {
         var i: isize = clipper.DisplayStart;
         while (i < clipper.DisplayEnd) : (i += 1) {
-            const match = self.matches.items[@intCast(i)];
+            const index: usize = @intCast(i);
+            const match = self.matches.items[index];
             c.ImGui_PushID(match.key);
             defer c.ImGui_PopID();
 
@@ -370,7 +374,15 @@ fn drawList(self: *Self) void {
                 { // draw the selectable region
                     const cursor = c.ImGui_GetCursorPos();
                     defer c.ImGui_SetCursorPos(cursor);
-                    _ = c.ImGui_SelectableEx("##item", false, 0, .{ .x = avail.x, .y = row_height - padding.y * 2 });
+                    _ = c.ImGui_SelectableEx(
+                        "##item",
+                        false,
+                        if (self.selected == index)
+                            c.ImGuiSelectableFlags_Highlight
+                        else
+                            c.ImGuiSelectableFlags_None,
+                        .{ .x = avail.x, .y = row_height - padding.y * 2 },
+                    );
                 }
                 { // draw the thumbnail
                     const thumbnail_rect = Rect{
@@ -447,7 +459,15 @@ fn drawGrid(self: *Self) void {
                     { // draw the selectable region
                         const cursor = c.ImGui_GetCursorPos();
                         defer c.ImGui_SetCursorPos(cursor);
-                        _ = c.ImGui_SelectableEx("##item", false, 0, .{ .x = cell_width, .y = row_max_height });
+                        _ = c.ImGui_SelectableEx(
+                            "##item",
+                            false,
+                            if (self.selected == index)
+                                c.ImGuiSelectableFlags_Highlight
+                            else
+                                c.ImGuiSelectableFlags_None,
+                            .{ .x = cell_width, .y = row_max_height },
+                        );
                     }
                     { // draw the thumbnail
                         const cell_pos = c.ImGui_GetCursorScreenPos();
