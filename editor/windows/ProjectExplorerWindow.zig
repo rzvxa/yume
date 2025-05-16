@@ -218,7 +218,7 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
         if (open) {
             switch (self.view_mode) {
                 .list => self.drawList(),
-                .grid => self.drawGrid(),
+                .grid => try self.drawGrid(),
             }
         }
     }
@@ -446,7 +446,8 @@ fn drawList(self: *Self) void {
     }
 }
 
-fn drawGrid(self: *Self) void {
+fn drawGrid(self: *Self) !void {
+    const grid_start_y = c.ImGui_GetCursorScreenPos().y;
     const avail = c.ImGui_GetContentRegionAvail();
     const style = c.ImGui_GetStyle().*;
     const padding = style.FramePadding;
@@ -458,6 +459,10 @@ fn drawGrid(self: *Self) void {
     const cell_width: f32 = effective_avail_x / columns;
 
     const row_count: usize = (total_entries + columns - 1) / columns;
+    var sfa = std.heap.stackFallback(2048, self.allocator);
+    const allocator = sfa.get();
+    var row_heights = try allocator.alloc(f32, row_count);
+    defer allocator.free(row_heights);
 
     var row: usize = 0;
     while (row < row_count) : (row += 1) {
@@ -479,6 +484,7 @@ fn drawGrid(self: *Self) void {
                 if (cell_req_height > row_max_height) row_max_height = cell_req_height;
             }
         }
+        row_heights[row] = row_max_height;
 
         c.ImGui_BeginGroup();
         {
@@ -520,7 +526,6 @@ fn drawGrid(self: *Self) void {
                         const cell_drawlist = c.ImGui_GetWindowDrawList();
                         match.entry.thumbnail.call(.{ cell_drawlist, match.entry, icon_rect });
                     }
-
                     { // draw the highlighted label
                         const res_text = match.key;
                         const text_avail: f32 = cell_width - 2 * padding.x;
@@ -542,6 +547,72 @@ fn drawGrid(self: *Self) void {
         c.ImGui_Spacing();
     }
     c.ImGui_Dummy(.{ .x = 0, .y = padding.y });
+
+    // ---- Grid navigation via fourway input ----
+    const input = imutils.fourwayInputs();
+    var new_selected: usize = self.selected;
+    const current_row: usize = self.selected / columns;
+    const current_col: usize = self.selected % columns;
+
+    switch (input) {
+        .left => {
+            if (current_col > 0) {
+                new_selected = current_row * columns + (current_col - 1);
+            }
+        },
+        .right => {
+            if (current_col < columns - 1) {
+                const candidate = current_row * columns + (current_col + 1);
+                if (candidate < total_entries) {
+                    new_selected = candidate;
+                }
+            }
+        },
+        .up => {
+            if (current_row > 0) {
+                const candidate = (current_row - 1) * columns + current_col;
+                if (candidate < total_entries) {
+                    new_selected = candidate;
+                }
+            }
+        },
+        .down => {
+            if (current_row < ((total_entries + columns - 1) / columns) - 1) {
+                const candidate = (current_row + 1) * columns + current_col;
+                if (candidate < total_entries) {
+                    new_selected = candidate;
+                }
+            }
+        },
+        else => {},
+    }
+    self.selected = new_selected;
+
+    // -- Vertical Scroll Snapping --
+    const sel_row = self.selected / columns;
+    var sel_row_offset: f32 = 0;
+    {
+        var r_idx: usize = 0;
+        while (r_idx < sel_row) : (r_idx += 1) {
+            sel_row_offset += row_heights[r_idx] + style.ItemSpacing.y;
+        }
+    }
+    const sel_row_height: f32 = row_heights[sel_row];
+
+    const current_scroll = c.ImGui_GetScrollY();
+    const view_height = avail.y;
+    const sel_row_top = grid_start_y + sel_row_offset;
+    const sel_row_bottom = sel_row_top + sel_row_height;
+
+    if (input == .down) {
+        if (sel_row_bottom > grid_start_y + current_scroll + view_height) {
+            c.ImGui_SetScrollY(current_scroll + (sel_row_bottom - (grid_start_y + current_scroll + view_height)));
+        }
+    } else if (input == .up) {
+        if (sel_row_top < grid_start_y + current_scroll) {
+            c.ImGui_SetScrollY(current_scroll - ((grid_start_y + current_scroll) - sel_row_top));
+        }
+    }
 }
 
 pub fn drawTagsGrid(tags: [][:0]const u8, max_width: f32, avail_height: f32) !struct { width: f32, clicked_index: ?usize } {
