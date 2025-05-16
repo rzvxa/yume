@@ -268,5 +268,28 @@ pub fn drawTextWithHighlight(
     c.ImGui_SetCursorScreenPos(cursor);
 }
 
+pub fn fourwayInputs() enum { none, up, down, left, right } {
+    const ctrl = c.ImGui_IsKeyDown(c.ImGuiKey_ModCtrl);
+    if (c.ImGui_IsKeyPressed(c.ImGuiKey_UpArrow) or
+        (ctrl and c.ImGui_IsKeyPressed(c.ImGuiKey_K)))
+    {
+        return .up;
+    } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_DownArrow) or
+        (ctrl and c.ImGui_IsKeyPressed(c.ImGuiKey_J)))
+    {
+        return .down;
+    } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_LeftArrow) or
+        (ctrl and c.ImGui_IsKeyPressed(c.ImGuiKey_H)))
+    {
+        return .left;
+    } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_RightArrow) or
+        (ctrl and c.ImGui_IsKeyPressed(c.ImGuiKey_L)))
+    {
+        return .right;
+    } else {
+        return .none;
+    }
+}
+
 // pub fn fromRainbow(n: anytype) c.ImU32 {
 // }
