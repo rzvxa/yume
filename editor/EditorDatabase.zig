@@ -6,6 +6,12 @@ const collections = @import("yume").collections;
 
 const Self = @This();
 
+const EditorDatabase = struct {
+    project: ProjectDatabase = .{},
+    logs: LogsDatabase,
+    project_explorer: ProjectExplorer = .{},
+};
+
 const ProjectDatabase = struct {
     last_open_project: ?[:0]u8 = null,
     last_open_scene: ?Uuid = null,
@@ -70,9 +76,8 @@ const LogsDatabase = struct {
     }
 };
 
-const EditorDatabase = struct {
-    project: ProjectDatabase = .{},
-    logs: LogsDatabase,
+const ProjectExplorer = struct {
+    view_mode: enum { list, grid } = .list,
 };
 
 var instance: Self = undefined;

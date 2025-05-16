@@ -10,6 +10,7 @@ const Event = @import("yume").Event;
 const collections = @import("yume").collections;
 
 const Editor = @import("../Editor.zig");
+const EditorDatabase = @import("../EditorDatabase.zig");
 const Resources = @import("../Resources.zig");
 const imutils = @import("../imutils.zig");
 
@@ -27,8 +28,6 @@ first_draw: bool = true,
 anim_alpha: f32 = 0,
 anim_window_height: f32 = 0,
 anim_window_width: f32 = 0,
-
-view_mode: enum { list, grid } = .list,
 
 filters: collections.StringSentinelArrayHashMap(0, Filter),
 
@@ -176,6 +175,8 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
         return;
     }
 
+    const edb = &EditorDatabase.storage().project_explorer;
+
     {
         const grid_icon = try Editor.getImGuiTexture("editor://icons/grid.png");
         const list_icon = try Editor.getImGuiTexture("editor://icons/list.png");
@@ -189,19 +190,19 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
             const active_col = c.ImGui_GetStyle().*.Colors[c.ImGuiCol_ButtonHovered];
             c.ImGui_PushStyleColorImVec4(
                 c.ImGuiCol_Button,
-                if (self.view_mode == .grid) active_col else normal_col,
+                if (edb.view_mode == .grid) active_col else normal_col,
             );
             if (c.ImGui_ImageButton("##grid_view", grid_icon, .{ .x = 24, .y = 24 })) {
-                self.view_mode = .grid;
+                edb.view_mode = .grid;
             }
             c.ImGui_PopStyleColor();
             c.ImGui_SameLine();
             c.ImGui_PushStyleColorImVec4(
                 c.ImGuiCol_Button,
-                if (self.view_mode == .list) active_col else normal_col,
+                if (edb.view_mode == .list) active_col else normal_col,
             );
             if (c.ImGui_ImageButton("##list_view", list_icon, .{ .x = 24, .y = 24 })) {
-                self.view_mode = .list;
+                edb.view_mode = .list;
             }
             c.ImGui_PopStyleColor();
         }
@@ -216,7 +217,7 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
         );
         defer c.ImGui_EndChild();
         if (open) {
-            switch (self.view_mode) {
+            switch (edb.view_mode) {
                 .list => self.drawList(),
                 .grid => try self.drawGrid(),
             }
