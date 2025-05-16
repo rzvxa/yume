@@ -356,11 +356,13 @@ fn invalidateCaches(self: *Self, comptime opts: struct { hard: bool = false }) v
 fn drawList(self: *Self) void {
     const avail = c.ImGui_GetContentRegionAvail();
     const padding = c.ImGui_GetStyle().*.FramePadding;
+    const list_start_y = c.ImGui_GetCursorScreenPos().y;
 
     const total_entries: c_int = @intCast(self.matches.items.len);
     const row_height: f32 = 32;
     var clipper = c.ImGuiListClipper{};
     c.ImGuiListClipper_Begin(&clipper, total_entries, row_height);
+    defer c.ImGuiListClipper_End(&clipper);
     while (c.ImGuiListClipper_Step(&clipper)) {
         var i: isize = clipper.DisplayStart;
         while (i < clipper.DisplayEnd) : (i += 1) {
@@ -405,7 +407,43 @@ fn drawList(self: *Self) void {
             c.ImGui_EndChildFrame();
         }
     }
-    c.ImGuiListClipper_End(&clipper);
+
+    const dir = imutils.fourwayInputs();
+    var force_scroll: bool = false;
+    switch (dir) {
+        .none, .left, .right => {},
+        .up => {
+            if (self.selected > 0) self.selected -= 1;
+            force_scroll = true;
+        },
+        .down => {
+            if (self.selected < self.matches.items.len - 1) {
+                self.selected += 1;
+            } else {
+                self.selected = self.matches.items.len - 1;
+            }
+            force_scroll = true;
+        },
+    }
+
+    if (force_scroll) {
+        const current_scroll = c.ImGui_GetScrollY();
+        const view_height = avail.y;
+
+        const item_top = list_start_y + (@as(f32, @floatFromInt(self.selected))) * row_height;
+        const item_bottom = item_top + row_height;
+
+        if (dir == .down) {
+            const visiblity_cutoff = list_start_y + current_scroll + view_height - row_height;
+            if (item_bottom > visiblity_cutoff) {
+                c.ImGui_SetScrollY(current_scroll + (item_bottom - visiblity_cutoff));
+            }
+        } else if (dir == .up) {
+            if (item_top < list_start_y + current_scroll) {
+                c.ImGui_SetScrollY(current_scroll - ((list_start_y + current_scroll) - item_top));
+            }
+        }
+    }
 }
 
 fn drawGrid(self: *Self) void {
@@ -506,36 +544,6 @@ fn drawGrid(self: *Self) void {
     c.ImGui_Dummy(.{ .x = 0, .y = padding.y });
 }
 
-const Kind = union(enum) {
-    filter: Filter,
-    resource: Resources.Resource,
-
-    fn deinit(kind: *Kind, allocator: std.mem.Allocator) void {
-        switch (kind.*) {
-            .resource => kind.resource.deinit(allocator),
-            .filter => {},
-        }
-    }
-};
-
-const Entry = struct {
-    kind: Kind,
-    thumbnail: Event(.{ *c.ImDrawList, *const Entry, Rect }).Callback,
-};
-
-const Match = struct {
-    score: usize,
-    ranges: [4]Range,
-    range_count: usize,
-    key: [:0]const u8,
-    entry: *const Entry,
-};
-
-const Filter = struct {
-    tag_name: [:0]const u8,
-    predicate: *const fn (*const Entry) bool,
-};
-
 pub fn drawTagsGrid(tags: [][:0]const u8, max_width: f32, avail_height: f32) !struct { width: f32, clicked_index: ?usize } {
     const style = c.ImGui_GetStyle().*;
     const padh: f32 = 4;
@@ -603,3 +611,33 @@ pub fn drawTagsGrid(tags: [][:0]const u8, max_width: f32, avail_height: f32) !st
         .clicked_index = clicked_index,
     };
 }
+
+const Kind = union(enum) {
+    filter: Filter,
+    resource: Resources.Resource,
+
+    fn deinit(kind: *Kind, allocator: std.mem.Allocator) void {
+        switch (kind.*) {
+            .resource => kind.resource.deinit(allocator),
+            .filter => {},
+        }
+    }
+};
+
+const Entry = struct {
+    kind: Kind,
+    thumbnail: Event(.{ *c.ImDrawList, *const Entry, Rect }).Callback,
+};
+
+const Match = struct {
+    score: usize,
+    ranges: [4]Range,
+    range_count: usize,
+    key: [:0]const u8,
+    entry: *const Entry,
+};
+
+const Filter = struct {
+    tag_name: [:0]const u8,
+    predicate: *const fn (*const Entry) bool,
+};
