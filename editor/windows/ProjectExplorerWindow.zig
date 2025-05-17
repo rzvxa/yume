@@ -163,6 +163,12 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
                 &self.find_str,
             )) {
                 self.updateQueries();
+            } else if (self.find_str.length() == 0 and
+                self.filters.count() > 0 and
+                c.ImGui_IsItemFocused() and
+                c.ImGui_IsKeyPressed(c.ImGuiKey_Backspace))
+            {
+                self.filters.orderedRemoveAt(self.filters.count() - 1);
             }
         }
     }
