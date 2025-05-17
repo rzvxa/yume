@@ -129,7 +129,6 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
         }
         c.ImGui_SetScrollY(0);
     }
-    defer self.request_focus = false;
     defer c.ImGui_EndPopup();
 
     {
@@ -150,6 +149,7 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
             c.ImGui_PushFont(Editor.roboto24);
             defer c.ImGui_PopFont();
             if (self.request_focus) {
+                self.request_focus = false;
                 c.ImGui_SetKeyboardFocusHere();
             }
             if (c.ImGui_InputTextWithHintAndSizeEx(
@@ -232,9 +232,11 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
 fn use(self: *Self, match: *const Match) !void {
     switch (match.entry.kind) {
         .filter => |filter| {
-            const gop = try self.filters.getOrPut(filter.tag_name);
+            const gop = try self.filters.getOrPut(filter.tag_name.span());
             if (gop.found_existing) return;
             gop.value_ptr.* = filter;
+            try self.find_str.set("");
+            self.request_focus = true;
             self.updateQueries();
         },
         .resource => {
@@ -243,16 +245,14 @@ fn use(self: *Self, match: *const Match) !void {
     }
 }
 
-fn onResourcesRegister(self: *Self, res: *const Resources.Resource, node: *const Resources.ResourceNode) void {
-    _ = self;
-    _ = node;
-    log.debug("HERE: {s}", .{res.path()});
+fn onResourcesRegister(self: *Self, node: *const Resources.ResourceNode) void {
+    self.indexResourceNode(node) catch |err| log.err("{}, Failed to index resource", .{err});
 }
 
-fn onResourcesUnregister(self: *Self, res: *const Resources.Resource, node: *const Resources.ResourceNode) void {
+fn onResourcesUnregister(self: *Self, node: *const Resources.ResourceNode) void {
     _ = self;
     _ = node;
-    log.debug("HERE: {s}", .{res.path()});
+    log.warn("TODO:  unregister", .{});
 }
 
 fn onResourcesReinit(self: *Self) void {
@@ -267,14 +267,14 @@ fn onResourcesReinit(self: *Self) void {
 }
 
 fn indexFilterTags(self: *Self) !void {
-    const types = @typeInfo(Resources.Resource.Type).Enum.fields;
-    inline for (types) |ty| {
+    // file type filters
+    inline for (@typeInfo(Resources.Resource.Type).Enum.fields) |ty| {
         const entry = Entry{
             .kind = .{
                 .filter = .{
-                    .tag_name = ty.name,
+                    .tag_name = .{ .constant = ty.name },
                     .predicate = &struct {
-                        fn f(it: *const Entry) bool {
+                        fn f(_: *const Filter, it: *const Entry) bool {
                             return switch (it.kind) {
                                 .resource => |r| @intFromEnum(r.type) == ty.value,
                                 else => false,
@@ -303,10 +303,57 @@ fn indexFilterTags(self: *Self) !void {
             entry,
         );
     }
+
+    // protocols
+    const root_resource = (try Resources.findResourceNode("/")).?;
+    for (root_resource.children.values()) |*cat| {
+        const protz = try self.allocator.dupeZ(u8, (try cat.node.uri()).protocolWithSeperator());
+        errdefer self.allocator.free(protz);
+        const gop = try self.index.getOrPut(protz);
+        if (gop.found_existing) {
+            self.allocator.free(protz);
+            continue;
+        }
+        gop.value_ptr.* = Entry{
+            .kind = .{
+                .filter = .{
+                    .tag_name = .{ .allocated = protz },
+                    .predicate = &struct {
+                        fn f(filter: *const Filter, it: *const Entry) bool {
+                            return switch (it.kind) {
+                                .resource => |r| std.mem.eql(u8, r.uri.protocolWithSeperator(), filter.tag_name.span()),
+                                else => false,
+                            };
+                        }
+                    }.f,
+                },
+            },
+            .thumbnail = thumbnail: {
+                var void_ = {};
+                break :thumbnail Event(.{ *c.ImDrawList, *const Entry, Rect }).callback(void, &void_, struct {
+                    fn f(_: *void, drawlist: *c.ImDrawList, _: *const Entry, rect: Rect) void {
+                        const icon = Editor.getImGuiTexture("editor://icons/filter.png") catch return;
+                        c.ImDrawList_AddImage(
+                            drawlist,
+                            icon,
+                            .{ .x = rect.x, .y = rect.y },
+                            .{ .x = rect.x + rect.width, .y = rect.y + rect.height },
+                        );
+                    }
+                }.f);
+            },
+        };
+    }
 }
 
 fn indexResourceNode(self: *Self, node: *const Resources.ResourceNode) !void {
     self.invalidateCaches(.{});
+    const uri = try node.node.uri();
+    // if it is a protocol node, we should update our filters
+    if (uri.parent() == null) {
+        try self.indexFilterTags();
+    }
+
     if (node.node == .resource) {
         try self.indexResource(node.node.resource);
     }
@@ -353,12 +400,15 @@ fn updateQueries(self: *Self) void {
         for (self.filters.values()) |filter| {
             if (it.value_ptr.kind == .filter) {
                 // skip the already in use filters
-                if (std.mem.eql(u8, it.value_ptr.kind.filter.tag_name, filter.tag_name)) {
+                if (std.mem.eql(u8, it.value_ptr.kind.filter.tag_name.span(), filter.tag_name.span())) {
                     continue :query;
                 }
-            } else if (!filter.predicate(it.value_ptr)) {
-                continue :query;
+                break;
+            } else if (filter.predicate(&filter, it.value_ptr)) {
+                break;
             }
+        } else if (self.filters.count() > 0) {
+            continue :query;
         }
 
         const score = utils.levenshtein(it.key_ptr.*, patt, self.allocator);
@@ -742,7 +792,7 @@ const Kind = union(enum) {
     fn deinit(kind: *Kind, allocator: std.mem.Allocator) void {
         switch (kind.*) {
             .resource => kind.resource.deinit(allocator),
-            .filter => {},
+            .filter => kind.filter.deinit(allocator),
         }
     }
 };
@@ -761,6 +811,26 @@ const Match = struct {
 };
 
 const Filter = struct {
-    tag_name: [:0]const u8,
-    predicate: *const fn (*const Entry) bool,
+    tag_name: union(enum) {
+        constant: [:0]const u8,
+        allocated: [:0]u8,
+
+        fn deinit(str: @This(), allocator: std.mem.Allocator) void {
+            return switch (str) {
+                .allocated => |s| allocator.free(s),
+                .constant => {},
+            };
+        }
+
+        fn span(str: @This()) [:0]const u8 {
+            return switch (str) {
+                inline .constant, .allocated => |s| s,
+            };
+        }
+    },
+    predicate: *const fn (*const Filter, *const Entry) bool,
+
+    fn deinit(filter: *@This(), allocator: std.mem.Allocator) void {
+        filter.tag_name.deinit(allocator);
+    }
 };

@@ -154,8 +154,8 @@ pub const Resource = struct {
 
 const ResourceStorage = std.AutoHashMap(Uuid, Resource);
 
-pub const OnRegisterEvent = Event(.{ *const Resource, *const ResourceNode });
-pub const OnUnregisterEvent = Event(.{ *const Resource, *const ResourceNode });
+pub const OnRegisterEvent = Event(.{*const ResourceNode});
+pub const OnUnregisterEvent = Event(.{*const ResourceNode});
 pub const OnReinitEvent = Event(.{});
 
 const Self = @This();
@@ -780,7 +780,7 @@ pub fn register(opts: struct {
     index_entry.value_ptr.* = id;
     res_ptr.value_ptr.save(self.allocator, opts.ensure_meta) catch |err| if (opts.ensure_meta) return err else log.warn("something went wrong while saving the resource's meta {}", .{err});
 
-    self.on_register.fire(.{ res_ptr.value_ptr, res_node.value });
+    self.on_register.fire(.{res_node.value});
 
     return res_ptr.key_ptr.*;
 }
@@ -889,6 +889,7 @@ pub fn indexCwd() !void {
                     dir_node.deinit(false);
                 } else {
                     gop.value.* = dir_node;
+                    self.on_register.fire(.{gop.value});
                 }
             },
             else => {},
@@ -992,6 +993,7 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                     dir_node.deinit(false);
                 } else {
                     gop.value.* = dir_node;
+                    self.on_register.fire(.{gop.value});
                 }
 
                 var dir_iter = dir.iterate();
