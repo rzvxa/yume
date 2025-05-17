@@ -24,7 +24,7 @@ const Editor = @import("../Editor.zig");
 const FrameData = struct {
     app: *GameApp,
     cmd: GameApp.RenderCommand,
-    d: *Self,
+    state: *Self,
     lights: []GPULightData = undefined,
 };
 
@@ -123,19 +123,25 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
-    self.frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .d = self };
+    self.frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .state = self };
     if (c.ImGui_Begin("Scene", null, c.ImGuiWindowFlags_NoCollapse | c.ImGuiWindowFlags_NoNav | c.ImGuiWindowFlags_NoScrollbar | c.ImGuiWindowFlags_NoScrollWithMouse)) {
         self.is_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
         self.is_hovered = c.ImGui_IsWindowHovered(c.ImGuiFocusedFlags_None);
         const editor_image = c.ImGui_GetWindowDrawList();
         self.scene_view_size = c.ImGui_GetWindowSize();
 
+        { // NOTE: camera update should happen before any draw so gizmos can have a valid projection/view
+            const aspect = self.scene_view_size.x / self.scene_view_size.y;
+            self.camera.updatePerspectiveProjection(aspect);
+            self.camera.updateViewProjection();
+        }
+
         c.ImDrawList_AddCallback(editor_image, extern struct {
             fn f(dl: [*c]const c.ImDrawList, dc: [*c]const c.ImDrawCmd) callconv(.C) void {
                 _ = dl;
                 const me: *FrameData = @alignCast(@ptrCast(dc.*.UserCallbackData));
                 const cr = dc.*.ClipRect;
-                me.d.scene_window_rect = cr;
+                me.state.scene_window_rect = cr;
                 const w = cr.z - cr.x;
                 const h = cr.w - cr.y;
 
@@ -145,20 +151,17 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                     .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
                 }});
 
-                const vx = if (cr.x > 0) cr.x else cr.z - me.d.scene_view_size.x;
+                const vx = if (cr.x > 0) cr.x else cr.z - me.state.scene_view_size.x;
                 c.vkCmdSetViewport(me.cmd, 0, 1, &[_]c.VkViewport{.{
                     .x = vx,
                     .y = cr.y,
-                    .width = me.d.scene_view_size.x,
-                    .height = me.d.scene_view_size.y,
+                    .width = me.state.scene_view_size.x,
+                    .height = me.state.scene_view_size.y,
                     .minDepth = 0.0,
                     .maxDepth = 1.0,
                 }});
 
-                const aspect = me.d.scene_view_size.x / me.d.scene_view_size.y;
-                me.d.camera.updatePerspectiveProjection(aspect);
-                me.d.camera.updateViewProjection();
-                _ = c.ecs_run(me.app.world.inner, me.d.render_system, me.app.delta, me);
+                _ = c.ecs_run(me.app.world.inner, me.state.render_system, me.app.delta, me);
 
                 const window_extent = me.app.windowExtent();
                 c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
@@ -319,6 +322,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
         switch (Editor.instance().selection) {
             .entity => |selection| {
                 const world_transform = ctx.world.getMut(selection, components.WorldTransform).?;
+                const local_transform = ctx.world.getMut(selection, components.LocalTransform).?;
 
                 if (c.ImGui_IsKeyPressed(c.ImGuiKey_F)) {
                     self.focus(world_transform.position(), default_cam_distance);
@@ -331,6 +335,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 c.ImGuizmo_PushID_Str((try std.fmt.bufPrintZ(&selection_id_buf, "{d}", .{selection})).ptr);
                 if (try gizmo.editTransform(
                     &world_transform.matrix,
+                    &local_transform.matrix,
                     self.active_tool,
                     self.active_mode,
                 )) {
@@ -576,7 +581,7 @@ fn sys(it: *ecs.Iter, transforms: []components.WorldTransform, meshes: []compone
     const me: *FrameData = @ptrCast(@alignCast(it.param));
 
     const directional_light: GPULightData = blk: {
-        var iter = me.d.directional_light_query.iter();
+        var iter = me.state.directional_light_query.iter();
         while (iter.next()) {
             const wts = ecs.field(&iter, components.WorldTransform, 0).?;
             const lights = ecs.field(&iter, components.DirectionalLight, 1).?;
@@ -596,7 +601,7 @@ fn sys(it: *ecs.Iter, transforms: []components.WorldTransform, meshes: []compone
     const point_lights = blk: {
         var sfa = std.heap.stackFallback(512, me.app.allocator);
         const a = sfa.get();
-        var iter = me.d.point_lights_query.iter();
+        var iter = me.state.point_lights_query.iter();
         var lights = std.ArrayList(GPULightData).init(a);
         while (iter.next()) {
             const wts = ecs.field(&iter, components.WorldTransform, 0).?;
@@ -614,7 +619,7 @@ fn sys(it: *ecs.Iter, transforms: []components.WorldTransform, meshes: []compone
     };
     defer point_lights.deinit();
 
-    std.mem.sort(GPULightData, point_lights.items, me.d.camera_pos, struct {
+    std.mem.sort(GPULightData, point_lights.items, me.state.camera_pos, struct {
         pub fn f(cam_pos: Vec3, a: GPULightData, b: GPULightData) bool {
             return a.pos.distanceTo(cam_pos) < b.pos.distanceTo(cam_pos);
         }
@@ -622,7 +627,7 @@ fn sys(it: *ecs.Iter, transforms: []components.WorldTransform, meshes: []compone
 
     var lights = std.mem.zeroes([4]Engine.GPUSceneData.GPULightData);
     std.debug.assert(point_lights.items.len < 4);
-    if (me.d.render_lights) {
+    if (me.state.render_lights) {
         @memcpy(lights[0..point_lights.items.len], point_lights.items);
     }
     me.app.engine.drawObjects(
@@ -631,11 +636,11 @@ fn sys(it: *ecs.Iter, transforms: []components.WorldTransform, meshes: []compone
             .transforms = transforms,
             .meshes = meshes,
             .materials = materials,
-            .ubo_buf = me.d.editor_camera_and_scene_buffer,
-            .ubo_set = me.d.editor_camera_and_scene_set,
-            .cam = &me.d.camera,
-            .cam_pos = me.d.camera_pos,
-            .directional_light = if (me.d.render_lights) directional_light else std.mem.zeroes(Engine.GPUSceneData.GPULightData),
+            .ubo_buf = me.state.editor_camera_and_scene_buffer,
+            .ubo_set = me.state.editor_camera_and_scene_set,
+            .cam = &me.state.camera,
+            .cam_pos = me.state.camera_pos,
+            .directional_light = if (me.state.render_lights) directional_light else std.mem.zeroes(Engine.GPUSceneData.GPULightData),
             .point_lights = lights,
         },
     );
