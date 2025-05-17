@@ -23,7 +23,7 @@ const Self = @This();
 
 allocator: std.mem.Allocator,
 visible: bool = false,
-first_draw: bool = true,
+request_focus: bool = true,
 
 anim_alpha: f32 = 0,
 anim_window_height: f32 = 0,
@@ -74,13 +74,12 @@ pub fn setup(self: *Self) !void {
 }
 
 pub fn draw(self: *Self, ctx: *GameApp) !void {
-    if (!self.visible and
-        c.ImGui_IsKeyDown(c.ImGuiKey_ModCtrl) and
-        c.ImGui_IsKeyPressed(c.ImGuiKey_P))
-    {
-        self.visible = true;
-        self.first_draw = true;
-        c.ImGui_OpenPopup("Project Explorer", 0);
+    if (c.ImGui_IsKeyDown(c.ImGuiKey_ModCtrl) and c.ImGui_IsKeyPressed(c.ImGuiKey_P)) {
+        if (!self.visible) {
+            self.visible = true;
+            c.ImGui_OpenPopup("Project Explorer", 0);
+        }
+        self.request_focus = true;
     }
 
     const app_window_extent = ctx.windowExtent().toVec2();
@@ -130,7 +129,7 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
         }
         c.ImGui_SetScrollY(0);
     }
-    defer self.first_draw = false;
+    defer self.request_focus = false;
     defer c.ImGui_EndPopup();
 
     {
@@ -140,20 +139,17 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
         );
         defer c.ImGui_PopStyleColor();
         c.ImGui_Image(try Editor.getImGuiTexture("editor://icons/search.png"), .{ .x = input_height - 8, .y = input_height - 8 });
-        c.ImGui_SetItemTooltip(
-            \\ e.g. "material,mesh: barrel" finds all materials and meshes with barrel in their path
-        );
         c.ImGui_SameLine();
         const drawn_tags = try drawTagsGrid(self.filters.keys(), @divTrunc(input_width, 3), input_height - 8);
+        c.ImGui_SameLine();
         if (drawn_tags.clicked_index) |clicked| {
             self.filters.orderedRemoveAt(clicked);
         }
 
-        c.ImGui_SameLine();
         {
             c.ImGui_PushFont(Editor.roboto24);
             defer c.ImGui_PopFont();
-            if (self.first_draw) {
+            if (self.request_focus) {
                 c.ImGui_SetKeyboardFocusHere();
             }
             if (c.ImGui_InputTextWithHintAndSizeEx(
@@ -631,34 +627,38 @@ fn drawGrid(self: *Self) !bool {
     self.selected = new_selected;
 
     // -- Vertical Scroll Snapping --
-    const sel_row = self.selected / columns;
-    var sel_row_offset: f32 = 0;
-    {
-        var r_idx: usize = 0;
-        while (r_idx < sel_row) : (r_idx += 1) {
-            sel_row_offset += row_heights[r_idx] + style.ItemSpacing.y;
+    if (self.matches.items.len > 0) {
+        const sel_row = self.selected / columns;
+        var sel_row_offset: f32 = 0;
+        {
+            var r_idx: usize = 0;
+            while (r_idx < sel_row) : (r_idx += 1) {
+                sel_row_offset += row_heights[r_idx] + style.ItemSpacing.y;
+            }
         }
-    }
-    const sel_row_height: f32 = row_heights[sel_row];
+        const sel_row_height: f32 = row_heights[sel_row];
 
-    const current_scroll = c.ImGui_GetScrollY();
-    const view_height = avail.y;
-    const sel_row_top = grid_start_y + sel_row_offset;
-    const sel_row_bottom = sel_row_top + sel_row_height;
+        const current_scroll = c.ImGui_GetScrollY();
+        const view_height = avail.y;
+        const sel_row_top = grid_start_y + sel_row_offset;
+        const sel_row_bottom = sel_row_top + sel_row_height;
 
-    if (input == .down) {
-        if (sel_row_bottom > grid_start_y + current_scroll + view_height) {
-            c.ImGui_SetScrollY(current_scroll + (sel_row_bottom - (grid_start_y + current_scroll + view_height)));
-        }
-    } else if (input == .up) {
-        if (sel_row_top < grid_start_y + current_scroll) {
-            c.ImGui_SetScrollY(current_scroll - ((grid_start_y + current_scroll) - sel_row_top));
+        if (input == .down) {
+            if (sel_row_bottom > grid_start_y + current_scroll + view_height) {
+                c.ImGui_SetScrollY(current_scroll + (sel_row_bottom - (grid_start_y + current_scroll + view_height)));
+            }
+        } else if (input == .up) {
+            if (sel_row_top < grid_start_y + current_scroll) {
+                c.ImGui_SetScrollY(current_scroll - ((grid_start_y + current_scroll) - sel_row_top));
+            }
         }
     }
     return clicked;
 }
 
 pub fn drawTagsGrid(tags: [][:0]const u8, max_width: f32, avail_height: f32) !struct { width: f32, clicked_index: ?usize } {
+    if (tags.len == 0) return .{ .width = 0, .clicked_index = null };
+
     const style = c.ImGui_GetStyle().*;
     const padh: f32 = 4;
     const padv: f32 = 4;
@@ -669,6 +669,7 @@ pub fn drawTagsGrid(tags: [][:0]const u8, max_width: f32, avail_height: f32) !st
     var current_row: usize = 0;
     var current_x: f32 = 0;
     var row_heights: [64]f32 = undefined;
+    var max_x: f32 = 0;
     row_heights[0] = 0;
 
     for (tags) |tag| {
@@ -687,41 +688,49 @@ pub fn drawTagsGrid(tags: [][:0]const u8, max_width: f32, avail_height: f32) !st
         } else {
             current_x += pill_width + spacing;
         }
+
+        max_x = @max(max_x, current_x);
     }
 
-    var verticalOffset: f32 = 0;
+    var vertical_offset: f32 = 0;
     if (row_count == 1) {
-        verticalOffset = (avail_height - row_heights[0]) * 0.5;
+        vertical_offset = (avail_height - row_heights[0]) * 0.5;
     }
 
     // --- Second Pass: Render the Pills ---
-    const startPos = c.ImGui_GetCursorPos();
-    current_x = 0;
-    current_row = 0;
-    var currentY: f32 = 0;
     var clicked_index: ?usize = null;
-    for (tags, 0..) |tag, i| {
-        const text_size = c.ImGui_CalcTextSize(tag);
-        const pill_width = text_size.x + 2 * padh;
+    {
+        _ = c.ImGui_BeginChild("tags_region", .{ .x = max_x, .y = avail_height }, 0, 0);
+        defer c.ImGui_EndChild();
 
-        if (current_x + pill_width > max_width and current_x > 0) {
-            currentY += row_heights[current_row] + spacing;
-            current_row += 1;
-            current_x = 0;
-        }
-        var pos: c.ImVec2 = startPos;
-        pos.x += current_x;
-        pos.y += currentY + verticalOffset;
-        c.ImGui_SetCursorPos(pos);
-        if (c.ImGui_Button(tag)) {
-            clicked_index = i;
-        }
+        current_x = 0;
+        current_row = 0;
+        const start_pos = c.ImGui_GetCursorPos();
+        var current_y: f32 = 0;
+        for (tags, 0..) |tag, i| {
+            const text_size = c.ImGui_CalcTextSize(tag);
+            const pill_width = text_size.x + 2 * padh;
 
-        current_x += pill_width + spacing;
+            if (current_x + pill_width > max_width and current_x > 0) {
+                current_y += row_heights[current_row] + spacing;
+                current_row += 1;
+                current_x = 0;
+            }
+            var pos: c.ImVec2 = start_pos;
+            pos.x += current_x;
+            pos.y += current_y + vertical_offset;
+            c.ImGui_SetCursorPos(pos);
+            if (c.ImGui_Button(tag)) {
+                clicked_index = i;
+            }
+
+            current_x += pill_width + spacing;
+        }
+        c.ImGui_SetCursorPos(.{ .x = start_pos.x + max_x, .y = start_pos.y });
     }
 
     return .{
-        .width = current_x,
+        .width = max_x,
         .clicked_index = clicked_index,
     };
 }
