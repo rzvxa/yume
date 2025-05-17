@@ -217,11 +217,33 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
         );
         defer c.ImGui_EndChild();
         if (open) {
-            switch (edb.view_mode) {
+            const clicked = switch (edb.view_mode) {
                 .list => self.drawList(),
                 .grid => try self.drawGrid(),
+            };
+
+            if (c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_RootAndChildWindows)) {
+                if (clicked or c.ImGui_IsKeyPressed(c.ImGuiKey_Enter) or c.ImGui_IsKeyPressed(c.ImGuiKey_KeypadEnter)) {
+                    if (self.matches.items.len > 0) {
+                        try self.use(&self.matches.items[self.selected]);
+                    }
+                }
             }
         }
+    }
+}
+
+fn use(self: *Self, match: *const Match) !void {
+    switch (match.entry.kind) {
+        .filter => |filter| {
+            const gop = try self.filters.getOrPut(filter.tag_name);
+            if (gop.found_existing) return;
+            gop.value_ptr.* = filter;
+            self.updateQueries();
+        },
+        .resource => {
+            log.warn("TODO resource selection", .{});
+        },
     }
 }
 
@@ -281,7 +303,7 @@ fn indexFilterTags(self: *Self) !void {
             },
         };
         try self.index.put(
-            "Filter by \"" ++ ty.name ++ "\"",
+            "File type: " ++ ty.name,
             entry,
         );
     }
@@ -329,9 +351,19 @@ fn updateQueries(self: *Self) void {
     var ranges_buf: [4]Range = undefined;
     @memset(&ranges_buf, .{});
     const patt = self.find_str.span();
-    while (iter.next()) |it| {
+    query: while (iter.next()) |it| {
         const ranges = utils.approximateMatch(&ranges_buf, it.key_ptr.*, patt);
-        if (ranges.len == 0) continue;
+        if (ranges.len == 0) continue :query;
+        for (self.filters.values()) |filter| {
+            if (it.value_ptr.kind == .filter) {
+                // skip the already in use filters
+                if (std.mem.eql(u8, it.value_ptr.kind.filter.tag_name, filter.tag_name)) {
+                    continue :query;
+                }
+            } else if (!filter.predicate(it.value_ptr)) {
+                continue :query;
+            }
+        }
 
         const score = utils.levenshtein(it.key_ptr.*, patt, self.allocator);
         self.matches.append(.{
@@ -342,19 +374,20 @@ fn updateQueries(self: *Self) void {
             .entry = it.value_ptr,
         }) catch {};
     }
+
+    self.selected = @min(self.selected, @max(self.matches.items.len, 1) - 1);
 }
 
 fn invalidateCaches(self: *Self, comptime opts: struct { hard: bool = false }) void {
     if (opts.hard) {
+        self.selected = 0;
         self.matches.clearAndFree();
     } else {
         self.matches.clearRetainingCapacity();
     }
-
-    self.selected = 0;
 }
 
-fn drawList(self: *Self) void {
+fn drawList(self: *Self) bool {
     const avail = c.ImGui_GetContentRegionAvail();
     const padding = c.ImGui_GetStyle().*.FramePadding;
     const list_start_y = c.ImGui_GetCursorScreenPos().y;
@@ -364,6 +397,7 @@ fn drawList(self: *Self) void {
     var clipper = c.ImGuiListClipper{};
     c.ImGuiListClipper_Begin(&clipper, total_entries, row_height);
     defer c.ImGuiListClipper_End(&clipper);
+    var clicked: bool = false;
     while (c.ImGuiListClipper_Step(&clipper)) {
         var i: isize = clipper.DisplayStart;
         while (i < clipper.DisplayEnd) : (i += 1) {
@@ -377,7 +411,7 @@ fn drawList(self: *Self) void {
                 { // draw the selectable region
                     const cursor = c.ImGui_GetCursorPos();
                     defer c.ImGui_SetCursorPos(cursor);
-                    _ = c.ImGui_SelectableEx(
+                    if (c.ImGui_SelectableEx(
                         "##item",
                         false,
                         if (self.selected == index)
@@ -385,7 +419,10 @@ fn drawList(self: *Self) void {
                         else
                             c.ImGuiSelectableFlags_None,
                         .{ .x = avail.x, .y = row_height - padding.y * 2 },
-                    );
+                    )) {
+                        self.selected = index;
+                        clicked = true;
+                    }
                 }
                 { // draw the thumbnail
                     const thumbnail_rect = Rect{
@@ -445,9 +482,11 @@ fn drawList(self: *Self) void {
             }
         }
     }
+
+    return clicked;
 }
 
-fn drawGrid(self: *Self) !void {
+fn drawGrid(self: *Self) !bool {
     const grid_start_y = c.ImGui_GetCursorScreenPos().y;
     const avail = c.ImGui_GetContentRegionAvail();
     const style = c.ImGui_GetStyle().*;
@@ -465,6 +504,7 @@ fn drawGrid(self: *Self) !void {
     var row_heights = try allocator.alloc(f32, row_count);
     defer allocator.free(row_heights);
 
+    var clicked = false;
     var row: usize = 0;
     while (row < row_count) : (row += 1) {
         const row_start = row * columns;
@@ -504,7 +544,7 @@ fn drawGrid(self: *Self) !void {
                     { // draw the selectable region
                         const cursor = c.ImGui_GetCursorPos();
                         defer c.ImGui_SetCursorPos(cursor);
-                        _ = c.ImGui_SelectableEx(
+                        if (c.ImGui_SelectableEx(
                             "##item",
                             false,
                             if (self.selected == index)
@@ -512,7 +552,10 @@ fn drawGrid(self: *Self) !void {
                             else
                                 c.ImGuiSelectableFlags_None,
                             .{ .x = cell_width, .y = row_max_height },
-                        );
+                        )) {
+                            self.selected = index;
+                            clicked = true;
+                        }
                     }
                     { // draw the thumbnail
                         const cell_pos = c.ImGui_GetCursorScreenPos();
@@ -580,9 +623,7 @@ fn drawGrid(self: *Self) !void {
         .down => {
             if (current_row < ((total_entries + columns - 1) / columns) - 1) {
                 const candidate = (current_row + 1) * columns + current_col;
-                if (candidate < total_entries) {
-                    new_selected = candidate;
-                }
+                new_selected = @min(candidate, total_entries - 1);
             }
         },
         else => {},
@@ -614,6 +655,7 @@ fn drawGrid(self: *Self) !void {
             c.ImGui_SetScrollY(current_scroll - ((grid_start_y + current_scroll) - sel_row_top));
         }
     }
+    return clicked;
 }
 
 pub fn drawTagsGrid(tags: [][:0]const u8, max_width: f32, avail_height: f32) !struct { width: f32, clicked_index: ?usize } {

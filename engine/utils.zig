@@ -142,6 +142,7 @@ pub fn approximateMatch(buffer: []Range, haystack: []const u8, pattern: []const 
     var in_match: bool = false;
 
     const toLower = std.ascii.toLower;
+    const isWhitespace = std.ascii.isWhitespace;
 
     // iterate over each character (and its index) in the haystack.
     for (haystack, 0..) |char, i| {
@@ -164,6 +165,12 @@ pub fn approximateMatch(buffer: []Range, haystack: []const u8, pattern: []const 
             last_match_index = i;
             patt_idx += 1;
             if (patt_idx >= pattern.len) break;
+            for (pattern[patt_idx..]) |peek| {
+                if (!isWhitespace(peek)) {
+                    break;
+                }
+                patt_idx += 1;
+            }
         }
     }
 
