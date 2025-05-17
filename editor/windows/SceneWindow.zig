@@ -322,7 +322,6 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
         switch (Editor.instance().selection) {
             .entity => |selection| {
                 const world_transform = ctx.world.getMut(selection, components.WorldTransform).?;
-                const local_transform = ctx.world.getMut(selection, components.LocalTransform).?;
 
                 if (c.ImGui_IsKeyPressed(c.ImGuiKey_F)) {
                     self.focus(world_transform.position(), default_cam_distance);
@@ -335,7 +334,6 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 c.ImGuizmo_PushID_Str((try std.fmt.bufPrintZ(&selection_id_buf, "{d}", .{selection})).ptr);
                 if (try gizmo.editTransform(
                     &world_transform.matrix,
-                    &local_transform.matrix,
                     self.active_tool,
                     self.active_mode,
                 )) {
