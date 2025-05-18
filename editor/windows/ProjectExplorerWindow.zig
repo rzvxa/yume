@@ -267,7 +267,9 @@ fn onResourcesReinit(self: *Self) void {
     (struct {
         fn f(this: *Self) !void {
             const root = try Resources.findResourceNode("/") orelse return error.NoResourceIndexed;
-            try this.indexResourceNode(root);
+            for (root.children.values()) |*child| {
+                try this.indexResourceNode(child);
+            }
         }
     }).f(self) catch |err| log.err("{}, Failed to index resources", .{err});
 }
@@ -394,6 +396,23 @@ fn indexResource(self: *Self, id: Uuid) !void {
     try self.index.put(resource.uri.spanZ(), .{ .kind = .{ .resource = resource }, .thumbnail = thumbnail });
 }
 
+fn calcContiguousBonus(ranges: []const Range) isize {
+    if (ranges.len == 0) return 0;
+    var best: isize = @intCast(ranges[0].end - ranges[0].start);
+    var current: isize = best;
+    var i: usize = 1;
+    while (i < ranges.len) : (i += 1) {
+        if (ranges[i].start == ranges[i - 1].end) {
+            current += @intCast(ranges[i].end - ranges[i].start);
+        } else {
+            if (current > best) best = current;
+            current = @intCast(ranges[i].end - ranges[i].start);
+        }
+    }
+    if (current > best) best = current;
+    return best;
+}
+
 fn updateQueries(self: *Self) void {
     self.invalidateCaches(.{});
     var iter = self.index.iterator();
@@ -405,7 +424,7 @@ fn updateQueries(self: *Self) void {
         if (ranges.len == 0) continue :query;
         for (self.filters.values()) |filter| {
             if (it.value_ptr.kind == .filter) {
-                // skip the already in use filters
+                // Skip already used filters.
                 if (std.mem.eql(u8, it.value_ptr.kind.filter.tag_name.span(), filter.tag_name.span())) {
                     continue :query;
                 }
@@ -416,8 +435,10 @@ fn updateQueries(self: *Self) void {
         } else if (self.filters.count() > 0) {
             continue :query;
         }
+        const lev_score = utils.levenshtein(it.key_ptr.*, patt, self.allocator);
+        const bonus = calcContiguousBonus(ranges);
+        const score = @as(isize, @intCast(lev_score)) - (bonus * 2);
 
-        const score = utils.levenshtein(it.key_ptr.*, patt, self.allocator);
         self.matches.append(.{
             .score = score,
             .ranges = ranges_buf,
@@ -426,7 +447,15 @@ fn updateQueries(self: *Self) void {
             .entry = it.value_ptr,
         }) catch {};
     }
-
+    std.mem.sort(Match, self.matches.items, {}, struct {
+        fn f(
+            _: void,
+            lhs: Match,
+            rhs: Match,
+        ) bool {
+            return std.math.compare(lhs.score, .lt, rhs.score);
+        }
+    }.f);
     self.selected = @min(self.selected, @max(self.matches.items.len, 1) - 1);
 }
 
@@ -809,7 +838,7 @@ const Entry = struct {
 };
 
 const Match = struct {
-    score: usize,
+    score: isize,
     ranges: [4]Range,
     range_count: usize,
     key: [:0]const u8,
