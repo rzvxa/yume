@@ -13,6 +13,7 @@ const Editors = @import("editors/editors.zig");
 const Resources = @import("Resources.zig");
 const Project = @import("Project.zig");
 const Assets = @import("yume").Assets;
+const assets = @import("yume").assets;
 
 const HierarchyWindow = @import("windows/HierarchyWindow.zig");
 const ResourcesWindow = @import("windows/ResourcesWindow.zig");
@@ -248,7 +249,7 @@ pub fn deinit(self: *Self) void {
 pub fn windowTitle(self: *Self) ![]u8 {
     const title = "Yume Editor";
     if (Project.current()) |proj| {
-        if (self.ctx.scene_handle) |scene| {
+        if (self.ctx.scene.handle) |scene| {
             return try std.fmt.allocPrint(self.ctx.allocator, "{s} - {s} - {s}", .{
                 proj.project_name,
                 Resources.getResourcePath(scene.uuid) catch "UNKNOWN",
@@ -351,7 +352,7 @@ pub fn draw(self: *Self) !void {
             if (c.ImGui_MenuItem("New*")) {}
             if (c.ImGui_MenuItem("Load*")) {}
             if (c.ImGui_MenuItemEx("Save", "CTRL+S", false, true)) {
-                if (self.ctx.scene_handle) |hndl| {
+                if (self.ctx.scene.handle) |hndl| {
                     const scene = self.ctx.snapshotLiveScene() catch @panic("Faield to serialize scene");
                     defer scene.deinit();
                     var resource_path_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -625,13 +626,13 @@ pub fn openProject(self: *Self) void {
     self.open_project_modal.open();
 }
 
-pub fn openScene(self: *Self, scene_id: Uuid) !void {
+pub fn openScene(self: *Self, scene: assets.SceneAssetHandle) !void {
     switch (self.selection) {
         .entity => self.selection = .none,
         else => {},
     }
-    try self.ctx.loadScene(scene_id);
-    EditorDatabase.storage().project.last_open_scene = scene_id;
+    try self.ctx.loadScene(scene);
+    EditorDatabase.storage().project.last_open_scene = scene;
 }
 
 pub fn trySetParentKeepUniquePathName(world: ecs.World, entity: ecs.Entity, new_parent: ecs.Entity, allocator: std.mem.Allocator) !void {
@@ -781,7 +782,7 @@ pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
     if (entry.found_existing) {
         return entry.value_ptr.*;
     }
-    const image = try Assets.getOrLoadImage(try Resources.getResourceId(uri));
+    const image = try Assets.get(try Resources.getAssetHandle(uri, .{ .expect = .image }));
 
     // Create the Image View
     var image_view: c.VkImageView = undefined;

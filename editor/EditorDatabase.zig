@@ -2,6 +2,7 @@ const std = @import("std");
 const log = std.log.scoped(.EditorDatabase);
 
 const Uuid = @import("yume").Uuid;
+const assets = @import("yume").assets;
 const collections = @import("yume").collections;
 
 const Self = @This();
@@ -14,7 +15,7 @@ const EditorDatabase = struct {
 
 const ProjectDatabase = struct {
     last_open_project: ?[:0]u8 = null,
-    last_open_scene: ?Uuid = null,
+    last_open_scene: ?assets.SceneAssetHandle = null,
 };
 
 const LogsDatabase = struct {
