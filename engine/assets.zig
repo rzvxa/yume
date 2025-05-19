@@ -48,21 +48,13 @@ pub const Assets = struct {
 
     pub fn deinit() void {
         {
-            const RecursiveReverseUnloader = struct {
-                fn unload(assets: std.AutoHashMap(AssetHandle, LoadedAsset)) void {
-                    var iter = assets.valueIterator();
-                    @This().f(&iter);
+            if (instance.loaded_assets.count() > 0) {
+                log.err("Memory leak", .{});
+                var iter = instance.loaded_assets.iterator();
+                while (iter.next()) |next| {
+                    log.err("leaked asset {s} -> {}", .{ next.key_ptr.uuid.urn(), next.value_ptr.assetType() });
                 }
-
-                fn f(iter: *std.AutoHashMap(AssetHandle, LoadedAsset).ValueIterator) void {
-                    if (iter.next()) |it| {
-                        @This().f(iter);
-                        it.unload();
-                    }
-                }
-            };
-
-            RecursiveReverseUnloader.unload(instance.loaded_assets);
+            }
         }
         instance.loaded_ids.deinit();
         instance.loaded_assets.deinit();
@@ -108,7 +100,7 @@ pub const Assets = struct {
         };
     }
 
-    pub fn release(asset: anytype) !void {
+    pub fn release(asset: anytype) error{AssetNotLoaded}!void {
         const handle: AssetHandle =
             if (comptime @hasDecl(@TypeOf(asset), "toAssetHandle"))
             asset.toAssetHandle()
@@ -133,7 +125,8 @@ pub const Assets = struct {
         defer instance.allocator.free(bytes);
 
         const image = try instance.allocator.create(Image);
-        image.* = try texs.load_image(instance.engine, bytes, handle.uuid.urn());
+        image.* = try texs.loadImage(instance.engine, bytes, handle.uuid.urn());
+        image.handle = handle;
 
         const loaded = LoadedAsset{ .data = .{ .image = image } };
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
@@ -169,6 +162,7 @@ pub const Assets = struct {
 
         var texture = try instance.allocator.create(Texture);
         texture.* = Texture{
+            .handle = handle,
             .image = image.*,
             .image_view = null,
         };
@@ -216,6 +210,7 @@ pub const Assets = struct {
         // NOTE: we are currently destroying the shader modules as soon as we are done
         // creating the pipeline. This is not great if we needed the modules for multiple pipelines.
         // Howver, for the sake of simplicity, we are doing it this way for now.
+        // shaders including their variants should be treated like any other loaded asset
 
         const vertex_input_state_ci = std.mem.zeroInit(c.VkPipelineVertexInputStateCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -319,7 +314,7 @@ pub const Assets = struct {
             instance.engine.object_set_layout,
             instance.engine.getDescriptorSetLayout(matparsed.value.shader.layouts) catch @panic("Failed to create shader resouces descriptor set layout"),
         };
-        const resources_uuids = try instance.allocator.alloc(Uuid, matparsed.value.resources.len);
+        const resources_handles = try instance.allocator.alloc(AssetHandle, matparsed.value.resources.len);
 
         // Allocate descriptor set for shader resources
         const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
@@ -335,7 +330,9 @@ pub const Assets = struct {
         for (matparsed.value.shader.layouts, matparsed.value.resources, 0..) |layout, resource, i| {
             switch (layout) {
                 .texture => {
-                    resources_uuids[i] = resource.?;
+                    const tex = Self.get((ImageAssetHandle{ .uuid = resource.? }).toTexture()) catch @panic("Failed to load texture");
+                    resources_handles[i] = tex.handle.toAssetHandle();
+
                     const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
                         .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
                         .magFilter = c.VK_FILTER_NEAREST,
@@ -348,7 +345,6 @@ pub const Assets = struct {
                     check_vk(c.vkCreateSampler(instance.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
                     instance.engine.deletion_queue.append(Engine.VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("Out of memory");
 
-                    const tex = Self.get((ImageAssetHandle{ .uuid = resource.? }).toTexture()) catch @panic("Failed to load texture");
                     const descriptor_image_info = std.mem.zeroInit(c.VkDescriptorImageInfo, .{
                         .sampler = sampler,
                         .imageView = tex.image_view,
@@ -400,8 +396,8 @@ pub const Assets = struct {
             .pipeline = pipeline,
             .pipeline_layout = pipeline_layout,
 
-            .rsc_count = @intCast(resources_uuids.len),
-            .rsc_uuids = resources_uuids.ptr,
+            .rsc_count = @intCast(resources_handles.len),
+            .rsc_handles = resources_handles.ptr,
             .rsc_descriptor_set = resource_set,
         };
 
@@ -462,7 +458,7 @@ pub const AssetType = enum(u8) {
     }
 };
 
-pub const AssetHandle = struct {
+pub const AssetHandle = extern struct {
     uuid: Uuid,
     type: AssetType,
 
@@ -590,6 +586,7 @@ const LoadedAsset = struct {
                     c.vkDestroyImageView,
                 );
                 view_del.delete(Assets.instance.engine);
+                Assets.release(it.image) catch {};
                 Assets.instance.allocator.destroy(it);
             },
             .mesh => {
@@ -603,7 +600,11 @@ const LoadedAsset = struct {
                 layout_del.delete(Assets.instance.engine);
                 var pipeline_del = Engine.VulkanDeleter.make(it.pipeline, c.vkDestroyPipeline);
                 pipeline_del.delete(Assets.instance.engine);
-                Assets.instance.allocator.free(it.rsc_uuids[0..@intCast(it.rsc_count)]);
+                const slice = it.rsc_handles[0..@intCast(it.rsc_count)];
+                for (slice) |res| {
+                    Assets.release(res) catch {};
+                }
+                Assets.instance.allocator.free(slice);
                 Assets.instance.allocator.destroy(it);
             },
             .scene => {

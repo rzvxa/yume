@@ -120,6 +120,10 @@ pub const Mesh = extern struct {
         return "editor://icons/mesh.png";
     }
 
+    pub fn deinit(self: *Mesh) void {
+        Assets.release(self.handle) catch {};
+    }
+
     pub fn default(ptr: *Mesh, _: ecs.Entity, _: *GameApp, rr: ecs.ResourceResolver) callconv(.C) bool {
         const handle = rr("builtin://cube.obj").toAssetHandle() catch |err| {
             log.err("encountered error on creating the default mesh, {}", .{err});
