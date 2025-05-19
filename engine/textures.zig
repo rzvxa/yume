@@ -1,6 +1,7 @@
 const std = @import("std");
 const c = @import("clibs");
 
+const assets = @import("assets.zig");
 const Engine = @import("VulkanEngine.zig");
 const check_vk = @import("vulkan_init.zig").check_vk;
 const Urn = @import("Uuid.zig").Urn;
@@ -8,11 +9,12 @@ const Urn = @import("Uuid.zig").Urn;
 const log = std.log.scoped(.textures);
 
 pub const Texture = struct {
+    handle: assets.TextureAssetHandle,
     image: Engine.AllocatedImage,
     image_view: c.VkImageView,
 };
 
-pub fn load_image(engine: *Engine, buffer: []const u8, urn: Urn) !Engine.AllocatedImage {
+pub fn loadImage(engine: *Engine, buffer: []const u8, urn: Urn) !Engine.AllocatedImage {
     var width: c_int = undefined;
     var height: c_int = undefined;
     var channels: c_int = undefined;
@@ -142,6 +144,7 @@ pub fn load_image(engine: *Engine, buffer: []const u8, urn: Urn) !Engine.Allocat
     });
 
     return .{
+        .handle = undefined,
         .image = image,
         .allocation = allocation,
     };

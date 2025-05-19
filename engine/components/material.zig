@@ -16,11 +16,15 @@ pub const Material = extern struct {
     pipeline_layout: c.VkPipelineLayout,
 
     rsc_count: u8,
-    rsc_uuids: [*c]Uuid,
+    rsc_handles: [*c]assets.AssetHandle,
     rsc_descriptor_set: c.VkDescriptorSet,
 
     pub fn editorIcon() [*:0]const u8 {
         return "editor://icons/material.png";
+    }
+
+    pub fn deinit(self: *Material) void {
+        Assets.release(self.handle) catch {};
     }
 
     pub fn default(ptr: *Material, _: ecs.Entity, _: *GameApp, rr: ecs.ResourceResolver) callconv(.C) bool {

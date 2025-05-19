@@ -239,11 +239,18 @@ pub fn deinit(self: *Self) void {
         p.unload();
     }
     self.ctx.allocator.free(std.mem.span(c.ImGui_GetIO().*.IniFilename));
-    loaded_imgui_images.deinit();
-    check_vk(c.vkDeviceWaitIdle(self.ctx.engine.device)) catch @panic("Failed to wait for device idle");
-    c.cImGui_ImplVulkan_Shutdown();
     EditorDatabase.flush() catch log.err("Failed to flush the editor database\n", .{});
     EditorDatabase.deinit();
+
+    check_vk(c.vkDeviceWaitIdle(self.ctx.engine.device)) catch @panic("Failed to wait for device idle");
+    c.cImGui_ImplVulkan_Shutdown();
+    {
+        var iter = loaded_imgui_images.iterator();
+        while (iter.next()) |next| {
+            Assets.release(next.value_ptr.handle) catch {};
+        }
+        loaded_imgui_images.deinit();
+    }
 }
 
 pub fn windowTitle(self: *Self) ![]u8 {
@@ -598,7 +605,7 @@ fn initImGui(engine: *Engine) !void {
     _ = c.cImGui_ImplVulkan_Init(&init_info);
     _ = c.cImGui_ImplVulkan_CreateFontsTexture();
 
-    loaded_imgui_images = std.StringHashMap(c.ImTextureID).init(engine.allocator);
+    loaded_imgui_images = std.StringHashMap(LoadedImGuiImage).init(engine.allocator);
 
     yume_logo_ds = try getImGuiTexture("editor://icons/yume.png");
 
@@ -780,7 +787,7 @@ pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
         _ = loaded_imgui_images.remove(uri);
     };
     if (entry.found_existing) {
-        return entry.value_ptr.*;
+        return entry.value_ptr.texture;
     }
     const image = try Assets.get(try Resources.getAssetHandle(uri, .{ .expect = .image }));
 
@@ -819,8 +826,12 @@ pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
         check_vk(c.vkCreateSampler(engine.device, &sampler_info, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
     }
     engine.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("OOM");
-    entry.value_ptr.* = @intFromPtr(c.cImGui_ImplVulkan_AddTexture(sampler, image_view, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
-    return entry.value_ptr.*;
+    const texture = @intFromPtr(c.cImGui_ImplVulkan_AddTexture(sampler, image_view, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+    entry.value_ptr.* = .{
+        .handle = image.handle.toAssetHandle(),
+        .texture = texture,
+    };
+    return texture;
 }
 
 fn bootstrapEditorPipeline(self: *const Self, world: ecs.World) void {
@@ -884,7 +895,11 @@ pub var roboto14: *c.ImFont = undefined;
 pub var roboto24: *c.ImFont = undefined;
 pub var roboto32: *c.ImFont = undefined;
 
-pub var loaded_imgui_images: std.StringHashMap(c.ImTextureID) = undefined;
+const LoadedImGuiImage = struct {
+    handle: assets.AssetHandle,
+    texture: c.ImTextureID,
+};
+var loaded_imgui_images: std.StringHashMap(LoadedImGuiImage) = undefined;
 
 pub var yume_logo_ds: c.ImTextureID = undefined;
 
