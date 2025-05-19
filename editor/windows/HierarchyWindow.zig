@@ -194,14 +194,18 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) !bool {
                 ctx.world.set(new_entity, ecs.components.Mesh, (try Assets.get(
                     try Resources.getAssetHandle("builtin://cube.obj", .{ .expect = .mesh }),
                 )).*);
-                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try Resources.getResourceId("builtin://materials/pbr.mat"))).*);
+                ctx.world.set(new_entity, ecs.components.Material, (try Assets.get(
+                    try Resources.getAssetHandle("builtin://materials/pbr.mat", .{ .expect = .material }),
+                )).*);
             }
             if (c.ImGui_MenuItem("Sphere")) {
                 const new_entity = ctx.world.entity(.{ .name = "Sphere", .parent = entity });
                 ctx.world.set(new_entity, ecs.components.Mesh, (try Assets.get(
                     try Resources.getAssetHandle("builtin://sphere.obj", .{ .expect = .mesh }),
                 )).*);
-                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try Resources.getResourceId("builtin://materials/pbr.mat"))).*);
+                ctx.world.set(new_entity, ecs.components.Material, (try Assets.get(
+                    try Resources.getAssetHandle("builtin://materials/pbr.mat", .{ .expect = .material }),
+                )).*);
             }
             _ = c.ImGui_MenuItem("Plane*");
             if (c.ImGui_MenuItem("Suzanne")) {
@@ -209,7 +213,9 @@ fn drawContextMenu(entity: ecs.Entity, ctx: *GameApp) !bool {
                 ctx.world.set(new_entity, ecs.components.Mesh, (try Assets.get(
                     try Resources.getAssetHandle("builtin://suzanne.obj", .{ .expect = .mesh }),
                 )).*);
-                ctx.world.set(new_entity, ecs.components.Material, (try Assets.getOrLoadMaterial(try Resources.getResourceId("builtin://materials/pbr.mat"))).*);
+                ctx.world.set(new_entity, ecs.components.Material, (try Assets.get(
+                    try Resources.getAssetHandle("builtin://materials/pbr.mat", .{ .expect = .material }),
+                )).*);
             }
             c.ImGui_Separator();
             if (c.ImGui_MenuItem("Camera")) {

@@ -632,7 +632,7 @@ fn open(self: *Self, node: *const Node, ty: Resources.Resource.Type) !void {
     switch (node.*) {
         .resource => |r| {
             switch (ty) {
-                .scene => try Editor.instance().openScene(r),
+                .scene => try Editor.instance().openScene(.{ .uuid = r }),
                 else => {
                     var buf: [std.fs.max_path_bytes]u8 = undefined;
                     try utils.tryOpenWithOsDefaultApplication(self.allocator, try Resources.bufResourceFullpath(r, &buf));

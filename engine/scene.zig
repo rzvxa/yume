@@ -4,6 +4,7 @@ const log = std.log.scoped(.scene);
 const ecs = @import("ecs.zig");
 const Dynamic = @import("serialization/dynamic.zig").Dynamic;
 const GameApp = @import("GameApp.zig");
+const assets = @import("assets.zig");
 const Uuid = @import("uuid.zig").Uuid;
 const Vec3 = @import("math3d.zig").Vec3;
 const Mat4 = @import("math3d.zig").Mat4;
@@ -13,6 +14,7 @@ const utils = @import("utils.zig");
 pub const Scene = struct {
     const Self = @This();
 
+    handle: ?assets.SceneAssetHandle,
     root: *Object,
     arena: *std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
@@ -25,6 +27,7 @@ pub const Scene = struct {
         const a = arena.allocator();
 
         self.* = .{
+            .handle = null,
             .arena = arena,
             .allocator = a,
             .root = undefined,
@@ -80,6 +83,7 @@ pub const Scene = struct {
         const a = arena.allocator();
 
         result.* = Self{
+            .handle = null,
             .arena = arena,
             .allocator = a,
             .root = undefined,
