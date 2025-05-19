@@ -178,8 +178,9 @@ pub fn deinit(self: *Self) void {
 pub fn loadScene(self: *Self, scene_id: Uuid) !void {
     const old_handle = self.scene_handle;
     var old_scene = self.scene;
-    self.scene_handle = try Assets.loadScene(scene_id);
-    self.scene = try Assets.getScene(self.scene_handle.?);
+    // FIXME
+    self.scene_handle = try Assets.loadScene_(scene_id);
+    self.scene = try Assets.getScene_(self.scene_handle.?);
 
     if (old_handle) |handle| {
         if (handle.uuid.raw != scene_id.raw) {

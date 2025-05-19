@@ -27,7 +27,7 @@ pub fn deinit(ptr: *anyopaque) void {
 
 pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
     var mesh = ctx.world.getMut(entity, ecs.components.Mesh).?;
-    var urn = mesh.uuid.urnZ();
+    var urn = mesh.handle.uuid.urnZ();
     c.ImGui_PushID("mesh-reference");
     _ = c.ImGui_InputText("##mesh-reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);
     c.ImGui_SameLine();

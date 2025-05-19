@@ -199,11 +199,20 @@ fn drawEntityProperties(_: *Self, entity: ecs.Entity, ctx: *GameApp) !void {
                             const ref = c.ecs_get_mut_id(ctx.world.inner, e, def.id);
                             std.debug.assert(def.default.?(ref.?, e, ctx, extern struct {
                                 fn f(path: [*:0]const u8) callconv(.C) ecs.ResourceResolverResult {
-                                    const uuid = Resources.getResourceId(std.mem.span(path)) catch return .{
+                                    return struct {
+                                        fn inner(p: [:0]const u8) !ecs.ResourceResolverResult {
+                                            const uuid = try Resources.getResourceId(p);
+                                            return .{
+                                                .found = true,
+                                                .uuid = uuid,
+                                                .type = (try Resources.getResourceType(uuid)).toAssetType(),
+                                            };
+                                        }
+                                    }.inner(std.mem.span(path)) catch return .{
                                         .found = false,
-                                        .uuid = .{ .raw = 0 },
+                                        .uuid = undefined,
+                                        .type = undefined,
                                     };
-                                    return .{ .found = true, .uuid = uuid };
                                 }
                             }.f));
                         },
