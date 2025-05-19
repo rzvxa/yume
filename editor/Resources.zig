@@ -6,6 +6,7 @@ const Event = @import("yume").Event;
 const Watch = @import("Watch.zig");
 
 const GameApp = @import("yume").GameApp;
+const assets = @import("yume").assets;
 
 const Editor = @import("Editor.zig");
 
@@ -47,6 +48,17 @@ pub const Resource = struct {
         pub fn fileIconUri(self: Type) [:0]const u8 {
             return switch (self) {
                 inline else => |t| "editor://icons/filetypes/" ++ @tagName(t) ++ ".png",
+            };
+        }
+
+        pub fn toAssetType(self: Type) assets.AssetType {
+            return switch (self) {
+                .shader => .binary, // TODO: we need to treat shaders as assets, use .shader
+                .unknown, .project => .binary,
+                .scene => .scene,
+                .mat => .material,
+                .obj, .fbx => .mesh,
+                .png => .image,
             };
         }
     };
@@ -582,6 +594,21 @@ pub fn getResourceId(uri: []const u8) !Uuid {
     const self = instance();
     if (self.resources_index.get(uri)) |id| {
         return id;
+    }
+    return error.ResourceNotFound;
+}
+
+pub fn getAssetHandle(
+    uri: []const u8,
+    comptime opts: struct { expect: ?assets.AssetType = null },
+) !if (opts.expect) |expect| expect.HandleType() else assets.AssetHandle {
+    const self = instance();
+    if (self.resources_index.get(uri)) |id| {
+        const handle = assets.AssetHandle{
+            .uuid = id,
+            .type = getResourcePtr(id).?.type.toAssetType(),
+        };
+        return if (comptime opts.expect) |expect| handle.unbox(expect) else handle;
     }
     return error.ResourceNotFound;
 }
