@@ -17,7 +17,7 @@ allocator: std.mem.Allocator,
 yume_version: std.SemanticVersion = @import("yume").version,
 project_name: []const u8,
 scenes: std.ArrayList(Uuid),
-default_scene: assets.SceneAssetHandle,
+default_scene: assets.SceneHandle,
 
 pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     if (instance) |*ins| {
@@ -112,7 +112,7 @@ pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, o: anytype) !Self {
         } else if (std.mem.eql(u8, field_name, "scenes")) {
             result.scenes = try parseScenes(a, jrs);
         } else if (std.mem.eql(u8, field_name, "default_scene")) {
-            result.default_scene = try assets.SceneAssetHandle.jsonParse(a, jrs, o);
+            result.default_scene = try assets.SceneHandle.jsonParse(a, jrs, o);
         } else {
             try jrs.skipValue();
         }

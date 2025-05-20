@@ -110,7 +110,7 @@ pub const BoundingBox = extern struct {
 };
 
 pub const Mesh = extern struct {
-    handle: assets.MeshAssetHandle,
+    handle: assets.MeshHandle,
     vertices_count: usize,
     vertices: [*c]Vertex,
     bounds: BoundingBox,
@@ -141,13 +141,13 @@ pub const Mesh = extern struct {
     pub fn deserialize(self: *@This(), value: *const Dynamic, _: std.mem.Allocator) !void {
         const urn = try value.expectString();
         const uuid = try Uuid.fromUrnSlice(std.mem.span(urn));
-        self.* = (try Assets.get(assets.MeshAssetHandle{ .uuid = uuid })).*;
+        self.* = (try Assets.get(assets.MeshHandle{ .uuid = uuid })).*;
     }
 };
 
 pub fn load_from_obj(
     allocator: std.mem.Allocator,
-    handle: assets.MeshAssetHandle,
+    handle: assets.MeshHandle,
     buffer: []const u8,
 ) Mesh {
     const smooth = false;

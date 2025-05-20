@@ -9,7 +9,7 @@ const Urn = @import("Uuid.zig").Urn;
 const log = std.log.scoped(.textures);
 
 pub const Texture = struct {
-    handle: assets.TextureAssetHandle,
+    handle: assets.TextureHandle,
     image: Engine.AllocatedImage,
     image_view: c.VkImageView,
 };

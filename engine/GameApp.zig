@@ -14,7 +14,7 @@ const Vec2U = math3d.Vec2U;
 const Vec3 = math3d.Vec3;
 
 const Assets = @import("assets.zig").Assets;
-const SceneAssetHandle = @import("assets.zig").SceneAssetHandle;
+const SceneHandle = @import("assets.zig").SceneHandle;
 
 const Scene = @import("scene.zig").Scene;
 
@@ -178,7 +178,7 @@ pub fn deinit(self: *Self) void {
     self.allocator.destroy(self);
 }
 
-pub fn loadScene(self: *Self, handle: SceneAssetHandle) !void {
+pub fn loadScene(self: *Self, handle: SceneHandle) !void {
     var old_scene = self.scene;
     self.scene = try Assets.get(handle);
 

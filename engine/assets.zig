@@ -166,7 +166,7 @@ pub const Assets = struct {
         return &instance.unused_assets_maps[instance.unused_assets_active_idx];
     }
 
-    fn loadImage(handle: ImageAssetHandle) !void {
+    fn loadImage(handle: ImageHandle) !void {
         if (instance.loaded_ids.contains(handle.uuid)) {
             return;
         }
@@ -183,7 +183,7 @@ pub const Assets = struct {
         try instance.loaded_ids.put(handle.uuid, {});
     }
 
-    fn loadTexture(handle: TextureAssetHandle) !void {
+    fn loadTexture(handle: TextureHandle) !void {
         if (instance.loaded_ids.contains(handle.uuid)) {
             return;
         }
@@ -224,7 +224,7 @@ pub const Assets = struct {
         try instance.loaded_ids.put(handle.uuid, {});
     }
 
-    fn loadMesh(handle: MeshAssetHandle) !void {
+    fn loadMesh(handle: MeshHandle) !void {
         if (instance.loaded_ids.contains(handle.uuid)) {
             return;
         }
@@ -240,7 +240,7 @@ pub const Assets = struct {
         try instance.loaded_ids.put(handle.uuid, {});
     }
 
-    fn loadMaterial(handle: MaterialAssetHandle) !void {
+    fn loadMaterial(handle: MaterialHandle) !void {
         if (instance.loaded_ids.contains(handle.uuid)) {
             return;
         }
@@ -380,7 +380,7 @@ pub const Assets = struct {
         for (matparsed.value.shader.layouts, matparsed.value.resources, 0..) |layout, resource, i| {
             switch (layout) {
                 .texture => {
-                    const tex = Self.get((ImageAssetHandle{ .uuid = resource.? }).toTexture()) catch @panic("Failed to load texture");
+                    const tex = Self.get((ImageHandle{ .uuid = resource.? }).toTexture()) catch @panic("Failed to load texture");
                     resources_handles[i] = tex.handle.toAssetHandle();
 
                     const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
@@ -456,7 +456,7 @@ pub const Assets = struct {
         try instance.loaded_ids.put(handle.uuid, {});
     }
 
-    fn loadScene(handle: SceneAssetHandle) !void {
+    fn loadScene(handle: SceneHandle) !void {
         if (instance.loaded_ids.contains(handle.uuid)) {
             return;
         }
@@ -498,12 +498,12 @@ pub const AssetType = enum(u8) {
 
     pub fn HandleType(ty: AssetType) type {
         return switch (ty) {
-            .binary => BinaryAssetHandle,
-            .image => ImageAssetHandle,
-            .texture => TextureAssetHandle,
-            .mesh => MeshAssetHandle,
-            .material => MaterialAssetHandle,
-            .scene => SceneAssetHandle,
+            .binary => BinaryHandle,
+            .image => ImageHandle,
+            .texture => TextureHandle,
+            .mesh => MeshHandle,
+            .material => MaterialHandle,
+            .scene => SceneHandle,
         };
     }
 };
@@ -571,35 +571,35 @@ pub fn AssetHandleOf(comptime tag: AssetType, comptime opts: struct {
     };
 }
 
-pub const BinaryAssetHandle = AssetHandleOf(.binary, .{});
-pub const ImageAssetHandle = AssetHandleOf(.image, .{
+pub const BinaryHandle = AssetHandleOf(.binary, .{});
+pub const ImageHandle = AssetHandleOf(.image, .{
     .extensions = struct {
-        pub inline fn fromTexture(tex: TextureAssetHandle) ImageAssetHandle {
-            return TextureAssetHandle.toImage(tex);
+        pub inline fn fromTexture(tex: TextureHandle) ImageHandle {
+            return TextureHandle.toImage(tex);
         }
 
-        pub inline fn toTexture(img: ImageAssetHandle) TextureAssetHandle {
-            return TextureAssetHandle.fromImage(img);
+        pub inline fn toTexture(img: ImageHandle) TextureHandle {
+            return TextureHandle.fromImage(img);
         }
     },
 });
-pub const TextureAssetHandle = AssetHandleOf(.texture, .{
+pub const TextureHandle = AssetHandleOf(.texture, .{
     .extensions = struct {
         // perhaps use a mask over this? given the randomness of UUID this should work at least for now
         pub const offset_with_image = 1;
 
-        pub inline fn fromImage(img: ImageAssetHandle) TextureAssetHandle {
+        pub inline fn fromImage(img: ImageHandle) TextureHandle {
             return .{ .uuid = .{ .raw = img.uuid.raw + offset_with_image } };
         }
 
-        pub inline fn toImage(tex: TextureAssetHandle) ImageAssetHandle {
+        pub inline fn toImage(tex: TextureHandle) ImageHandle {
             return .{ .uuid = .{ .raw = tex.uuid.raw - offset_with_image } };
         }
     },
 });
-pub const MeshAssetHandle = AssetHandleOf(.mesh, .{});
-pub const MaterialAssetHandle = AssetHandleOf(.material, .{});
-pub const SceneAssetHandle = AssetHandleOf(.scene, .{});
+pub const MeshHandle = AssetHandleOf(.mesh, .{});
+pub const MaterialHandle = AssetHandleOf(.material, .{});
+pub const SceneHandle = AssetHandleOf(.scene, .{});
 
 const LoadedAsset = struct {
     const Self = @This();
