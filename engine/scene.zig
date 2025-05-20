@@ -14,7 +14,7 @@ const utils = @import("utils.zig");
 pub const Scene = struct {
     const Self = @This();
 
-    handle: ?assets.SceneAssetHandle,
+    handle: ?assets.SceneHandle,
     root: *Object,
     arena: *std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,

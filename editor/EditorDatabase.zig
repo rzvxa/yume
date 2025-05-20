@@ -15,7 +15,7 @@ const EditorDatabase = struct {
 
 const ProjectDatabase = struct {
     last_open_project: ?[:0]u8 = null,
-    last_open_scene: ?assets.SceneAssetHandle = null,
+    last_open_scene: ?assets.SceneHandle = null,
 };
 
 const LogsDatabase = struct {

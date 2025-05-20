@@ -38,7 +38,7 @@ pub const AllocatedBuffer = extern struct {
 };
 
 pub const AllocatedImage = extern struct {
-    handle: assets.ImageAssetHandle,
+    handle: assets.ImageHandle,
     image: c.VkImage,
     allocation: c.VmaAllocation,
 };

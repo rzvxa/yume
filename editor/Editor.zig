@@ -633,7 +633,7 @@ pub fn openProject(self: *Self) void {
     self.open_project_modal.open();
 }
 
-pub fn openScene(self: *Self, scene: assets.SceneAssetHandle) !void {
+pub fn openScene(self: *Self, scene: assets.SceneHandle) !void {
     switch (self.selection) {
         .entity => self.selection = .none,
         else => {},

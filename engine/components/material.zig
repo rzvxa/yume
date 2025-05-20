@@ -11,7 +11,7 @@ const Dynamic = @import("../serialization/dynamic.zig").Dynamic;
 const Uuid = @import("../uuid.zig").Uuid;
 
 pub const Material = extern struct {
-    handle: assets.MaterialAssetHandle,
+    handle: assets.MaterialHandle,
     pipeline: c.VkPipeline,
     pipeline_layout: c.VkPipelineLayout,
 
@@ -43,6 +43,6 @@ pub const Material = extern struct {
     pub fn deserialize(self: *@This(), value: *const Dynamic, _: std.mem.Allocator) !void {
         const urn = try value.expectString();
         const uuid = try Uuid.fromUrnSlice(std.mem.span(urn));
-        self.* = (try Assets.get(assets.MaterialAssetHandle{ .uuid = uuid })).*;
+        self.* = (try Assets.get(assets.MaterialHandle{ .uuid = uuid })).*;
     }
 };
