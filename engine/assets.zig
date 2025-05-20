@@ -33,6 +33,9 @@ pub const Assets = struct {
     loaded_ids: std.AutoHashMap(Uuid, void),
     loaded_assets: std.AutoHashMap(AssetHandle, LoadedAsset),
 
+    unused_assets_maps: [4]std.AutoHashMap(AssetHandle, void),
+    unused_assets_active_idx: u3 = 3,
+
     loader: ResourceLoader,
 
     pub fn init(allocator: std.mem.Allocator, engine: *Engine, loader: ResourceLoader) void {
@@ -41,12 +44,18 @@ pub const Assets = struct {
             .engine = engine,
             .loaded_ids = std.AutoHashMap(Uuid, void).init(allocator),
             .loaded_assets = std.AutoHashMap(AssetHandle, LoadedAsset).init(allocator),
+            .unused_assets_maps = undefined,
 
             .loader = loader,
         };
+
+        for (0..instance.unused_assets_maps.len) |i| {
+            instance.unused_assets_maps[i] = std.AutoHashMap(AssetHandle, void).init(allocator);
+        }
     }
 
     pub fn deinit() void {
+        collect(.{ .force = true }) catch @panic("Failed to collect assets");
         {
             if (instance.loaded_assets.count() > 0) {
                 log.err("Memory leak", .{});
@@ -58,6 +67,9 @@ pub const Assets = struct {
         }
         instance.loaded_ids.deinit();
         instance.loaded_assets.deinit();
+        for (0..instance.unused_assets_maps.len) |i| {
+            instance.unused_assets_maps[i].deinit();
+        }
     }
 
     pub fn get(handle: anytype) !ty: {
@@ -100,7 +112,7 @@ pub const Assets = struct {
         };
     }
 
-    pub fn release(asset: anytype) error{AssetNotLoaded}!void {
+    pub fn release(asset: anytype) !void {
         const handle: AssetHandle =
             if (comptime @hasDecl(@TypeOf(asset), "toAssetHandle"))
             asset.toAssetHandle()
@@ -108,12 +120,50 @@ pub const Assets = struct {
             asset.handle.toAssetHandle();
 
         var loaded = try getLoadedAsset(handle);
+        if (loaded.ref_count == 0) {
+            // item released more times that borrowed
+            return error.DoubleRelease;
+        }
         loaded.ref_count -= 1;
         if (loaded.ref_count == 0) {
+            try unused(handle);
+        }
+    }
+
+    pub fn collect(comptime opts: struct { force: bool = false }) !void {
+        var unused_assets = unused_assets_map();
+        if (unused_assets.count() == 0) return;
+        // round robin between active maps on each collection,
+        // this is mostly here to allow buffering of collectable assets released during this collection
+        instance.unused_assets_active_idx = @mod(instance.unused_assets_active_idx + 1, @as(u3, @intCast(instance.unused_assets_maps.len)));
+        var iter = unused_assets.keyIterator();
+        while (iter.next()) |handle| {
+            var loaded = try getLoadedAsset(handle.*);
+            // it is possible for an asset to get rescued if it's referenced again before collection
+            // if that is the case, we just ignore this entry
+            if (loaded.ref_count > 0) {
+                continue;
+            }
+
             loaded.unload();
             std.debug.assert(instance.loaded_ids.remove(handle.uuid));
             std.debug.assert(instance.loaded_assets.remove(handle.toAssetHandle()));
         }
+        unused_assets.clearRetainingCapacity();
+
+        if (comptime opts.force) {
+            if (unused_assets_map().count() > 0) {
+                return collect(opts);
+            }
+        }
+    }
+
+    fn unused(handle: AssetHandle) !void {
+        try unused_assets_map().put(handle, {});
+    }
+
+    inline fn unused_assets_map() *std.AutoHashMap(AssetHandle, void) {
+        return &instance.unused_assets_maps[instance.unused_assets_active_idx];
     }
 
     fn loadImage(handle: ImageAssetHandle) !void {

@@ -160,6 +160,8 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) !void {
         if (comptime std.meta.hasMethod(Dispatcher, "endFrame")) {
             d.endFrame();
         }
+
+        try Assets.collect(.{}); // TODO: we shouldn't collect unused assets every frame
     }
 }
 
