@@ -187,11 +187,13 @@ pub fn init(ctx: *GameApp) *Self {
         .project_explorer_window = ProjectExplorerWindow.init(ctx.allocator) catch @panic("Failed to initialize `Project Explorer`"),
         .scene_window = undefined,
     };
-    singleton.project_explorer_window.setup() catch @panic("Failed to start project explorer indexing");
     singleton.scene_window = SceneWindow.init(ctx, @ptrCast(&Editors.onDrawGizmos), &singleton.editors);
     singleton.bootstrapEditorPipeline(ctx.world);
     singleton.initDescriptors(&ctx.engine);
+
     initImGui(&ctx.engine) catch @panic("failed to init imgui");
+
+    singleton.project_explorer_window.setup() catch @panic("Failed to start project explorer indexing");
 
     if (EditorDatabase.storage().project.last_open_project) |lop| {
         Project.load(ctx.allocator, lop) catch {
