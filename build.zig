@@ -5,6 +5,9 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    assertTargetSupported(target);
+    const sdl3_build = build_sdl3(b, target);
+
     const cfg = std.Build.Step.Options.create(b);
     cfg.addOption(std.SemanticVersion, "version", std.SemanticVersion{ .major = 0, .minor = 0, .patch = 1 });
 
@@ -41,7 +44,9 @@ pub fn build(b: *std.Build) !void {
         },
     });
 
+    const env_map = try std.process.getEnvMap(b.allocator);
     const vk_lib_name = if (target.result.os.tag == .windows) "vulkan-1" else "vulkan";
+    const vk_sdk_path = env_map.get("VULKAN_SDK") orelse env_map.get("VK_SDK_PATH");
 
     const uuid_dep = b.dependency("uuid_zig", .{
         .target = target,
@@ -50,13 +55,15 @@ pub fn build(b: *std.Build) !void {
     const uuid_mod = uuid_dep.module("uuid");
     yume.addImport("uuid", uuid_mod);
 
-    yume.linkSystemLibrary("SDL3", .{});
-    yume.linkSystemLibrary(vk_lib_name, .{});
-    yume.addLibraryPath(.{ .cwd_relative = "vendor/sdl3/lib" });
-    const env_map = try std.process.getEnvMap(b.allocator);
-    if (env_map.get("VK_SDK_PATH")) |path| {
+    yume.addCMacro("VK_ENABLE_BETA_EXTENSIONS", "1");
+    yume.linkSystemLibrary("SDL3", .{ .needed = true });
+    yume.linkSystemLibrary(vk_lib_name, .{ .needed = true });
+    yume.addLibraryPath(sdl3_build.lib_path);
+
+    if (vk_sdk_path) |path| {
         yume.addLibraryPath(.{ .cwd_relative = try std.fmt.allocPrint(b.allocator, "{s}/lib", .{path}) });
         yume.addIncludePath(.{ .cwd_relative = try std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) });
+        engine_c_libs.defineCMacro("VK_ENABLE_BETA_EXTENSIONS", "1");
         engine_c_libs.addIncludeDir(try std.fmt.allocPrint(b.allocator, "{s}/include", .{path}));
     }
     yume.addCSourceFile(.{ .file = b.path("engine/c/vk_mem_alloc.cpp"), .flags = &.{""} });
@@ -105,7 +112,7 @@ pub fn build(b: *std.Build) !void {
     engine_c_libs.addIncludeDir("vendor/imguizmo/");
     editor.root_module.addImport("clibs", engine_c_mod);
 
-    if (env_map.get("VK_SDK_PATH")) |path| {
+    if (vk_sdk_path) |path| {
         editor.addIncludePath(.{ .cwd_relative = try std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) });
     }
     editor.addIncludePath(.{ .cwd_relative = "vendor/sdl3/include" });
@@ -118,12 +125,6 @@ pub fn build(b: *std.Build) !void {
     editor.root_module.addImport("yume", yume);
 
     b.installArtifact(editor);
-    if (target.result.os.tag == .windows) {
-        b.installBinFile("vendor/sdl3/lib/SDL3.dll", "SDL3.dll");
-    } else {
-        b.installBinFile("vendor/sdl3/lib/libSDL3.so", "libSDL3.so.0");
-        editor.root_module.addRPathSpecial("$ORIGIN");
-    }
 
     // Imgui (with cimgui and vulkan + sdl3 backends)
     const imgui_lib = b.addStaticLibrary(.{
@@ -131,7 +132,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    if (env_map.get("VK_SDK_PATH")) |path| {
+    if (vk_sdk_path) |path| {
         imgui_lib.addIncludePath(.{ .cwd_relative = try std.fmt.allocPrint(b.allocator, "{s}/include", .{path}) });
     }
     imgui_lib.root_module.addCMacro("IMGUI_USE_LEGACY_CRC32_ADLER", "1");
@@ -176,6 +177,10 @@ pub fn build(b: *std.Build) !void {
     });
 
     editor.linkLibrary(imguizmo_lib);
+
+    if (target.result.os.tag == .macos) {
+        editor.root_module.addRPathSpecial("@executable_path");
+    }
 
     const run_cmd = b.addRunArtifact(editor);
 
@@ -253,4 +258,59 @@ fn build_shader(b: *std.Build, installdir: std.Build.InstallDir, src: []const u8
     shader_compilation.addFileArg(b.path(src));
 
     b.getInstallStep().dependOn(&b.addInstallFileWithDir(output, installdir, out).step);
+}
+
+fn build_sdl3(b: *std.Build, target: std.Build.ResolvedTarget) struct { lib_path: std.Build.LazyPath } {
+    const cmake = b.addSystemCommand(&.{"cmake"});
+    cmake.stdio = .inherit;
+    cmake.addArg("-B");
+    const build_dir = cmake.addOutputDirectoryArg("sdl3-build");
+    cmake.addArg("-S");
+    cmake.addDirectoryArg(.{ .cwd_relative = "vendor/sdl3" });
+
+    switch (target.result.os.tag) {
+        .macos => {
+            cmake.addArg("-DCMAKE_OSX_DEPLOYMENT_TARGET=10.11");
+
+            const lib_name = "libSDL3.dylib";
+            const lib_sym_name = "libSDL3.0.dylib";
+            const make = b.addSystemCommand(&.{"make"});
+            make.step.dependOn(&cmake.step);
+            make.stdio = .inherit;
+            make.addArg("-C");
+            make.addDirectoryArg(build_dir);
+            make.addArgs(&.{ "-j", b.fmt("{d}", .{std.Thread.getCpuCount() catch 1}) });
+
+            // TODO: This exists because I don't know how to make module directly depend on the final build step,
+            // so I have to update the lazy path to enforce it
+            const cpy_lib = b.addSystemCommand(&.{"cp"});
+            cpy_lib.step.dependOn(&make.step);
+            cpy_lib.addDirectoryArg(build_dir.path(b, lib_name));
+            const lib_path = cpy_lib.addOutputFileArg(lib_name);
+
+            const cpy_lib_sym = b.addSystemCommand(&.{"cp"});
+            cpy_lib_sym.step.dependOn(&cpy_lib.step);
+            cpy_lib_sym.addDirectoryArg(build_dir.path(b, lib_name));
+            const lib_sym_path = cpy_lib_sym.addOutputFileArg(lib_name);
+
+            var install_lib_step = &b.addInstallBinFile(lib_path, lib_name).step;
+            install_lib_step.dependOn(&cpy_lib.step);
+            b.getInstallStep().dependOn(install_lib_step);
+
+            var install_lib_sym_step = &b.addInstallBinFile(lib_sym_path, lib_sym_name).step;
+            install_lib_sym_step.dependOn(&cpy_lib_sym.step);
+            b.getInstallStep().dependOn(install_lib_sym_step);
+
+            return .{ .lib_path = lib_sym_path.dirname() };
+        },
+        else => unreachable,
+    }
+}
+
+fn assertTargetSupported(target: std.Build.ResolvedTarget) void {
+    switch (target.result.os.tag) {
+        //support platforms
+        .windows, .macos => {},
+        inline else => |pl| @panic("Unsupported target platform " ++ @tagName(pl)),
+    }
 }

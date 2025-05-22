@@ -1,15 +1,23 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 var init = std.once(struct {
     fn f() void {
-        heap = std.heap.HeapAllocator.init();
-        arena = std.heap.ArenaAllocator.init(heap.allocator());
+        if (comptime builtin.os.tag == .windows) {
+            heap = std.heap.HeapAllocator.init();
+            heap_allocator = heap.allocator();
+        } else {
+            heap = {};
+            heap_allocator = std.heap.page_allocator;
+        }
+        arena = std.heap.ArenaAllocator.init(heap_allocator);
         allocator = arena.allocator();
         logs = std.ArrayList(Log).init(allocator);
     }
 }.f);
 
-var heap: std.heap.HeapAllocator = undefined;
+var heap: if (builtin.os.tag == .windows) std.heap.HeapAllocator else void = undefined;
+var heap_allocator: std.mem.Allocator = undefined;
 var arena: std.heap.ArenaAllocator = undefined;
 var allocator: std.mem.Allocator = undefined;
 var mutex = std.Thread.Mutex{};

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const c = @import("clibs");
 
 const log = std.log.scoped(.vulkan_init);
@@ -100,6 +101,17 @@ pub fn create_instance(alloc: std.mem.Allocator, opts: VkiInstanceOpts) !Instanc
         enable_validation = false;
     }
 
+    if (comptime builtin.os.tag == .macos) {
+        const portablity_subset_ext = "VK_KHR_portability_subset";
+        try extensions.append(arena, portablity_subset_ext);
+        // if (ExtensionFinder.find(portablity_subset_ext, extension_props)) {
+        //     try extensions.append(arena, portablity_subset_ext);
+        // } else {
+        //     log.err("Required vulkan extension not supported: {s}", .{portablity_subset_ext});
+        //     return error.vulkan_extension_not_supported;
+        // }
+    }
+
     const app_info = std.mem.zeroInit(c.VkApplicationInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .apiVersion = opts.api_version,
@@ -114,6 +126,11 @@ pub fn create_instance(alloc: std.mem.Allocator, opts: VkiInstanceOpts) !Instanc
         .ppEnabledLayerNames = layers.items.ptr,
         .enabledExtensionCount = @as(u32, @intCast(extensions.items.len)),
         .ppEnabledExtensionNames = extensions.items.ptr,
+
+        .flags = if (comptime builtin.os.tag == .macos)
+            c.VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR
+        else
+            0,
     });
 
     var instance: c.VkInstance = undefined;

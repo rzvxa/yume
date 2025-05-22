@@ -407,7 +407,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
         .resources_index = std.StringHashMap(Uuid).init(allocator),
         .resource_tree = ResourceNode.init(allocator, .root),
 
-        .watcher = if (Watch.supported_platform) try Watch.init(allocator, ".") else null,
+        .watcher = if (comptime Watch.supported_platform) try Watch.init(allocator, ".") else null,
     };
 
     errdefer deinit() catch {};
@@ -489,7 +489,7 @@ pub fn reinit(new_allocator: std.mem.Allocator) !void {
 
 pub fn deinit() !void {
     var self = instance();
-    if (self.watcher) |w| w.deinit();
+    if (comptime Watch.supported_platform) if (self.watcher) |w| w.deinit();
     {
         var it = self.resources_index.iterator();
         while (it.next()) |kv| {
