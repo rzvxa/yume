@@ -126,8 +126,8 @@ pub fn tryOpenWithOsDefaultApplication(allocator: std.mem.Allocator, path: []con
             "\"\"",
             path,
         } }) catch return error.FailedToOpen,
-        .macos => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "open", path } }) catch return error.FailedToOpen,
-        .linux => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "xdg-open", path } }) catch return error.LauncherNotFound,
+        .macos => std.process.Child.run(.{ .allocator = allocator, .argv = &.{ "open", path } }) catch return error.FailedToOpen,
+        .linux => std.process.Child.run(.{ .allocator = allocator, .argv = &.{ "xdg-open", path } }) catch return error.LauncherNotFound,
         else => |p| @compileError("Unsupported platform: " ++ p),
     };
 }
@@ -148,8 +148,8 @@ pub fn tryRevealPathInOsFileManager(allocator: std.mem.Allocator, path: []const 
                 },
             }) catch return error.FailedToReveal;
         },
-        .macos => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "open -R", path } }) catch return error.FailedToReveal,
-        .linux => std.process.Child.run(.{ .allocator = allocator, .argv = .{ "xdg-open", path } }) catch return error.FileManagerNotFound,
+        .macos => std.process.Child.run(.{ .allocator = allocator, .argv = &.{ "open -R", path } }) catch return error.FailedToReveal,
+        .linux => std.process.Child.run(.{ .allocator = allocator, .argv = &.{ "xdg-open", path } }) catch return error.FileManagerNotFound,
         else => |p| @compileError("Unsupported platform: " ++ p),
     };
 }
