@@ -23,6 +23,7 @@ const Self = @This();
 
 allocator: std.mem.Allocator,
 visible: bool = false,
+request_open: bool = false,
 request_focus: bool = true,
 
 anim_alpha: f32 = 0,
@@ -30,10 +31,11 @@ anim_window_height: f32 = 0,
 anim_window_width: f32 = 0,
 
 filters: collections.StringSentinelArrayHashMap(0, Filter),
+locked_filters: collections.StringSentinelArrayHashMap(0, Filter),
 
 find_str: imutils.ImString,
 
-index: collections.StringSentinelArrayHashMap(0, Entry),
+index: collections.StringSentinelArrayHashMap(0, *Entry),
 matches: std.ArrayList(Match),
 selected: usize = 0,
 
@@ -41,14 +43,16 @@ pub fn init(allocator: std.mem.Allocator) !Self {
     return .{
         .allocator = allocator,
         .filters = collections.StringSentinelArrayHashMap(0, Filter).init(allocator),
+        .locked_filters = collections.StringSentinelArrayHashMap(0, Filter).init(allocator),
         .find_str = try imutils.ImString.init(allocator),
-        .index = collections.StringSentinelArrayHashMap(0, Entry).init(allocator),
+        .index = collections.StringSentinelArrayHashMap(0, *Entry).init(allocator),
         .matches = std.ArrayList(Match).init(allocator),
     };
 }
 
 pub fn deinit(self: *Self) void {
     self.filters.deinit();
+    self.locked_filters.deinit();
     self.find_str.deinit();
 
     Resources.onRegister().remove(Resources.OnRegisterEvent.callback(Self, self, &Self.onResourcesRegister)) catch {};
@@ -60,7 +64,8 @@ pub fn deinit(self: *Self) void {
         defer self.index.deinit();
         var values = self.index.values();
         for (0..values.len) |i| {
-            values[i].kind.deinit(self.allocator);
+            values[i].deinit(self.allocator);
+            self.allocator.destroy(values[i]);
         }
     }
 }
@@ -73,13 +78,51 @@ pub fn setup(self: *Self) !void {
     try Resources.onReinit().append(Resources.OnReinitEvent.callback(Self, self, &Self.onResourcesReinit));
 }
 
+pub fn browse(self: *Self, selected: ?Selector, opts: struct {
+    locked_filters: []const Filter,
+    filters: []const Filter,
+}) !void {
+    self.filters.clearRetainingCapacity();
+    for (opts.locked_filters) |filter| {
+        try self.filters.put(filter.tag_name.span(), filter);
+    }
+    for (opts.filters) |filter| {
+        try self.filters.put(filter.tag_name.span(), filter);
+    }
+    self.selected = 0;
+    var found_entry: ?[:0]const u8 = null;
+    if (selected) |sel| {
+        var iter = self.index.iterator();
+        switch (sel) {
+            .filter => |s| while (iter.next()) |it| {
+                if (it.value_ptr.*.kind == .filter and std.mem.eql(u8, it.value_ptr.*.kind.filter.tag_name.span(), s)) {
+                    found_entry = it.key_ptr.*;
+                }
+            },
+            .resource => |u| while (iter.next()) |it| {
+                if (it.value_ptr.*.kind == .resource and it.value_ptr.*.kind.resource.id.eql(u)) {
+                    found_entry = it.key_ptr.*;
+                }
+            },
+        }
+    }
+
+    if (found_entry) |entry| {
+        try self.find_str.set(entry);
+    }
+
+    self.updateQueries();
+    self.request_open = true;
+}
+
 pub fn draw(self: *Self, ctx: *GameApp) !void {
-    if (c.ImGui_IsKeyDown(c.ImGuiKey_ModCtrl) and c.ImGui_IsKeyPressed(c.ImGuiKey_P)) {
+    if (self.request_open or (c.ImGui_IsKeyDown(c.ImGuiKey_ModCtrl) and c.ImGui_IsKeyPressed(c.ImGuiKey_P))) {
         if (!self.visible) {
             self.visible = true;
             c.ImGui_OpenPopup("Project Explorer", 0);
         }
         self.request_focus = true;
+        self.request_open = false;
     }
 
     const app_window_extent = ctx.windowExtent().toVec2();
@@ -139,7 +182,7 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
         defer c.ImGui_PopStyleColor();
         c.ImGui_Image(try Editor.getImGuiTexture("editor://icons/search.png"), .{ .x = input_height - 8, .y = input_height - 8 });
         c.ImGui_SameLine();
-        const drawn_tags = try drawTagsGrid(self.filters.keys(), @divTrunc(input_width, 3), input_height - 8);
+        const drawn_tags = try drawTagsGrid(self.locked_filters.keys(), self.filters.keys(), @divTrunc(input_width, 3), input_height - 8);
         c.ImGui_SameLine();
         if (drawn_tags.clicked_index) |clicked| {
             self.filters.orderedRemoveAt(clicked);
@@ -277,39 +320,18 @@ fn onResourcesReinit(self: *Self) void {
 fn indexFilterTags(self: *Self) !void {
     // file type filters
     inline for (@typeInfo(Resources.Resource.Type).Enum.fields) |ty| {
-        const entry = Entry{
-            .kind = .{
-                .filter = .{
-                    .tag_name = .{ .constant = ty.name },
-                    .predicate = &struct {
-                        fn f(_: *const Filter, it: *const Entry) bool {
-                            return switch (it.kind) {
-                                .resource => |r| @intFromEnum(r.type) == ty.value,
-                                else => false,
-                            };
-                        }
-                    }.f,
+        const thumbnail = try iconThumbnail("editor://icons/filter.png");
+        const gop = try self.index.getOrPut("File type: " ++ ty.name);
+
+        if (!gop.found_existing) {
+            gop.value_ptr.* = try self.allocator.create(Entry);
+            gop.value_ptr.*.* = Entry{
+                .kind = .{
+                    .filter = filterByResourceType(@enumFromInt(ty.value)),
                 },
-            },
-            .thumbnail = thumbnail: {
-                var void_ = {};
-                break :thumbnail Event(.{ *c.ImDrawList, *const Entry, Rect }).callback(void, &void_, struct {
-                    fn f(_: *void, drawlist: *c.ImDrawList, _: *const Entry, rect: Rect) void {
-                        const icon = Editor.getImGuiTexture("editor://icons/filter.png") catch return;
-                        c.ImDrawList_AddImage(
-                            drawlist,
-                            icon,
-                            .{ .x = rect.x, .y = rect.y },
-                            .{ .x = rect.x + rect.width, .y = rect.y + rect.height },
-                        );
-                    }
-                }.f);
-            },
-        };
-        try self.index.put(
-            "File type: " ++ ty.name,
-            entry,
-        );
+                .thumbnail = thumbnail,
+            };
+        }
     }
 
     // protocols
@@ -322,7 +344,8 @@ fn indexFilterTags(self: *Self) !void {
             self.allocator.free(protz);
             continue;
         }
-        gop.value_ptr.* = Entry{
+        gop.value_ptr.* = try self.allocator.create(Entry);
+        gop.value_ptr.*.* = Entry{
             .kind = .{
                 .filter = .{
                     .tag_name = .{ .allocated = protz },
@@ -336,20 +359,7 @@ fn indexFilterTags(self: *Self) !void {
                     }.f,
                 },
             },
-            .thumbnail = thumbnail: {
-                var void_ = {};
-                break :thumbnail Event(.{ *c.ImDrawList, *const Entry, Rect }).callback(void, &void_, struct {
-                    fn f(_: *void, drawlist: *c.ImDrawList, _: *const Entry, rect: Rect) void {
-                        const icon = Editor.getImGuiTexture("editor://icons/filter.png") catch return;
-                        c.ImDrawList_AddImage(
-                            drawlist,
-                            icon,
-                            .{ .x = rect.x, .y = rect.y },
-                            .{ .x = rect.x + rect.width, .y = rect.y + rect.height },
-                        );
-                    }
-                }.f);
-            },
+            .thumbnail = try iconThumbnail("editor://icons/filter.png"),
         };
     }
 }
@@ -374,7 +384,8 @@ fn indexResourceNode(self: *Self, node: *const Resources.ResourceNode) !void {
 fn indexResource(self: *Self, id: Uuid) !void {
     var resource = try Resources.getResource(self.allocator, id) orelse return error.ResourceNotFound;
     errdefer resource.deinit(self.allocator);
-    if (self.index.contains(resource.uri.spanZ())) {
+    const gop = try self.index.getOrPut(resource.uri.spanZ());
+    if (gop.found_existing) {
         resource.deinit(self.allocator);
         return;
     }
@@ -393,7 +404,11 @@ fn indexResource(self: *Self, id: Uuid) !void {
         }
     }.f);
 
-    try self.index.put(resource.uri.spanZ(), .{ .kind = .{ .resource = resource }, .thumbnail = thumbnail });
+    gop.value_ptr.* = try self.allocator.create(Entry);
+    gop.value_ptr.*.* = .{
+        .kind = .{ .resource = resource },
+        .thumbnail = thumbnail,
+    };
 }
 
 fn calcContiguousBonus(ranges: []const Range) isize {
@@ -423,13 +438,13 @@ fn updateQueries(self: *Self) void {
         const ranges = utils.approximateMatch(&ranges_buf, it.key_ptr.*, patt);
         if (ranges.len == 0) continue :query;
         for (self.filters.values()) |filter| {
-            if (it.value_ptr.kind == .filter) {
+            if (it.value_ptr.*.kind == .filter) {
                 // Skip already used filters.
-                if (std.mem.eql(u8, it.value_ptr.kind.filter.tag_name.span(), filter.tag_name.span())) {
+                if (std.mem.eql(u8, it.value_ptr.*.kind.filter.tag_name.span(), filter.tag_name.span())) {
                     continue :query;
                 }
                 break;
-            } else if (filter.predicate(&filter, it.value_ptr)) {
+            } else if (filter.predicate(&filter, it.value_ptr.*)) {
                 break;
             }
         } else if (self.filters.count() > 0) {
@@ -444,7 +459,7 @@ fn updateQueries(self: *Self) void {
             .ranges = ranges_buf,
             .range_count = ranges.len,
             .key = it.key_ptr.*,
-            .entry = it.value_ptr,
+            .entry = it.value_ptr.*,
         }) catch {};
     }
     std.mem.sort(Match, self.matches.items, {}, struct {
@@ -741,8 +756,8 @@ fn drawGrid(self: *Self) !bool {
     return clicked;
 }
 
-pub fn drawTagsGrid(tags: [][:0]const u8, max_width: f32, avail_height: f32) !struct { width: f32, clicked_index: ?usize } {
-    if (tags.len == 0) return .{ .width = 0, .clicked_index = null };
+pub fn drawTagsGrid(locked_tags: [][:0]const u8, tags: [][:0]const u8, max_width: f32, avail_height: f32) !struct { width: f32, clicked_index: ?usize } {
+    if (locked_tags.len == 0 and tags.len == 0) return .{ .width = 0, .clicked_index = null };
 
     const style = c.ImGui_GetStyle().*;
     const padh: f32 = 4;
@@ -757,25 +772,40 @@ pub fn drawTagsGrid(tags: [][:0]const u8, max_width: f32, avail_height: f32) !st
     var max_x: f32 = 0;
     row_heights[0] = 0;
 
-    for (tags) |tag| {
-        const text_size = c.ImGui_CalcTextSize(tag);
-        const pill_width = text_size.x + 2 * padh;
-        const pill_height = text_size.y + 2 * padv;
+    const calc = struct {
+        fn calc(
+            tt: [][:0]const u8,
+            spacing_: f32,
+            max_width_: f32,
+            row_heights_: *[64]f32,
+            row_count_: *usize,
+            current_row_: *usize,
+            current_x_: *f32,
+            max_x_: *f32,
+        ) void {
+            for (tt) |t| {
+                const text_size = c.ImGui_CalcTextSize(t);
+                const pill_width = text_size.x + 2 * padh;
+                const pill_height = text_size.y + 2 * padv;
 
-        if (pill_height > row_heights[current_row]) {
-            row_heights[current_row] = pill_height;
-        }
-        if (current_x + pill_width > max_width and current_x > 0) {
-            row_count += 1;
-            current_row += 1;
-            row_heights[current_row] = pill_height;
-            current_x = pill_width + spacing;
-        } else {
-            current_x += pill_width + spacing;
-        }
+                if (pill_height > row_heights_[current_row_.*]) {
+                    row_heights_.*[current_row_.*] = pill_height;
+                }
+                if (current_x_.* + pill_width > max_width_ and current_x_.* > 0) {
+                    row_count_.* += 1;
+                    current_row_.* += 1;
+                    row_heights_[current_row_.*] = pill_height;
+                    current_x_.* = pill_width + spacing_;
+                } else {
+                    current_x_.* += pill_width + spacing_;
+                }
 
-        max_x = @max(max_x, current_x);
-    }
+                max_x_.* = @max(max_x_.*, current_x_.*);
+            }
+        }
+    }.calc;
+
+    calc(tags, spacing, max_width, &row_heights, &row_count, &current_row, &current_x, &max_x);
 
     var vertical_offset: f32 = 0;
     if (row_count == 1) {
@@ -820,7 +850,7 @@ pub fn drawTagsGrid(tags: [][:0]const u8, max_width: f32, avail_height: f32) !st
     };
 }
 
-const Kind = union(enum) {
+pub const Kind = union(enum) {
     filter: Filter,
     resource: Resources.Resource,
 
@@ -830,11 +860,25 @@ const Kind = union(enum) {
             .filter => kind.filter.deinit(allocator),
         }
     }
+
+    pub fn eql(lhs: *const Kind, rhs: *const Kind) bool {
+        if (std.meta.activeTag(lhs.*) != std.meta.activeTag(rhs.*)) return false;
+        return switch (lhs.*) {
+            .filter => |it| it.eql(&rhs.filter),
+            .resource => |it| it.eql(&rhs.resource),
+        };
+    }
 };
 
 const Entry = struct {
+    const Thumbnail = Event(.{ *c.ImDrawList, *const Entry, Rect });
+
     kind: Kind,
-    thumbnail: Event(.{ *c.ImDrawList, *const Entry, Rect }).Callback,
+    thumbnail: Thumbnail.Callback,
+
+    pub fn deinit(self: *Entry, allocator: std.mem.Allocator) void {
+        self.kind.deinit(allocator);
+    }
 };
 
 const Match = struct {
@@ -845,19 +889,24 @@ const Match = struct {
     entry: *const Entry,
 };
 
-const Filter = struct {
+pub const Selector = union(enum) {
+    filter: []const u8,
+    resource: Uuid,
+};
+
+pub const Filter = struct {
     tag_name: union(enum) {
         constant: [:0]const u8,
         allocated: [:0]u8,
 
-        fn deinit(str: @This(), allocator: std.mem.Allocator) void {
+        pub fn deinit(str: @This(), allocator: std.mem.Allocator) void {
             return switch (str) {
                 .allocated => |s| allocator.free(s),
                 .constant => {},
             };
         }
 
-        fn span(str: @This()) [:0]const u8 {
+        pub fn span(str: @This()) [:0]const u8 {
             return switch (str) {
                 inline .constant, .allocated => |s| s,
             };
@@ -865,7 +914,40 @@ const Filter = struct {
     },
     predicate: *const fn (*const Filter, *const Entry) bool,
 
-    fn deinit(filter: *@This(), allocator: std.mem.Allocator) void {
+    pub fn deinit(filter: *@This(), allocator: std.mem.Allocator) void {
         filter.tag_name.deinit(allocator);
     }
+
+    pub fn eql(lhs: *const Filter, rhs: *const Filter) bool {
+        return std.mem.eql(u8, lhs.tag_name.span(), rhs.tag_name.span()) and lhs.predicate == rhs.predicate;
+    }
 };
+
+pub fn filterByResourceType(comptime ty: Resources.Resource.Type) Filter {
+    return .{
+        .tag_name = .{ .constant = @tagName(ty) },
+        .predicate = &struct {
+            fn f(_: *const Filter, it: *const Entry) bool {
+                return switch (it.kind) {
+                    .resource => |r| r.type == ty,
+                    else => false,
+                };
+            }
+        }.f,
+    };
+}
+
+fn iconThumbnail(uri: []const u8) !Entry.Thumbnail.Callback {
+    const icon = try Editor.getImGuiTexture(uri);
+    // imgui's ImTextureID is just a pointer to the derscriptor set
+    return Entry.Thumbnail.callback(anyopaque, @ptrFromInt(icon), struct {
+        fn f(icon_: *anyopaque, drawlist: *c.ImDrawList, _: *const Entry, rect: Rect) void {
+            c.ImDrawList_AddImage(
+                drawlist,
+                @intFromPtr(icon_),
+                .{ .x = rect.x, .y = rect.y },
+                .{ .x = rect.x + rect.width, .y = rect.y + rect.height },
+            );
+        }
+    }.f);
+}

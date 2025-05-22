@@ -6,6 +6,8 @@ const Uuid = @import("yume").Uuid;
 const assets = @import("yume").assets;
 const AssetLoader = assets.AssetLoader;
 const EditorDatabase = @import("EditorDatabase.zig");
+const ProjectExplorerWindow = @import("windows/ProjectExplorerWindow.zig");
+const Editor = @import("Editor.zig");
 const Resources = @import("Resources.zig");
 
 const Self = @This();
@@ -49,6 +51,16 @@ pub fn current() ?*Self {
         return it;
     }
     return null;
+}
+
+pub fn browseAssets(selected: ?assets.AssetHandle, opts: struct {
+    locked_filters: []const ProjectExplorerWindow.Filter = &.{},
+    filters: []const ProjectExplorerWindow.Filter = &.{},
+}) !?assets.AssetHandle {
+    const sel: ?ProjectExplorerWindow.Selector = if (selected) |sel| .{ .resource = sel.uuid } else null;
+
+    try Editor.instance().project_explorer_window.browse(sel, .{ .locked_filters = opts.locked_filters, .filters = opts.filters });
+    return selected;
 }
 
 pub fn jsonStringify(self: Self, jws: anytype) !void {

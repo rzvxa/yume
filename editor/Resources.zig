@@ -142,7 +142,7 @@ pub const Resource = struct {
         defer file.close();
     }
 
-    fn eql(
+    pub fn eql(
         lhs: *const Resource,
         rhs: *const Resource,
     ) bool {
