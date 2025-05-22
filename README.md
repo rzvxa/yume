@@ -24,7 +24,7 @@ Yume comes with tools that both artists and developers need to maximize their pr
 - **Zig Compiler:** Ensure you have the Zig `v0.13.0` installed in your `PATH`.
 - **A modern C++ Compiler:** Visual Studio 2019+, Clang 10+ or GCC 9+. Some third-party libraries require C++17.
 - **CMake:** (>= v3.16) This is a temporary dependency to avoid porting some third-party build configurations to Zig.
-- **Graphics Capabilities:** A modern graphics card capable of supporting Vulkan or Metal (for now through MoltenVk, with native Metal and DX12 on the way).
+- **Graphics Capabilities:** A modern graphics card capable of supporting Vulkan or Metal (for now through MoltenVK, with native Metal and DX12 on the way).
 - **Development Environment:** Familiarity with basic game development concepts is recommended.
 
 ### Installation
@@ -32,7 +32,7 @@ Yume comes with tools that both artists and developers need to maximize their pr
 Clone the repository and navigate into the project directory:
 
 ```bash
-git clone https://github.com/yourusername/yume.git
+git clone https://github.com/rzvxa/yume.git
 cd yume
 # build and run the editor
 zig build run
@@ -70,9 +70,9 @@ These improvements provide developers with powerful tools while avoiding some of
 
 ### Why Zig over Rust?
 
-While Rust is celebrated for its strong emphasis on memory safety and concurrency, it also breaks so easily when interacting with an unsafe API, and as soon as you break the borrow checker, the whole program becomes unsound. Unfortunately, it is a very common occurrence in game development where you have to rely on existing libraries written in C++ which can easily cause aliasing issues and break the borrow checker. It's also true the other way around, It's really hard to provide a stable ABI(even for Rust-Rust calls) which makes scripting hard to implement.
+While Rust is celebrated for its strong emphasis on memory safety and concurrency, it also breaks so easily when interacting with an unsafe API, and as soon as you break the borrow checker, the whole program becomes unsound. Unfortunately, it is a very common occurrence in game development where you have to rely on existing libraries written in C++, which can easily cause aliasing issues and break the borrow checker. It's also true the other way around, it's really hard to provide a stable ABI(even for Rust-Rust calls), which makes scripting hard to implement.
 
-This, and the fact that game logic can become overly entangled with each other, makes it really hard to prototype in a language such as Rust. Yes, for a highly optimized game world where you want to support, let's say, an MMO for 10+ years it might be feasible to invest in the extra development time required; however, it isn't a silver bullet. For a general purpose game engine, flexibility is more favorable compared to absolute safety. As long as user-generated content is running in a sandboxed scripting language, nobody cares if the game crashes after 48 hours of uptime if it means you get to play the game 3 years sooner.
+This, and the fact that game logic can become overly entangled with each other, makes it really hard to prototype in a language such as Rust. Yes, for a highly optimized game world where you want to support, let's say, an MMO for 10+ years, it might be feasible to invest in the extra development time required; however, it isn't a silver bullet. For a general-purpose game engine, flexibility is more favorable compared to absolute safety. As long as user-generated content is running in a sandboxed scripting language, nobody cares if the game crashes after 48 hours of uptime if it means you get to play the game 3 years sooner.
 
 - **No Borrow Checker:** Zig foregoes the sometimes-complex borrow checking system, offering a more straightforward approach to memory management that many find easier for iterative and experimental projects.
 - **Lower-Level Control:** Zig provides direct, uncompromised access to low-level operations similar to C but with modern conveniences and safety nets.
@@ -86,7 +86,7 @@ Not yet. Yume is in its experimental phase, and while our goal is to achieve fea
 
 ### How can I contribute?
 
-We welcome community contribution! If you're interested in helping shape Yume, please review our [Contribution Guidelines](CONTRIBUTING.md) to learn more about reporting bugs, submitting feature requests, or contributing code. Every bit of feedback helps us grow.
+We welcome community contributions! If you're interested in helping shape Yume, please review our [Contribution Guidelines](CONTRIBUTING.md) to learn more about reporting bugs, submitting feature requests, or contributing code. Every bit of feedback helps us grow.
 
 ## License
 
