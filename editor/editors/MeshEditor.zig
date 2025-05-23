@@ -13,11 +13,11 @@ const Quat = @import("yume").Quat;
 const Project = @import("../Project.zig");
 const ProjectExplorerWindow = @import("../windows/ProjectExplorerWindow.zig");
 const ComponentEditor = @import("editors.zig").ComponentEditor;
+const imutils = @import("../imutils.zig");
 
 const Self = @This();
 
 allocator: std.mem.Allocator,
-new_handle: ?assets.AssetHandle = null,
 
 pub fn init(a: std.mem.Allocator) *anyopaque {
     const ptr = a.create(@This()) catch @panic("OOM");
@@ -30,10 +30,13 @@ pub fn deinit(ptr: *anyopaque) void {
     me.allocator.destroy(me);
 }
 
-pub fn edit(ptr: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
-    const me = @as(*@This(), @ptrCast(@alignCast(ptr)));
+pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
     var mesh = ctx.world.getMut(entity, ecs.components.Mesh).?;
-    if (me.new_handle) |new_handle| {
+    const result = imutils.assetHandleInput("Mesh", mesh.handle.toAssetHandle()) catch |err| blk: {
+        std.log.err("Failed to display asset handle editor on the Mesh component, {}", .{err});
+        break :blk null;
+    };
+    if (result) |new_handle| {
         new_handle_op: {
             const new_mesh = Assets.get(new_handle.unbox(.mesh)) catch break :new_handle_op;
             Assets.release(mesh.handle) catch {
@@ -43,9 +46,6 @@ pub fn edit(ptr: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) v
             mesh.* = new_mesh.*;
         }
     }
-    me.editAssetHandle("Mesh", mesh.handle.toAssetHandle()) catch |err| {
-        std.log.err("Failed to display asset handle editor on the Mesh component, {}", .{err});
-    };
 }
 
 pub fn asComponentEditor() ComponentEditor {
@@ -54,26 +54,4 @@ pub fn asComponentEditor() ComponentEditor {
         .deinit = @This().deinit,
         .edit = @This().edit,
     };
-}
-
-fn editAssetHandle(self: *Self, label: [:0]const u8, handle: assets.AssetHandle) !void {
-    var urn = handle.uuid.urnZ();
-    c.ImGui_PushID(label);
-    defer c.ImGui_PopID();
-    _ = c.ImGui_InputText("##mesh-reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);
-    c.ImGui_SameLine();
-    if (c.ImGui_Button("...")) {
-        try Project.browseAssets(handle, .{
-            .locked_filters = &.{
-                ProjectExplorerWindow.filterByResourceType(.obj),
-            },
-            .callback = Project.OnSelectAsset.callback(Self, self, Self.onSelectAsset),
-        });
-    }
-    c.ImGui_SameLine();
-    _ = c.ImGui_Text("Mesh");
-}
-
-fn onSelectAsset(self: *Self, handle: ?assets.AssetHandle) void {
-    self.new_handle = handle;
 }

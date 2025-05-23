@@ -20,6 +20,7 @@ const lerp = std.math.lerp;
 const log = std.log.scoped(.ProjectExplorer);
 
 pub const OnPick = Event(.{*const Resources.Resource});
+pub const ModalEvent = Event(.{?*const Resources.Resource});
 
 const Self = @This();
 
@@ -42,6 +43,8 @@ index: collections.StringSentinelArrayHashMap(0, *Entry),
 matches: std.ArrayList(Match),
 selected: usize = 0,
 
+// there is only one active modal callback, set by the caller of browse.
+modal_callback: ModalEvent.List,
 on_pick: OnPick.List,
 
 pub fn init(allocator: std.mem.Allocator) !Self {
@@ -53,6 +56,7 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .index = collections.StringSentinelArrayHashMap(0, *Entry).init(allocator),
         .matches = std.ArrayList(Match).init(allocator),
 
+        .modal_callback = ModalEvent.List.init(allocator),
         .on_pick = OnPick.List.init(allocator),
     };
 }
@@ -67,6 +71,7 @@ pub fn deinit(self: *Self) void {
     Resources.onReinit().remove(.always, Resources.OnReinitEvent.callback(Self, self, &Self.onResourcesReinit)) catch {};
 
     self.invalidateCaches(.{ .hard = true });
+    self.modal_callback.deinit();
     self.on_pick.deinit();
 
     {
@@ -94,7 +99,7 @@ pub fn browse(
         locked_filters: []const Filter,
         filters: []const Filter,
         // callback only owns the entry for the duration of the call
-        callback: OnPick.Callback,
+        callback: ModalEvent.Callback,
     },
 ) !void {
     self.filters.clearRetainingCapacity();
@@ -127,7 +132,8 @@ pub fn browse(
     }
 
     self.updateQueries();
-    try self.on_pick.append(.once, opts.callback);
+    self.modal_callback.clearRetainingCapacity();
+    try self.modal_callback.append(.once, opts.callback);
     self.request_open = true;
 }
 
@@ -179,6 +185,7 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
         c.ImGui_PushStyleVar(c.ImGuiStyleVar_Alpha, self.anim_alpha);
         defer c.ImGui_PopStyleVar();
         defer c.ImGui_PopStyleColor();
+        const pre_begin_visible = self.visible;
         if (!c.ImGui_BeginPopupModal(
             "Project Explorer",
             &self.visible,
@@ -190,6 +197,9 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
                 c.ImGuiWindowFlags_NoTitleBar |
                 c.ImGuiWindowFlags_NoCollapse,
         )) {
+            if (pre_begin_visible) { // modal just closed
+                self.modal_callback.fire(.{null});
+            }
             return;
         }
         c.ImGui_SetScrollY(0);
@@ -312,6 +322,7 @@ fn use(self: *Self, match: *const Match) !void {
         },
         .resource => |*resource| {
             self.on_pick.fire(.{resource});
+            self.modal_callback.fire(.{resource});
             self.request_close = true;
         },
     }

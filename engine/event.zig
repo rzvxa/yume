@@ -110,6 +110,11 @@ pub fn Event(comptime params: anytype) type {
                 return error.CallbackNotFound;
             }
 
+            pub fn clearRetainingCapacity(list: *List) void {
+                list.always.clearRetainingCapacity();
+                list.once.clearRetainingCapacity();
+            }
+
             fn of(list: *List, comptime kind: CallKind) *std.ArrayListUnmanaged(Callback) {
                 return switch (comptime kind) {
                     .always => &list.always,

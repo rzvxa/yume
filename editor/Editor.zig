@@ -334,9 +334,7 @@ pub fn sanitizeSelection(self: *Self, sel: *Selection) void {
 pub fn draw(self: *Self) !void {
     const cmd = self.ctx.engine.beginFrame();
 
-    c.cImGui_ImplVulkan_NewFrame();
-    c.cImGui_ImplSDL3_NewFrame();
-    c.ImGui_NewFrame();
+    imutils.newFrame();
 
     c.ImGuizmo_SetOrthographic(!self.scene_window.is_perspective);
     c.ImGuizmo_BeginFrame();
@@ -453,7 +451,7 @@ pub fn draw(self: *Self) !void {
     try self.new_project_modal.show(self.ctx);
     try self.open_project_modal.show(self.ctx);
 
-    c.ImGui_Render();
+    imutils.render();
 
     // UI
     c.cImGui_ImplVulkan_RenderDrawData(c.ImGui_GetDrawData(), cmd);
@@ -582,7 +580,7 @@ fn initImGui(engine: *Engine) !void {
     var imgui_pool: c.VkDescriptorPool = undefined;
     check_vk(c.vkCreateDescriptorPool(engine.device, &pool_ci, Engine.vk_alloc_cbs, &imgui_pool)) catch @panic("Failed to create imgui descriptor pool");
 
-    _ = c.ImGui_CreateContext(null);
+    imutils.createContext();
     _ = c.cImGui_ImplSDL3_InitForVulkan(engine.window);
 
     var init_info = std.mem.zeroInit(c.ImGui_ImplVulkan_InitInfo, .{
