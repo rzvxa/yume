@@ -4,6 +4,7 @@ const log = std.log.scoped(.Project);
 const Uuid = @import("yume").Uuid;
 
 const assets = @import("yume").assets;
+const Event = @import("yume").Event;
 const AssetLoader = assets.AssetLoader;
 const EditorDatabase = @import("EditorDatabase.zig");
 const ProjectExplorerWindow = @import("windows/ProjectExplorerWindow.zig");
@@ -53,14 +54,37 @@ pub fn current() ?*Self {
     return null;
 }
 
+pub const OnSelectAsset = Event(.{?assets.AssetHandle});
+
 pub fn browseAssets(selected: ?assets.AssetHandle, opts: struct {
     locked_filters: []const ProjectExplorerWindow.Filter = &.{},
     filters: []const ProjectExplorerWindow.Filter = &.{},
-}) !?assets.AssetHandle {
+    callback: OnSelectAsset.Callback,
+}) !void {
     const sel: ?ProjectExplorerWindow.Selector = if (selected) |sel| .{ .resource = sel.uuid } else null;
 
-    try Editor.instance().project_explorer_window.browse(sel, .{ .locked_filters = opts.locked_filters, .filters = opts.filters });
-    return selected;
+    const CbType = struct {
+        allocator: std.mem.Allocator,
+        tail: OnSelectAsset.Callback,
+
+        fn f(ptr: *@This(), pick: *const Resources.Resource) void {
+            ptr.tail.call(.{.{ .uuid = pick.id, .type = pick.type.toAssetType() }});
+            ptr.allocator.destroy(ptr);
+        }
+    };
+    const cb_instance = try instance.?.allocator.create(CbType);
+
+    cb_instance.* = .{ .allocator = instance.?.allocator, .tail = opts.callback };
+
+    try Editor.instance().project_explorer_window.browse(sel, .{
+        .locked_filters = opts.locked_filters,
+        .filters = opts.filters,
+        .callback = ProjectExplorerWindow.OnPick.callback(
+            CbType,
+            cb_instance,
+            &CbType.f,
+        ),
+    });
 }
 
 pub fn jsonStringify(self: Self, jws: anytype) !void {

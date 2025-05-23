@@ -518,9 +518,9 @@ pub fn reinit(new_allocator: std.mem.Allocator) !void {
     errdefer reinit_cbs.deinit();
 
     if (singleton) |s| {
-        try reg_cbs.appendSlice(s.on_register.cbs.items);
-        try unreg_cbs.appendSlice(s.on_unregister.cbs.items);
-        try reinit_cbs.appendSlice(s.on_reinit.cbs.items);
+        try reg_cbs.copyFrom(&s.on_register);
+        try unreg_cbs.copyFrom(&s.on_unregister);
+        try reinit_cbs.copyFrom(&s.on_reinit);
         try deinit();
         singleton = null;
     }

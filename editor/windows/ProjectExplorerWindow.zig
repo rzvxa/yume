@@ -19,11 +19,14 @@ const lerp = std.math.lerp;
 
 const log = std.log.scoped(.ProjectExplorer);
 
+pub const OnPick = Event(.{*const Resources.Resource});
+
 const Self = @This();
 
 allocator: std.mem.Allocator,
 visible: bool = false,
 request_open: bool = false,
+request_close: bool = false,
 request_focus: bool = true,
 
 anim_alpha: f32 = 0,
@@ -39,6 +42,8 @@ index: collections.StringSentinelArrayHashMap(0, *Entry),
 matches: std.ArrayList(Match),
 selected: usize = 0,
 
+on_pick: OnPick.List,
+
 pub fn init(allocator: std.mem.Allocator) !Self {
     return .{
         .allocator = allocator,
@@ -47,6 +52,8 @@ pub fn init(allocator: std.mem.Allocator) !Self {
         .find_str = try imutils.ImString.init(allocator),
         .index = collections.StringSentinelArrayHashMap(0, *Entry).init(allocator),
         .matches = std.ArrayList(Match).init(allocator),
+
+        .on_pick = OnPick.List.init(allocator),
     };
 }
 
@@ -55,11 +62,13 @@ pub fn deinit(self: *Self) void {
     self.locked_filters.deinit();
     self.find_str.deinit();
 
-    Resources.onRegister().remove(Resources.OnRegisterEvent.callback(Self, self, &Self.onResourcesRegister)) catch {};
-    Resources.onUnregister().remove(Resources.OnUnregisterEvent.callback(Self, self, &Self.onResourcesUnregister)) catch {};
-    Resources.onReinit().remove(Resources.OnReinitEvent.callback(Self, self, &Self.onResourcesReinit)) catch {};
+    Resources.onRegister().remove(.always, Resources.OnRegisterEvent.callback(Self, self, &Self.onResourcesRegister)) catch {};
+    Resources.onUnregister().remove(.always, Resources.OnUnregisterEvent.callback(Self, self, &Self.onResourcesUnregister)) catch {};
+    Resources.onReinit().remove(.always, Resources.OnReinitEvent.callback(Self, self, &Self.onResourcesReinit)) catch {};
 
     self.invalidateCaches(.{ .hard = true });
+    self.on_pick.deinit();
+
     {
         defer self.index.deinit();
         var values = self.index.values();
@@ -73,15 +82,21 @@ pub fn deinit(self: *Self) void {
 pub fn setup(self: *Self) !void {
     self.onResourcesReinit();
 
-    try Resources.onRegister().append(Resources.OnRegisterEvent.callback(Self, self, &Self.onResourcesRegister));
-    try Resources.onUnregister().append(Resources.OnUnregisterEvent.callback(Self, self, &Self.onResourcesUnregister));
-    try Resources.onReinit().append(Resources.OnReinitEvent.callback(Self, self, &Self.onResourcesReinit));
+    try Resources.onRegister().append(.always, Resources.OnRegisterEvent.callback(Self, self, &Self.onResourcesRegister));
+    try Resources.onUnregister().append(.always, Resources.OnUnregisterEvent.callback(Self, self, &Self.onResourcesUnregister));
+    try Resources.onReinit().append(.always, Resources.OnReinitEvent.callback(Self, self, &Self.onResourcesReinit));
 }
 
-pub fn browse(self: *Self, selected: ?Selector, opts: struct {
-    locked_filters: []const Filter,
-    filters: []const Filter,
-}) !void {
+pub fn browse(
+    self: *Self,
+    selected: ?Selector,
+    opts: struct {
+        locked_filters: []const Filter,
+        filters: []const Filter,
+        // callback only owns the entry for the duration of the call
+        callback: OnPick.Callback,
+    },
+) !void {
     self.filters.clearRetainingCapacity();
     for (opts.locked_filters) |filter| {
         try self.filters.put(filter.tag_name.span(), filter);
@@ -112,6 +127,7 @@ pub fn browse(self: *Self, selected: ?Selector, opts: struct {
     }
 
     self.updateQueries();
+    try self.on_pick.append(.once, opts.callback);
     self.request_open = true;
 }
 
@@ -123,6 +139,12 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
         }
         self.request_focus = true;
         self.request_open = false;
+    } else if (self.request_close) {
+        if (self.visible) {
+            self.visible = false;
+            c.ImGui_CloseCurrentPopup();
+        }
+        self.request_close = false;
     }
 
     const app_window_extent = ctx.windowExtent().toVec2();
@@ -288,8 +310,9 @@ fn use(self: *Self, match: *const Match) !void {
             self.request_focus = true;
             self.updateQueries();
         },
-        .resource => {
-            log.warn("TODO resource selection", .{});
+        .resource => |*resource| {
+            self.on_pick.fire(.{resource});
+            self.request_close = true;
         },
     }
 }
@@ -850,27 +873,27 @@ pub fn drawTagsGrid(locked_tags: [][:0]const u8, tags: [][:0]const u8, max_width
     };
 }
 
-pub const Kind = union(enum) {
-    filter: Filter,
-    resource: Resources.Resource,
-
-    fn deinit(kind: *Kind, allocator: std.mem.Allocator) void {
-        switch (kind.*) {
-            .resource => kind.resource.deinit(allocator),
-            .filter => kind.filter.deinit(allocator),
-        }
-    }
-
-    pub fn eql(lhs: *const Kind, rhs: *const Kind) bool {
-        if (std.meta.activeTag(lhs.*) != std.meta.activeTag(rhs.*)) return false;
-        return switch (lhs.*) {
-            .filter => |it| it.eql(&rhs.filter),
-            .resource => |it| it.eql(&rhs.resource),
-        };
-    }
-};
-
 const Entry = struct {
+    const Kind = union(enum) {
+        filter: Filter,
+        resource: Resources.Resource,
+
+        fn deinit(kind: *Kind, allocator: std.mem.Allocator) void {
+            switch (kind.*) {
+                .resource => kind.resource.deinit(allocator),
+                .filter => kind.filter.deinit(allocator),
+            }
+        }
+
+        pub fn eql(lhs: *const Kind, rhs: *const Kind) bool {
+            if (std.meta.activeTag(lhs.*) != std.meta.activeTag(rhs.*)) return false;
+            return switch (lhs.*) {
+                .filter => |it| it.eql(&rhs.filter),
+                .resource => |it| it.eql(&rhs.resource),
+            };
+        }
+    };
+
     const Thumbnail = Event(.{ *c.ImDrawList, *const Entry, Rect });
 
     kind: Kind,
