@@ -52,49 +52,69 @@ pub fn Event(comptime params: anytype) type {
         }
 
         pub const List = struct {
-            cbs: std.ArrayList(Callback),
+            pub const CallKind = enum { always, once };
+
+            allocator: std.mem.Allocator,
+            always: std.ArrayListUnmanaged(Callback) = .{},
+            once: std.ArrayListUnmanaged(Callback) = .{},
 
             pub fn init(allocator: std.mem.Allocator) List {
-                return .{
-                    .cbs = std.ArrayList(Callback).init(allocator),
-                };
+                return .{ .allocator = allocator };
             }
 
             pub fn deinit(self: *List) void {
-                self.cbs.deinit();
+                self.always.deinit(self.allocator);
+                self.once.deinit(self.allocator);
             }
 
             pub fn fire(self: *List, args: anytype) void {
-                for (self.cbs.items) |cb| {
+                for (self.always.items) |cb| {
                     cb.call(args);
                 }
+
+                for (self.once.items) |cb| {
+                    cb.call(args);
+                }
+                self.once.clearRetainingCapacity();
             }
 
-            pub fn append(list: *List, cb: Callback) !void {
-                return list.cbs.append(cb);
+            pub fn append(list: *List, comptime kind: CallKind, cb: Callback) !void {
+                return list.of(kind).append(list.allocator, cb);
             }
 
-            pub fn appendUnique(list: *List, cb: Callback) !void {
-                for (list.cbs.items) |it| {
+            pub fn appendUnique(list: *List, comptime kind: CallKind, cb: Callback) !void {
+                for (list.of(kind).items) |it| {
                     if (it.eql(&cb)) {
                         return;
                     }
                 }
-                return list.append(cb);
+                return list.of(kind).append(cb);
             }
 
-            pub fn appendSlice(list: *List, cbs: []const Callback) !void {
-                return list.cbs.appendSlice(cbs);
+            pub fn appendSlice(list: *List, comptime kind: CallKind, cbs: []const Callback) !void {
+                return list.of(kind).appendSlice(list.allocator, cbs);
             }
 
-            pub fn remove(list: *List, cb: Callback) !void {
-                for (list.cbs.items, 0..) |it, i| {
+            pub fn copyFrom(dst: *List, src: *const List) !void {
+                try dst.appendSlice(.always, src.always.items);
+                try dst.appendSlice(.once, src.once.items);
+            }
+
+            pub fn remove(list: *List, comptime kind: CallKind, cb: Callback) !void {
+                for (list.of(kind).items, 0..) |it, i| {
                     if (it.eql(&cb)) {
-                        _ = list.cbs.orderedRemove(i);
+                        _ = list.of(kind).orderedRemove(i);
                         return;
                     }
                 }
                 return error.CallbackNotFound;
+            }
+
+            fn of(list: *List, comptime kind: CallKind) *std.ArrayListUnmanaged(Callback) {
+                return switch (comptime kind) {
+                    .always => &list.always,
+                    .once => &list.once,
+                };
             }
         };
     };

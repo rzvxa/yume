@@ -4,6 +4,7 @@ const std = @import("std");
 
 const ecs = @import("yume").ecs;
 const assets = @import("yume").assets;
+const Assets = assets.Assets;
 const GameApp = @import("yume").GameApp;
 const Vec3 = @import("yume").Vec3;
 const Mat4 = @import("yume").Mat4;
@@ -16,6 +17,7 @@ const ComponentEditor = @import("editors.zig").ComponentEditor;
 const Self = @This();
 
 allocator: std.mem.Allocator,
+new_handle: ?assets.AssetHandle = null,
 
 pub fn init(a: std.mem.Allocator) *anyopaque {
     const ptr = a.create(@This()) catch @panic("OOM");
@@ -28,9 +30,20 @@ pub fn deinit(ptr: *anyopaque) void {
     me.allocator.destroy(me);
 }
 
-pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
+pub fn edit(ptr: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
+    const me = @as(*@This(), @ptrCast(@alignCast(ptr)));
     var mesh = ctx.world.getMut(entity, ecs.components.Mesh).?;
-    editAssetHandle("Mesh", mesh.handle.toAssetHandle()) catch |err| {
+    if (me.new_handle) |new_handle| {
+        new_handle_op: {
+            const new_mesh = Assets.get(new_handle.unbox(.mesh)) catch break :new_handle_op;
+            Assets.release(mesh.handle) catch {
+                Assets.release(new_mesh) catch {};
+                break :new_handle_op;
+            };
+            mesh.* = new_mesh.*;
+        }
+    }
+    me.editAssetHandle("Mesh", mesh.handle.toAssetHandle()) catch |err| {
         std.log.err("Failed to display asset handle editor on the Mesh component, {}", .{err});
     };
 }
@@ -43,19 +56,24 @@ pub fn asComponentEditor() ComponentEditor {
     };
 }
 
-fn editAssetHandle(label: [:0]const u8, handle: assets.AssetHandle) !void {
+fn editAssetHandle(self: *Self, label: [:0]const u8, handle: assets.AssetHandle) !void {
     var urn = handle.uuid.urnZ();
     c.ImGui_PushID(label);
     defer c.ImGui_PopID();
     _ = c.ImGui_InputText("##mesh-reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);
     c.ImGui_SameLine();
     if (c.ImGui_Button("...")) {
-        const new_handle = try Project.browseAssets(handle, .{ .locked_filters = &.{ProjectExplorerWindow.filterByResourceType(.obj)} });
-        std.log.debug("old_handle: {s}, new_handle: {s}", .{
-            handle.uuid.urn(),
-            if (new_handle) |h| &h.uuid.urn() else "null",
+        try Project.browseAssets(handle, .{
+            .locked_filters = &.{
+                ProjectExplorerWindow.filterByResourceType(.obj),
+            },
+            .callback = Project.OnSelectAsset.callback(Self, self, Self.onSelectAsset),
         });
     }
     c.ImGui_SameLine();
     _ = c.ImGui_Text("Mesh");
+}
+
+fn onSelectAsset(self: *Self, handle: ?assets.AssetHandle) void {
+    self.new_handle = handle;
 }

@@ -113,8 +113,12 @@ pub const Assets = struct {
     }
 
     pub fn release(asset: anytype) !void {
-        const handle: AssetHandle =
-            if (comptime @hasDecl(@TypeOf(asset), "toAssetHandle"))
+        comptime var actual_ty = @TypeOf(asset);
+        const ty_info = @typeInfo(actual_ty);
+        if (ty_info == .Pointer) {
+            actual_ty = ty_info.Pointer.child;
+        }
+        const handle: AssetHandle = if (comptime @hasDecl(actual_ty, "toAssetHandle"))
             asset.toAssetHandle()
         else
             asset.handle.toAssetHandle();
