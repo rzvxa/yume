@@ -67,8 +67,12 @@ pub fn browseAssets(selected: ?assets.AssetHandle, opts: struct {
         allocator: std.mem.Allocator,
         tail: OnSelectAsset.Callback,
 
-        fn f(ptr: *@This(), pick: *const Resources.Resource) void {
-            ptr.tail.call(.{.{ .uuid = pick.id, .type = pick.type.toAssetType() }});
+        fn f(ptr: *@This(), pick: ?*const Resources.Resource) void {
+            if (pick) |it| {
+                ptr.tail.call(.{.{ .uuid = it.id, .type = it.type.toAssetType() }});
+            } else {
+                ptr.tail.call(.{null});
+            }
             ptr.allocator.destroy(ptr);
         }
     };
@@ -79,7 +83,7 @@ pub fn browseAssets(selected: ?assets.AssetHandle, opts: struct {
     try Editor.instance().project_explorer_window.browse(sel, .{
         .locked_filters = opts.locked_filters,
         .filters = opts.filters,
-        .callback = ProjectExplorerWindow.OnPick.callback(
+        .callback = ProjectExplorerWindow.ModalEvent.callback(
             CbType,
             cb_instance,
             &CbType.f,

@@ -2,7 +2,29 @@ const c = @import("clibs");
 const std = @import("std");
 
 const utils = @import("yume").utils;
+const assets = @import("yume").assets;
+
 const Editor = @import("Editor.zig");
+const Project = @import("Project.zig");
+const ProjectExplorerWindow = @import("windows/ProjectExplorerWindow.zig");
+
+var imutils_context: Context = undefined;
+
+pub fn createContext() void {
+    imutils_context = .{
+        .imgui_context = c.ImGui_CreateContext(null).?,
+    };
+}
+
+pub inline fn newFrame() void {
+    c.cImGui_ImplVulkan_NewFrame();
+    c.cImGui_ImplSDL3_NewFrame();
+    c.ImGui_NewFrame();
+}
+
+pub inline fn render() void {
+    c.ImGui_Render();
+}
 
 pub const ImString = struct {
     allocator: std.mem.Allocator,
@@ -291,5 +313,37 @@ pub fn fourwayInputs() enum { none, up, down, left, right } {
     }
 }
 
-// pub fn fromRainbow(n: anytype) c.ImU32 {
-// }
+pub fn assetHandleInput(label: [*:0]const u8, handle: assets.AssetHandle) !?assets.AssetHandle {
+    var urn = handle.uuid.urnZ();
+    c.ImGui_PushID(label);
+    defer c.ImGui_PopID();
+    const id = c.ImGui_GetItemID();
+    _ = c.ImGui_InputText("##reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);
+    c.ImGui_SameLine();
+    if (c.ImGui_Button("...")) {
+        imutils_context.active_asset_handle_input = id;
+        try Project.browseAssets(handle, .{
+            .locked_filters = &.{
+                ProjectExplorerWindow.filterByResourceType(.obj),
+            },
+            .callback = Project.OnSelectAsset.callback(Context, &imutils_context, Context.onSelectAsset),
+        });
+    }
+    c.ImGui_SameLine();
+    _ = c.ImGui_Text("Mesh");
+
+    if (imutils_context.active_asset_handle_input == id) {
+        return imutils_context.new_asset_handle;
+    }
+    return null;
+}
+
+const Context = struct {
+    imgui_context: *c.ImGuiContext,
+    active_asset_handle_input: c.ImGuiID = 0,
+    new_asset_handle: ?assets.AssetHandle = null,
+
+    fn onSelectAsset(ctx: *Context, handle: ?assets.AssetHandle) void {
+        ctx.new_asset_handle = handle;
+    }
+};
