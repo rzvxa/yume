@@ -41,6 +41,8 @@ pub const Resource = struct {
                 .fbx
             else if (seql(u8, ext, ".png"))
                 .png
+            else if (seql(u8, ext, ".vert") or seql(u8, ext, ".frag"))
+                .shader
             else
                 .unknown;
         }
@@ -817,21 +819,6 @@ pub fn onUnregister() *OnUnregisterEvent.List {
 
 pub fn onReinit() *OnReinitEvent.List {
     return &instance().on_reinit;
-}
-
-// TODO: shaders should register like any other resource
-fn registerBuiltinShader(urn: []const u8, path: []const u8) !void {
-    const self = instance();
-    const id = try Uuid.fromUrnSlice(urn);
-    const editor_root = try Editor.rootDir(self.allocator);
-    defer self.allocator.free(editor_root);
-    const uri = try std.fmt.allocPrint(self.allocator, "builtin-shaders://{s}", .{path});
-    try self.resources.put(id, Resource{
-        .id = id,
-        .uri = try Uri.initWithProtocolLen(self.allocator, uri, "builtin-shaders".len),
-        .type = .shader,
-    });
-    try self.resources_index.put(uri, id);
 }
 
 // if resource isn't a project asset this function has undefined behavior.
