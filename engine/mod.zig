@@ -14,6 +14,9 @@ pub const VulkanEngine = @import("VulkanEngine.zig");
 pub const vki = @import("vulkan_init.zig");
 pub const textures = @import("textures.zig");
 
+pub const shaders = @import("shaders.zig");
+pub const Shader = shaders.Shader;
+
 pub const assets = @import("assets.zig");
 pub const Assets = assets.Assets;
 pub const AssetHandle = assets.AssetHandle;

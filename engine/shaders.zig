@@ -11,10 +11,12 @@ pub const Shader = struct {
             fragment: Uuid,
         };
 
+        name: [:0]const u8,
         passes: Passes,
         layouts: []Engine.UniformBindingKind,
 
         pub fn deinit(def: *Def, allocator: std.mem.Allocator) void {
+            allocator.free(def.name);
             allocator.free(def.layouts);
         }
     };
