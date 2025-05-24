@@ -23,6 +23,7 @@ pub const Resource = struct {
         // registered as normal json files.
         project,
         scene,
+        shader_stage,
         shader,
         mat,
         obj,
@@ -42,6 +43,8 @@ pub const Resource = struct {
             else if (seql(u8, ext, ".png"))
                 .png
             else if (seql(u8, ext, ".vert") or seql(u8, ext, ".frag"))
+                .shader_stage
+            else if (seql(u8, ext, ".shader"))
                 .shader
             else
                 .unknown;
@@ -55,7 +58,7 @@ pub const Resource = struct {
 
         pub fn toAssetType(self: Type) assets.AssetType {
             return switch (self) {
-                .shader => .binary, // TODO: we need to treat shaders as assets, use .shader
+                .shader, .shader_stage => .binary, // TODO: we need to treat shaders as assets, use .shader
                 .unknown, .project => .binary,
                 .scene => .scene,
                 .mat => .material,
@@ -451,8 +454,11 @@ pub fn init(allocator: std.mem.Allocator) !void {
         const cat = "builtin-shaders";
         _ = try register(.{ .urn = "cf64bfc9-703c-43b0-9d01-c8032706872c", .path = "simple.vert", .category = cat });
         _ = try register(.{ .urn = "79d1e1cc-607d-491c-b2e8-d1d3a44bd6a4", .path = "pbr.frag", .category = cat });
+        _ = try register(.{ .urn = "361d3e88-c823-41fa-821d-5a7811af41ce", .path = "pbr.shader", .category = cat });
         _ = try register(.{ .urn = "8b4db7d0-33a6-4f42-96cc-7b1d88566f27", .path = "default_unlit.frag", .category = cat });
+        _ = try register(.{ .urn = "7166c8c1-9f74-4093-b626-e226d4ce63ff", .path = "default_unlit.shader", .category = cat });
         _ = try register(.{ .urn = "9939ab1b-d72c-4463-b039-58211f2d6531", .path = "textured_unlit.frag", .category = cat });
+        _ = try register(.{ .urn = "603b93fe-9d75-48af-88f5-3c2af8e72b0b", .path = "textured_unlit.shader", .category = cat });
     }
 
     { // editor resources
