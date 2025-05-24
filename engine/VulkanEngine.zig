@@ -1568,3 +1568,5 @@ pub fn uniformBindingLayoutHash(layout: []const UniformBindingKind) u32 {
 
     return hash;
 }
+
+pub const ShaderModule = c.VkShaderModule;
