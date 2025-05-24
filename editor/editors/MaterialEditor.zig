@@ -10,6 +10,8 @@ const Quat = @import("yume").Quat;
 
 const ComponentEditor = @import("editors.zig").ComponentEditor;
 
+const Resources = @import("../Resources.zig");
+
 const Self = @This();
 
 allocator: std.mem.Allocator,
@@ -27,14 +29,20 @@ pub fn deinit(ptr: *anyopaque) void {
 
 pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
     var mat = ctx.world.getMut(entity, ecs.components.Material).?;
+    if (c.ImGui_BeginCombo("Shader", "selected shader", c.ImGuiComboFlags_None)) {
+        // Resources.findResourceNode
+        defer c.ImGui_EndCombo();
+        _ = c.ImGui_Selectable("A");
+        _ = c.ImGui_Selectable("PBR");
+    }
     c.ImGui_PushID("material-reference");
+    defer c.ImGui_PopID();
     var urn = mat.handle.uuid.urnZ();
     _ = c.ImGui_InputText("##material-reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);
     c.ImGui_SameLine();
     _ = c.ImGui_Button("...");
     c.ImGui_SameLine();
     _ = c.ImGui_Text("Material");
-    c.ImGui_PopID();
 }
 
 pub fn asComponentEditor() ComponentEditor {

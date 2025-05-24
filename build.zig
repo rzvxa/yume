@@ -189,7 +189,6 @@ pub fn build(b: *std.Build) !void {
     run_step.dependOn(&run_cmd.step);
 
     try build_all_resources(b, .prefix, "resources", "resources");
-    try build_all_shaders(b, .prefix, "shaders", "shaders");
 }
 
 fn build_all_resources(
@@ -215,6 +214,8 @@ fn build_all_resources(
             else => {},
         }
     }
+
+    return build_all_shaders(b, installdir, srcdir, outdir);
 }
 
 fn build_all_shaders(
@@ -223,8 +224,7 @@ fn build_all_shaders(
     srcdir: []const u8,
     outdir: []const u8,
 ) !void {
-    const shader_ext = "glsl";
-    const built_shader_ext = "spv";
+    const shader_exts = [_][]const u8{ "vert", "frag" };
 
     const shaders_dir = try b.build_root.handle.openDir(srcdir, .{ .iterate = true });
 
@@ -232,12 +232,17 @@ fn build_all_shaders(
     while (try file_it.next()) |entry| {
         if (entry.kind == .file) {
             const ext = std.fs.path.extension(entry.name);
-            if (ext.len > 1 and std.mem.eql(u8, ext[1..], shader_ext)) {
+            if (ext.len <= 1) continue;
+            const is_shader = blk: for (shader_exts) |shader_ext| {
+                if (std.mem.eql(u8, ext[1..], shader_ext)) {
+                    break :blk true;
+                }
+            } else false;
+            if (is_shader) {
                 const basename = std.fs.path.basename(entry.name);
-                const name = basename[0 .. basename.len - ext.len];
                 std.debug.print("Found shader file to compile: {s}.\n", .{entry.name});
-                const src = try std.fmt.allocPrint(b.allocator, "{s}/{s}.{s}", .{ srcdir, name, shader_ext });
-                const out = try std.fmt.allocPrint(b.allocator, "{s}/{s}.{s}", .{ outdir, name, built_shader_ext });
+                const src = try std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ srcdir, basename });
+                const out = try std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ outdir, basename });
                 build_shader(b, installdir, src, out);
             }
         }
