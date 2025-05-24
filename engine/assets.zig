@@ -251,13 +251,24 @@ pub const Assets = struct {
         const matjson = try instance.loader(instance.allocator, handle.uuid, 20_000);
         defer instance.allocator.free(matjson);
 
-        const matparsed = std.json.parseFromSlice(
+        const mat_parsed = std.json.parseFromSlice(
             MaterialDef,
             instance.allocator,
             matjson,
             .{},
         ) catch @panic("Failed to parse the material json");
-        defer matparsed.deinit();
+        defer mat_parsed.deinit();
+
+        const shader_json = try instance.loader(instance.allocator, mat_parsed.value.shader, 20_000);
+        defer instance.allocator.free(shader_json);
+
+        const shader_parsed = std.json.parseFromSlice(
+            ShaderDef,
+            instance.allocator,
+            shader_json,
+            .{},
+        ) catch @panic("Failed to parse the shader json");
+        defer shader_parsed.deinit();
 
         const material = try instance.allocator.create(Material);
 
@@ -349,7 +360,7 @@ pub const Assets = struct {
         pipeline_builder.vertex_input_state.pVertexBindingDescriptions = vertex_descritpion.bindings.ptr;
         pipeline_builder.vertex_input_state.vertexBindingDescriptionCount = @as(u32, @intCast(vertex_descritpion.bindings.len));
 
-        const vert_code = try instance.loader(instance.allocator, matparsed.value.shader.passes.vertex, 20_000);
+        const vert_code = try instance.loader(instance.allocator, shader_parsed.value.passes.vertex, 20_000);
         defer instance.allocator.free(vert_code);
         const vert_module = instance.engine.createShaderModule(vert_code) orelse null;
         defer c.vkDestroyShaderModule(instance.engine.device, vert_module, Engine.vk_alloc_cbs);
@@ -366,9 +377,9 @@ pub const Assets = struct {
         var set_layouts = [3]c.VkDescriptorSetLayout{
             instance.engine.global_set_layout,
             instance.engine.object_set_layout,
-            instance.engine.getDescriptorSetLayout(matparsed.value.shader.layouts) catch @panic("Failed to create shader resouces descriptor set layout"),
+            instance.engine.getDescriptorSetLayout(shader_parsed.value.layouts) catch @panic("Failed to create shader resouces descriptor set layout"),
         };
-        const resources_handles = try instance.allocator.alloc(AssetHandle, matparsed.value.resources.len);
+        const resources_handles = try instance.allocator.alloc(AssetHandle, mat_parsed.value.resources.len);
 
         // Allocate descriptor set for shader resources
         const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
@@ -381,7 +392,7 @@ pub const Assets = struct {
         var resource_set: c.VkDescriptorSet = undefined;
         check_vk(c.vkAllocateDescriptorSets(instance.engine.device, &descriptor_set_alloc_info, &resource_set)) catch @panic("Failed to allocate descriptor set");
 
-        for (matparsed.value.shader.layouts, matparsed.value.resources, 0..) |layout, resource, i| {
+        for (shader_parsed.value.layouts, mat_parsed.value.resources, 0..) |layout, resource, i| {
             switch (layout) {
                 .texture => {
                     const tex = Self.get((ImageHandle{ .uuid = resource.? }).toTexture()) catch @panic("Failed to load texture");
@@ -435,7 +446,7 @@ pub const Assets = struct {
             &pipeline_layout,
         )) catch @panic("Failed to create textured mesh pipeline layout");
 
-        const frag_code = try instance.loader(instance.allocator, matparsed.value.shader.passes.fragment, 20_000);
+        const frag_code = try instance.loader(instance.allocator, shader_parsed.value.passes.fragment, 20_000);
         defer instance.allocator.free(frag_code);
         const frag_module = instance.engine.createShaderModule(frag_code) orelse null;
         defer c.vkDestroyShaderModule(instance.engine.device, frag_module, Engine.vk_alloc_cbs);
@@ -680,7 +691,7 @@ const ShaderDef = struct {
 
 const MaterialDef = struct {
     name: []const u8,
-    shader: ShaderDef,
+    shader: Uuid,
     resources: []?Uuid,
 
     pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, opts: anytype) !@This() {
@@ -711,7 +722,7 @@ const MaterialDef = struct {
                     },
                 };
             } else if (std.mem.eql(u8, field_name, "shader")) {
-                result.shader = try std.json.innerParse(ShaderDef, a, jrs, opts);
+                result.shader = try std.json.innerParse(Uuid, a, jrs, opts);
             } else if (std.mem.eql(u8, field_name, "resources")) {
                 resources = try std.json.innerParse([]?Uuid, a, jrs, opts);
             } else {
