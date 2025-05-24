@@ -8,6 +8,8 @@ const Uuid = @import("uuid.zig").Uuid;
 const vki = @import("vulkan_init.zig");
 const check_vk = vki.check_vk;
 
+const assets = @import("assets.zig");
+
 const math3d = @import("math3d.zig");
 const Vec2 = math3d.Vec2;
 const Vec3 = math3d.Vec3;
@@ -36,6 +38,7 @@ pub const AllocatedBuffer = extern struct {
 };
 
 pub const AllocatedImage = extern struct {
+    handle: assets.ImageHandle,
     image: c.VkImage,
     allocation: c.VmaAllocation,
 };

@@ -14,7 +14,7 @@ const Vec2U = math3d.Vec2U;
 const Vec3 = math3d.Vec3;
 
 const Assets = @import("assets.zig").Assets;
-const SceneAssetHandle = @import("assets.zig").SceneAssetHandle;
+const SceneHandle = @import("assets.zig").SceneHandle;
 
 const Scene = @import("scene.zig").Scene;
 
@@ -39,7 +39,6 @@ components: std.StringHashMap(ecs.ComponentDef),
 world: ecs.World,
 scene_root: ecs.Entity,
 scene: *Scene,
-scene_handle: ?SceneAssetHandle = null,
 
 delta: f32 = 0.016,
 
@@ -161,11 +160,15 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) !void {
         if (comptime std.meta.hasMethod(Dispatcher, "endFrame")) {
             d.endFrame();
         }
+
+        try Assets.collect(.{}); // TODO: we shouldn't collect unused assets every frame
     }
 }
 
 pub fn deinit(self: *Self) void {
-    if (self.scene_handle == null) {
+    if (self.scene.handle) |handle| {
+        Assets.release(handle.toAssetHandle()) catch {};
+    } else {
         self.scene.deinit();
     }
     self.world.deinit();
@@ -175,16 +178,12 @@ pub fn deinit(self: *Self) void {
     self.allocator.destroy(self);
 }
 
-pub fn loadScene(self: *Self, scene_id: Uuid) !void {
-    const old_handle = self.scene_handle;
+pub fn loadScene(self: *Self, handle: SceneHandle) !void {
     var old_scene = self.scene;
-    self.scene_handle = try Assets.loadScene(scene_id);
-    self.scene = try Assets.getScene(self.scene_handle.?);
+    self.scene = try Assets.get(handle);
 
-    if (old_handle) |handle| {
-        if (handle.uuid.raw != scene_id.raw) {
-            try Assets.unload(handle.toAssetHandle());
-        }
+    if (old_scene.handle) |old_handle| {
+        try Assets.release(old_handle.toAssetHandle());
     } else {
         old_scene.deinit();
     }

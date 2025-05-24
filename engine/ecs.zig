@@ -5,6 +5,7 @@ const log = std.log.scoped(.ecs);
 const Mat4 = @import("math3d.zig").Mat4;
 const GameApp = @import("GameApp.zig");
 const Uuid = @import("uuid.zig").Uuid;
+const assets = @import("assets.zig");
 const Dynamic = @import("serialization/dynamic.zig").Dynamic;
 
 pub const TypeId = c.ecs_id_t;
@@ -192,7 +193,10 @@ pub const World = struct {
             }.f else null,
             .serialize = if (@hasDecl(T, "serialize")) struct {
                 pub fn f(ptr: *const anyopaque, allocator: *const std.mem.Allocator) callconv(.C) SerializationResult {
-                    const result = T.serialize(@ptrCast(@alignCast(ptr)), allocator.*) catch return .{ .ok = false };
+                    const result = T.serialize(@ptrCast(@alignCast(ptr)), allocator.*) catch |err| {
+                        log.err("serialization encountered an error, {}", .{err});
+                        return .{ .ok = false };
+                    };
                     return .{ .ok = true, .result = result };
                 }
             }.f else if (@hasDecl(T, "serialize"))
@@ -205,7 +209,10 @@ pub const World = struct {
                 }
                 break :blk struct {
                     pub fn f(ptr: *anyopaque, value: *const Dynamic, allocator: *const std.mem.Allocator) callconv(.C) bool {
-                        T.deserialize(@ptrCast(@alignCast(ptr)), value, allocator.*) catch return false;
+                        T.deserialize(@ptrCast(@alignCast(ptr)), value, allocator.*) catch |err| {
+                            log.err("deserialization encountered an error, {}", .{err});
+                            return false;
+                        };
                         return true;
                     }
                 }.f;
@@ -635,6 +642,12 @@ pub const World = struct {
 pub const ResourceResolverResult = extern struct {
     found: bool,
     uuid: Uuid,
+    type: assets.AssetType,
+
+    pub fn toAssetHandle(rrr: ResourceResolverResult) !assets.AssetHandle {
+        if (!rrr.found) return error.ResourceNotFound;
+        return .{ .uuid = rrr.uuid, .type = rrr.type };
+    }
 };
 pub const ResourceResolver = *const fn (path: [*:0]const u8) callconv(.C) ResourceResolverResult;
 

@@ -3,8 +3,12 @@ const log = std.log.scoped(.Project);
 
 const Uuid = @import("yume").Uuid;
 
-const AssetLoader = @import("yume").assets.AssetLoader;
+const assets = @import("yume").assets;
+const Event = @import("yume").Event;
+const AssetLoader = assets.AssetLoader;
 const EditorDatabase = @import("EditorDatabase.zig");
+const ProjectExplorerWindow = @import("windows/ProjectExplorerWindow.zig");
+const Editor = @import("Editor.zig");
 const Resources = @import("Resources.zig");
 
 const Self = @This();
@@ -16,7 +20,7 @@ allocator: std.mem.Allocator,
 yume_version: std.SemanticVersion = @import("yume").version,
 project_name: []const u8,
 scenes: std.ArrayList(Uuid),
-default_scene: Uuid,
+default_scene: assets.SceneHandle,
 
 pub fn load(allocator: std.mem.Allocator, path: []const u8) !void {
     if (instance) |*ins| {
@@ -48,6 +52,43 @@ pub fn current() ?*Self {
         return it;
     }
     return null;
+}
+
+pub const OnSelectAsset = Event(.{?assets.AssetHandle});
+
+pub fn browseAssets(selected: ?assets.AssetHandle, opts: struct {
+    locked_filters: []const ProjectExplorerWindow.Filter = &.{},
+    filters: []const ProjectExplorerWindow.Filter = &.{},
+    callback: OnSelectAsset.Callback,
+}) !void {
+    const sel: ?ProjectExplorerWindow.Selector = if (selected) |sel| .{ .resource = sel.uuid } else null;
+
+    const CbType = struct {
+        allocator: std.mem.Allocator,
+        tail: OnSelectAsset.Callback,
+
+        fn f(ptr: *@This(), pick: ?*const Resources.Resource) void {
+            if (pick) |it| {
+                ptr.tail.call(.{.{ .uuid = it.id, .type = it.type.toAssetType() }});
+            } else {
+                ptr.tail.call(.{null});
+            }
+            ptr.allocator.destroy(ptr);
+        }
+    };
+    const cb_instance = try instance.?.allocator.create(CbType);
+
+    cb_instance.* = .{ .allocator = instance.?.allocator, .tail = opts.callback };
+
+    try Editor.instance().project_explorer_window.browse(sel, .{
+        .locked_filters = opts.locked_filters,
+        .filters = opts.filters,
+        .callback = ProjectExplorerWindow.ModalEvent.callback(
+            CbType,
+            cb_instance,
+            &CbType.f,
+        ),
+    });
 }
 
 pub fn jsonStringify(self: Self, jws: anytype) !void {
@@ -111,7 +152,7 @@ pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, o: anytype) !Self {
         } else if (std.mem.eql(u8, field_name, "scenes")) {
             result.scenes = try parseScenes(a, jrs);
         } else if (std.mem.eql(u8, field_name, "default_scene")) {
-            result.default_scene = try Uuid.jsonParse(a, jrs, o);
+            result.default_scene = try assets.SceneHandle.jsonParse(a, jrs, o);
         } else {
             try jrs.skipValue();
         }

@@ -7,7 +7,8 @@ const m3d = @import("../math3d.zig");
 
 const ecs = @import("../ecs.zig");
 const GameApp = @import("../GameApp.zig");
-const Assets = @import("../assets.zig").Assets;
+const assets = @import("../assets.zig");
+const Assets = assets.Assets;
 const Dynamic = @import("../serialization/dynamic.zig").Dynamic;
 
 const Uuid = @import("../uuid.zig").Uuid;
@@ -109,7 +110,7 @@ pub const BoundingBox = extern struct {
 };
 
 pub const Mesh = extern struct {
-    uuid: Uuid,
+    handle: assets.MeshHandle,
     vertices_count: usize,
     vertices: [*c]Vertex,
     bounds: BoundingBox,
@@ -119,103 +120,36 @@ pub const Mesh = extern struct {
         return "editor://icons/mesh.png";
     }
 
-    pub fn default(ptr: *Mesh, _: ecs.Entity, _: *GameApp, rr: ecs.ResourceResolver) callconv(.C) bool {
-        const cube = rr("builtin://cube.obj");
-        if (!cube.found) {
-            return false;
-        }
+    pub fn deinit(self: *Mesh) void {
+        Assets.release(self.handle) catch {};
+    }
 
-        ptr.* = (Assets.getOrLoadMesh(cube.uuid) catch return false).*;
+    pub fn default(ptr: *Mesh, _: ecs.Entity, _: *GameApp, rr: ecs.ResourceResolver) callconv(.C) bool {
+        const handle = rr("builtin://cube.obj").toAssetHandle() catch |err| {
+            log.err("encountered error on creating the default mesh, {}", .{err});
+            return false;
+        };
+
+        ptr.* = (Assets.get(handle.unbox(.mesh)) catch return false).*;
         return true;
     }
 
     pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {
-        return .{ .type = .string, .value = .{ .string = try allocator.dupeZ(u8, &self.uuid.urn()) } };
+        return .{ .type = .string, .value = .{ .string = try allocator.dupeZ(u8, &self.handle.uuid.urn()) } };
     }
 
     pub fn deserialize(self: *@This(), value: *const Dynamic, _: std.mem.Allocator) !void {
         const urn = try value.expectString();
         const uuid = try Uuid.fromUrnSlice(std.mem.span(urn));
-        self.* = (try Assets.getOrLoadMesh(uuid)).*;
+        self.* = (try Assets.get(assets.MeshHandle{ .uuid = uuid })).*;
     }
 };
 
-pub fn load_from_obj(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
-    var obj_mesh = obj_loader.parse(allocator, buffer, ":memory:") catch |err| {
-        std.log.err("Failed to load obj file: {s}", .{@errorName(err)});
-        unreachable;
-    };
-    defer obj_mesh.deinit();
-
-    var vb = struct {
-        vertices: std.ArrayList(Vertex),
-        bounds: BoundingBox,
-
-        fn builder(a: std.mem.Allocator) @This() {
-            return .{
-                .vertices = std.ArrayList(Vertex).init(a),
-                .bounds = .{
-                    .mins = Vec3.scalar(std.math.floatMax(f32)),
-                    .maxs = Vec3.scalar(std.math.floatMin(f32)),
-                },
-            };
-        }
-
-        // get (len - n)'th element
-        fn getFromEnd(self: *@This(), n: usize) Vertex {
-            return self.vertices.items[self.vertices.items.len - n];
-        }
-
-        fn append(self: *@This(), vert: Vertex) void {
-            self.bounds.accumulate(vert.position);
-            self.vertices.append(vert) catch @panic("OOM");
-        }
-    }.builder(allocator);
-
-    for (obj_mesh.objects) |object| {
-        var index_count: usize = 0;
-        for (object.face_vertices) |face_vx_count| {
-            if (face_vx_count < 3) {
-                @panic("Face has fewer than 3 vertices. Not a valid polygon.");
-            }
-
-            for (0..face_vx_count) |vx_index| {
-                const obj_index = object.indices[index_count];
-                const pos = obj_mesh.vertices[obj_index.vertex];
-                const nml = obj_mesh.normals[obj_index.normal];
-                const uvs = obj_mesh.uvs[obj_index.uv];
-
-                const vx = Vertex{
-                    .position = Vec3.make(pos[0], pos[1], pos[2]),
-                    .normal = Vec3.make(nml[0], nml[1], nml[2]),
-                    .color = Vec3.make(nml[0], nml[1], nml[2]),
-                    .uv = Vec2.make(uvs[0], 1.0 - uvs[1]),
-                };
-
-                // Triangulate the polygon
-                if (vx_index > 2) {
-                    const v0 = vb.getFromEnd(3);
-                    const v1 = vb.getFromEnd(1);
-                    vb.append(v0);
-                    vb.append(v1);
-                }
-
-                vb.append(vx);
-
-                index_count += 1;
-            }
-        }
-    }
-
-    return Mesh{
-        .uuid = Uuid.new(),
-        .vertices_count = vb.vertices.items.len,
-        .vertices = (vb.vertices.toOwnedSlice() catch @panic("Failed to make owned slice")).ptr,
-        .bounds = vb.bounds,
-    };
-}
-
-pub fn load_from_obj2(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
+pub fn load_from_obj(
+    allocator: std.mem.Allocator,
+    handle: assets.MeshHandle,
+    buffer: []const u8,
+) Mesh {
     const smooth = false;
     var computedNormalsUsed: bool = false;
     var err: c.ufbx_error = std.mem.zeroes(c.ufbx_error);
@@ -357,7 +291,7 @@ pub fn load_from_obj2(allocator: std.mem.Allocator, buffer: []const u8) Mesh {
     }
 
     return Mesh{
-        .uuid = Uuid.new(),
+        .handle = handle,
         .vertices_count = vb.vertices.items.len,
         .vertices = (vb.vertices.toOwnedSlice() catch @panic("Failed to make owned slice")).ptr,
         .bounds = vb.bounds,

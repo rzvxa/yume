@@ -40,7 +40,7 @@ pub fn deinit(self: *Self) void {
 
 pub fn draw(self: *Self) !void {
     if (c.ImGui_Begin("Logs", null, c.ImGuiWindowFlags_NoCollapse)) {
-        var edstore = &EditorDatabase.storage().logs;
+        var edb = &EditorDatabase.storage().logs;
         const new_logs = logs_harness.drainInto(&self.logs) catch @panic("OOM");
         for (self.logs.items[self.logs.items.len - new_logs ..]) |log| {
             try self.scopes.put(log.scope, {});
@@ -58,7 +58,7 @@ pub fn draw(self: *Self) !void {
                 logs_harness.free(self.logs.items);
                 self.logs.clearAndFree();
                 self.scopes.clearRetainingCapacity();
-                edstore.scopes.clearRetainingCapacity();
+                edb.scopes.clearRetainingCapacity();
             }
             c.ImGui_SameLine();
             {
@@ -72,7 +72,7 @@ pub fn draw(self: *Self) !void {
                     preview_writer.print("scopes: ", .{}) catch {};
                     const initial_pos = preview_stream.getPos() catch {};
                     var first = true;
-                    for (edstore.scopes.keys()) |selected| {
+                    for (edb.scopes.keys()) |selected| {
                         if (first) {
                             first = false;
                         } else {
@@ -83,14 +83,14 @@ pub fn draw(self: *Self) !void {
                         }
                     }
 
-                    if (edstore.scopes.count() == self.scopes.count()) {
+                    if (edb.scopes.count() == self.scopes.count()) {
                         preview_stream.seekTo(initial_pos) catch {};
                         if (self.scopes.count() == 0) {
                             preview_writer.print("Empty", .{}) catch {};
                         } else {
                             preview_writer.print("All", .{}) catch {};
                         }
-                    } else if (edstore.scopes.count() == 0) {
+                    } else if (edb.scopes.count() == 0) {
                         preview_stream.seekTo(initial_pos) catch {};
                         preview_writer.print("None", .{}) catch {};
                     }
@@ -112,12 +112,12 @@ pub fn draw(self: *Self) !void {
                     c.ImGui_PushItemFlag(c.ImGuiItemFlags_AutoClosePopups, false);
                     defer c.ImGui_PopItemFlag();
                     for (self.scopes.keys()) |scope| {
-                        var selected = edstore.scopes.contains(scope);
+                        var selected = edb.scopes.contains(scope);
                         if (c.ImGui_SelectableBoolPtr(scope, &selected, c.ImGuiSelectableFlags_None)) {
                             if (selected) {
-                                try edstore.scopes.put(scope, {});
+                                try edb.scopes.put(scope, {});
                             } else {
-                                _ = edstore.scopes.orderedRemove(scope);
+                                _ = edb.scopes.orderedRemove(scope);
                             }
                         }
                     }
@@ -152,7 +152,7 @@ pub fn draw(self: *Self) !void {
 
             filterToggleButton(
                 "error",
-                &edstore.filters.err,
+                &edb.filters.err,
                 try Editor.getImGuiTexture("editor://icons/error.png"),
                 try Editor.getImGuiTexture("editor://icons/error-mono.png"),
             );
@@ -160,7 +160,7 @@ pub fn draw(self: *Self) !void {
             c.ImGui_SetCursorPos(cursor);
             filterToggleButton(
                 "warning",
-                &edstore.filters.warn,
+                &edb.filters.warn,
                 try Editor.getImGuiTexture("editor://icons/warning.png"),
                 try Editor.getImGuiTexture("editor://icons/warning-mono.png"),
             );
@@ -168,7 +168,7 @@ pub fn draw(self: *Self) !void {
             c.ImGui_SetCursorPos(cursor);
             filterToggleButton(
                 "info",
-                &edstore.filters.info,
+                &edb.filters.info,
                 try Editor.getImGuiTexture("editor://icons/info.png"),
                 try Editor.getImGuiTexture("editor://icons/info-mono.png"),
             );
@@ -176,7 +176,7 @@ pub fn draw(self: *Self) !void {
             c.ImGui_SetCursorPos(cursor);
             filterToggleButton(
                 "debug",
-                &edstore.filters.debug,
+                &edb.filters.debug,
                 try Editor.getImGuiTexture("editor://icons/debug.png"),
                 try Editor.getImGuiTexture("editor://icons/debug-mono.png"),
             );
@@ -196,7 +196,7 @@ pub fn draw(self: *Self) !void {
                 while (idx < clipper.DisplayEnd) : (idx += 1) {
                     const log_index: usize = @intCast((total_entries - 1) - idx);
                     const log = self.logs.items[log_index];
-                    if (!edstore.scopes.contains(log.scope) or !self.filter(log)) {
+                    if (!edb.scopes.contains(log.scope) or !self.filter(log)) {
                         continue;
                     }
                     const icon = switch (log.level) {

@@ -2,13 +2,20 @@ const std = @import("std");
 const log = std.log.scoped(.EditorDatabase);
 
 const Uuid = @import("yume").Uuid;
+const assets = @import("yume").assets;
 const collections = @import("yume").collections;
 
 const Self = @This();
 
+const EditorDatabase = struct {
+    project: ProjectDatabase = .{},
+    logs: LogsDatabase,
+    project_explorer: ProjectExplorer = .{},
+};
+
 const ProjectDatabase = struct {
     last_open_project: ?[:0]u8 = null,
-    last_open_scene: ?Uuid = null,
+    last_open_scene: ?assets.SceneHandle = null,
 };
 
 const LogsDatabase = struct {
@@ -70,9 +77,8 @@ const LogsDatabase = struct {
     }
 };
 
-const EditorDatabase = struct {
-    project: ProjectDatabase = .{},
-    logs: LogsDatabase,
+const ProjectExplorer = struct {
+    view_mode: enum { list, grid } = .list,
 };
 
 var instance: Self = undefined;

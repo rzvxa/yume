@@ -181,14 +181,14 @@ fn onCreateClick(self: *Self, ctx: *GameApp) !void {
 
         .project_name = try self.allocator.dupe(u8, project_name),
         .scenes = std.ArrayList(Uuid).init(self.allocator),
-        .default_scene = Uuid.new(),
+        .default_scene = .{ .uuid = Uuid.new() },
     };
     defer project.unload();
 
     try resources.put(
-        project.default_scene,
+        project.default_scene.uuid,
         Resources.Resource{
-            .id = project.default_scene,
+            .id = project.default_scene.uuid,
             .uri = try Resources.Uri.initWithProtocolLen(
                 allocator,
                 "project://scenes/Default.scene",

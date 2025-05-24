@@ -83,15 +83,15 @@ pub fn absorbSentinel(slice: anytype) AbsorbSentinelReturnType(@TypeOf(slice)) {
     }
 }
 
-pub fn levenshtein(a: []const u8, b: []const u8, allocator: std.mem.Allocator) usize {
+pub fn levenshtein(a: []const u8, b: []const u8, fallback_allocator: std.mem.Allocator) usize {
     const rows = a.len + 1;
     const cols = b.len + 1;
 
-    const alloc = blk: {
-        var s = std.heap.stackFallback(4096, allocator);
+    const allocator = blk: {
+        var s = std.heap.stackFallback(4096, fallback_allocator);
         break :blk s.get();
     };
-    var matrix = alloc.alloc(usize, rows * cols) catch unreachable;
+    var matrix = allocator.alloc(usize, rows * cols) catch unreachable;
 
     for (0..rows) |i| {
         matrix[i * cols] = i;
@@ -112,9 +112,75 @@ pub fn levenshtein(a: []const u8, b: []const u8, allocator: std.mem.Allocator) u
 
     const result = matrix[rows * cols - 1];
 
-    alloc.free(matrix);
+    allocator.free(matrix);
 
     return result;
+}
+
+/// start (inclusive) to end (exclusive)
+pub const Range = struct {
+    start: usize = 0,
+    end: usize = 0,
+};
+
+/// finds a fuzzy match for `pattern` in `haystack` by matching characters
+/// in order. Returns the ranges (i.e. contiguous segments) in the haystack that
+/// matched. Note that if characters are not adjacent, they become separate ranges.
+/// for example, matching "cat" in "cartwheel" will yield two (or more) ranges.
+/// the caller provides a mutable buffer to accumulate ranges.
+/// it will bail to find more matches when buffer runs out
+pub fn approximateMatch(buffer: []Range, haystack: []const u8, pattern: []const u8) []Range {
+    var range_count: usize = 0;
+    if (pattern.len == 0) return buffer[0..0];
+
+    // we'll iterate through haystack. When a character equals the current pattern
+    // character, we record its position. If the character is immediately after the
+    // previous one, we continue the current range; otherwise, we start a new range.
+    var patt_idx: usize = 0;
+    var current_range_start: usize = 0;
+    var last_match_index: usize = 0;
+    var in_match: bool = false;
+
+    const toLower = std.ascii.toLower;
+    const isWhitespace = std.ascii.isWhitespace;
+
+    // iterate over each character (and its index) in the haystack.
+    for (haystack, 0..) |char, i| {
+        if (patt_idx < pattern.len and toLower(char) == toLower(pattern[patt_idx])) {
+            if (!in_match) {
+                // start a new match.
+                in_match = true;
+                current_range_start = i;
+            } else if (i != last_match_index + 1) {
+                // there's a gap between matched characters:
+                // finish the current range before starting a new one.
+                buffer[range_count] = Range{ .start = current_range_start, .end = last_match_index + 1 };
+                range_count += 1;
+                if (range_count == buffer.len) {
+                    in_match = false;
+                    break;
+                }
+                current_range_start = i;
+            }
+            last_match_index = i;
+            patt_idx += 1;
+            if (patt_idx >= pattern.len) break;
+            for (pattern[patt_idx..]) |peek| {
+                if (!isWhitespace(peek)) {
+                    break;
+                }
+                patt_idx += 1;
+            }
+        }
+    }
+
+    if (in_match and range_count < buffer.len) {
+        // end the last range.
+        buffer[range_count] = Range{ .start = current_range_start, .end = last_match_index + 1 };
+        range_count += 1;
+    }
+
+    return buffer[0..range_count];
 }
 
 pub fn tryOpenWithOsDefaultApplication(allocator: std.mem.Allocator, path: []const u8) !void {

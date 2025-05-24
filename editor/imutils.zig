@@ -2,7 +2,29 @@ const c = @import("clibs");
 const std = @import("std");
 
 const utils = @import("yume").utils;
+const assets = @import("yume").assets;
+
 const Editor = @import("Editor.zig");
+const Project = @import("Project.zig");
+const ProjectExplorerWindow = @import("windows/ProjectExplorerWindow.zig");
+
+var imutils_context: Context = undefined;
+
+pub fn createContext() void {
+    imutils_context = .{
+        .imgui_context = c.ImGui_CreateContext(null).?,
+    };
+}
+
+pub inline fn newFrame() void {
+    c.cImGui_ImplVulkan_NewFrame();
+    c.cImGui_ImplSDL3_NewFrame();
+    c.ImGui_NewFrame();
+}
+
+pub inline fn render() void {
+    c.ImGui_Render();
+}
 
 pub const ImString = struct {
     allocator: std.mem.Allocator,
@@ -186,3 +208,142 @@ pub fn DelayedInputTextEx(
     }
     return false;
 }
+
+/// Draws a single line of text (provided in `line`) starting at `base_pos`,
+/// with the text’s character offset in the full text given by `line_offset`.
+/// A wrap_width is used (if nonzero) when calculating the text sizes.
+/// Any highlight ranges (provided in `ranges`) that intersect this line will
+/// be drawn using the highlight color.
+pub fn drawHighlightedTextLine(
+    line: []const u8,
+    line_offset: usize,
+    base_pos: c.ImVec2,
+    wrap_width: f32,
+    ranges: []const utils.Range,
+    font: *c.ImFont,
+    font_size: f32,
+    highlight_color: c.ImU32,
+) void {
+    const drawlist = c.ImGui_GetWindowDrawList();
+
+    var range_index: usize = 0;
+    while (range_index < ranges.len) : (range_index += 1) {
+        const r = ranges[range_index];
+        if (r.end <= line_offset or r.start >= line_offset + line.len) continue;
+
+        const rel_start = if (r.start < line_offset) 0 else r.start - line_offset;
+        const rel_end = if (r.end > line_offset + line.len) line.len else r.end - line_offset;
+
+        const prefix_width = c.ImGui_CalcTextSizeEx(line[0..rel_start].ptr, line[rel_start..].ptr, false, wrap_width).x;
+        const seg_width = c.ImGui_CalcTextSizeEx(line[rel_start..rel_end].ptr, line[rel_end..].ptr, false, wrap_width).x;
+
+        const highlight_min = c.ImVec2{
+            .x = base_pos.x + prefix_width,
+            .y = base_pos.y,
+        };
+        const highlight_max = c.ImVec2{
+            .x = base_pos.x + prefix_width + seg_width,
+            .y = base_pos.y + font_size,
+        };
+
+        c.ImDrawList_AddRectFilled(drawlist, highlight_min, highlight_max, highlight_color);
+    }
+
+    c.ImDrawList_AddTextImFontPtrEx(
+        drawlist,
+        font,
+        font_size,
+        base_pos,
+        c.ImGui_GetColorU32(c.ImGuiCol_Text),
+        line.ptr,
+        line[line.len..].ptr,
+        wrap_width,
+        null,
+    );
+}
+
+/// Draws text with highlighted ranges. The full text is provided in `text`.
+/// The `ranges` slice contains ranges (as character index intervals) to be highlighted.
+pub fn drawTextWithHighlight(
+    text: []const u8,
+    ranges: []const utils.Range,
+    wrap_width: f32,
+) void {
+    const base_pos = c.ImGui_GetCursorScreenPos();
+
+    const font = c.ImGui_GetFont();
+    const font_size = c.ImGui_GetFontSize();
+    const style = c.ImGui_GetStyle().*;
+    const highlight_color = c.ImGui_GetColorU32ImVec4(style.Colors[c.ImGuiCol_TextSelectedBg]);
+
+    var line_start: usize = 0;
+    var cursor = base_pos;
+    var i: usize = 0;
+    while (i <= text.len) : (i += 1) {
+        if (i == text.len or text[i] == '\n') {
+            const line = text[line_start..i];
+            drawHighlightedTextLine(line, line_start, cursor, wrap_width, ranges, font, font_size, highlight_color);
+            cursor.y += font_size + style.ItemSpacing.y;
+            line_start = i + 1;
+        }
+    }
+    c.ImGui_SetCursorScreenPos(cursor);
+}
+
+pub fn fourwayInputs() enum { none, up, down, left, right } {
+    const ctrl = c.ImGui_IsKeyDown(c.ImGuiKey_ModCtrl);
+    if (c.ImGui_IsKeyPressed(c.ImGuiKey_UpArrow) or
+        (ctrl and c.ImGui_IsKeyPressed(c.ImGuiKey_K)))
+    {
+        return .up;
+    } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_DownArrow) or
+        (ctrl and c.ImGui_IsKeyPressed(c.ImGuiKey_J)))
+    {
+        return .down;
+    } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_LeftArrow) or
+        (ctrl and c.ImGui_IsKeyPressed(c.ImGuiKey_H)))
+    {
+        return .left;
+    } else if (c.ImGui_IsKeyPressed(c.ImGuiKey_RightArrow) or
+        (ctrl and c.ImGui_IsKeyPressed(c.ImGuiKey_L)))
+    {
+        return .right;
+    } else {
+        return .none;
+    }
+}
+
+pub fn assetHandleInput(label: [*:0]const u8, handle: assets.AssetHandle) !?assets.AssetHandle {
+    var urn = handle.uuid.urnZ();
+    c.ImGui_PushID(label);
+    defer c.ImGui_PopID();
+    const id = c.ImGui_GetItemID();
+    _ = c.ImGui_InputText("##reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);
+    c.ImGui_SameLine();
+    if (c.ImGui_Button("...")) {
+        imutils_context.active_asset_handle_input = id;
+        try Project.browseAssets(handle, .{
+            .locked_filters = &.{
+                ProjectExplorerWindow.filterByResourceType(.obj),
+            },
+            .callback = Project.OnSelectAsset.callback(Context, &imutils_context, Context.onSelectAsset),
+        });
+    }
+    c.ImGui_SameLine();
+    _ = c.ImGui_Text("Mesh");
+
+    if (imutils_context.active_asset_handle_input == id) {
+        return imutils_context.new_asset_handle;
+    }
+    return null;
+}
+
+const Context = struct {
+    imgui_context: *c.ImGuiContext,
+    active_asset_handle_input: c.ImGuiID = 0,
+    new_asset_handle: ?assets.AssetHandle = null,
+
+    fn onSelectAsset(ctx: *Context, handle: ?assets.AssetHandle) void {
+        ctx.new_asset_handle = handle;
+    }
+};

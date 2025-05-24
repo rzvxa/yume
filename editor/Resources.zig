@@ -2,9 +2,11 @@ const std = @import("std");
 
 const Uuid = @import("yume").Uuid;
 const utils = @import("yume").utils;
+const Event = @import("yume").Event;
 const Watch = @import("Watch.zig");
 
 const GameApp = @import("yume").GameApp;
+const assets = @import("yume").assets;
 
 const Editor = @import("Editor.zig");
 
@@ -21,6 +23,7 @@ pub const Resource = struct {
         // registered as normal json files.
         project,
         scene,
+        shader_stage,
         shader,
         mat,
         obj,
@@ -39,6 +42,10 @@ pub const Resource = struct {
                 .fbx
             else if (seql(u8, ext, ".png"))
                 .png
+            else if (seql(u8, ext, ".vert") or seql(u8, ext, ".frag"))
+                .shader_stage
+            else if (seql(u8, ext, ".shader"))
+                .shader
             else
                 .unknown;
         }
@@ -46,6 +53,17 @@ pub const Resource = struct {
         pub fn fileIconUri(self: Type) [:0]const u8 {
             return switch (self) {
                 inline else => |t| "editor://icons/filetypes/" ++ @tagName(t) ++ ".png",
+            };
+        }
+
+        pub fn toAssetType(self: Type) assets.AssetType {
+            return switch (self) {
+                .shader, .shader_stage => .binary, // TODO: we need to treat shaders as assets, use .shader
+                .unknown, .project => .binary,
+                .scene => .scene,
+                .mat => .material,
+                .obj, .fbx => .mesh,
+                .png => .image,
             };
         }
     };
@@ -60,16 +78,8 @@ pub const Resource = struct {
         return self.uri.pathZ();
     }
 
-    pub fn bufLoadPath(self: *const Resource, buf: []u8) ![:0]const u8 {
-        const result = try self.bufFullpath(buf);
-        if (std.mem.eql(u8, self.uri.protocol(), "builtin-shaders")) {
-            var backing_buf: [std.fs.max_path_bytes]u8 = undefined;
-            @memcpy(backing_buf[0..result.len], result);
-            const baseext = utils.baseExtensionSplit(backing_buf[0..result.len]);
-            return try std.fmt.bufPrintZ(buf, "{s}.spv", .{baseext.base});
-        } else {
-            return result;
-        }
+    pub inline fn bufLoadPath(self: *const Resource, buf: []u8) ![:0]const u8 {
+        return try self.bufFullpath(buf);
     }
 
     pub inline fn bufFullpath(self: *const Resource, buf: []u8) ![:0]const u8 {
@@ -105,6 +115,7 @@ pub const Resource = struct {
         const meta_path = try self.bufMetaPath(&buf);
         var file = f: {
             if (create_if_missing) {
+                std.log.debug("{s}", .{meta_path});
                 break :f try std.fs.cwd().createFile(meta_path, .{ .truncate = true });
             } else {
                 const file = try std.fs.cwd().openFile(meta_path, .{ .mode = .read_write });
@@ -129,7 +140,7 @@ pub const Resource = struct {
         defer file.close();
     }
 
-    fn eql(
+    pub fn eql(
         lhs: *const Resource,
         rhs: *const Resource,
     ) bool {
@@ -153,6 +164,10 @@ pub const Resource = struct {
 
 const ResourceStorage = std.AutoHashMap(Uuid, Resource);
 
+pub const OnRegisterEvent = Event(.{*const ResourceNode});
+pub const OnUnregisterEvent = Event(.{*const ResourceNode});
+pub const OnReinitEvent = Event(.{});
+
 const Self = @This();
 
 var singleton: ?Self = null;
@@ -166,6 +181,10 @@ resource_tree: ResourceNode,
 
 watcher: ?*Watch = null,
 watcher_counter: f32 = 0,
+
+on_register: OnRegisterEvent.List,
+on_unregister: OnUnregisterEvent.List,
+on_reinit: OnReinitEvent.List,
 
 pub const ResourceNode = struct {
     pub const Node = union(enum) {
@@ -408,32 +427,41 @@ pub fn init(allocator: std.mem.Allocator) !void {
         .resource_tree = ResourceNode.init(allocator, .root),
 
         .watcher = if (Watch.supported_platform) try Watch.init(allocator, ".") else null,
+
+        .on_register = OnRegisterEvent.List.init(allocator),
+        .on_unregister = OnUnregisterEvent.List.init(allocator),
+        .on_reinit = OnReinitEvent.List.init(allocator),
     };
 
     errdefer deinit() catch {};
 
-    {
-        _ = try register(.{ .urn = "3e21192b-6c22-4a4f-98ca-a4a43f675986", .path = "materials/default.mat", .category = "builtin" });
-        _ = try register(.{ .urn = "e732bb0c-19bb-492b-a79d-24fde85964d2", .path = "materials/none.mat", .category = "builtin" });
-        _ = try register(.{ .urn = "61de2700-0eac-4fd5-9c56-0bd5b6b9ba10", .path = "materials/pbr.mat", .category = "builtin" });
-        _ = try register(.{ .urn = "ad4bc22b-3765-4a9d-bab7-7984e101428a", .path = "lost_empire-RGBA.png", .category = "builtin" });
-        _ = try register(.{ .urn = "00923d64-c2ca-4d36-abbd-90b1fbde7a48", .path = "1x1.png", .category = "builtin" });
-        _ = try register(.{ .urn = "54dff348-3f93-429a-83c0-2d29b1ae00dd", .path = "1x1b.png", .category = "builtin" });
-        _ = try register(.{ .urn = "c4340d7a-caab-4925-965c-5ea71d8e447e", .path = "1x1h.png", .category = "builtin" });
-        _ = try register(.{ .urn = "ac6b9d14-0a56-458a-a7cc-fd36ede79468", .path = "lost_empire.obj", .category = "builtin" });
-        _ = try register(.{ .urn = "6d4f3849-e3d7-4cb0-b593-095a9afafb99", .path = "suzanne.obj", .category = "builtin" });
-        _ = try register(.{ .urn = "23400ade-52d7-416b-9679-884a49de1722", .path = "cube.obj", .category = "builtin" });
-        _ = try register(.{ .urn = "ab7151f0-1f77-4ae8-99ad-17695c6ab9de", .path = "sphere.obj", .category = "builtin" });
+    { // builtin assets
+        const cat = "builtin";
+        _ = try register(.{ .urn = "3e21192b-6c22-4a4f-98ca-a4a43f675986", .path = "materials/default.mat", .category = cat });
+        _ = try register(.{ .urn = "e732bb0c-19bb-492b-a79d-24fde85964d2", .path = "materials/none.mat", .category = cat });
+        _ = try register(.{ .urn = "61de2700-0eac-4fd5-9c56-0bd5b6b9ba10", .path = "materials/pbr.mat", .category = cat });
+        _ = try register(.{ .urn = "ad4bc22b-3765-4a9d-bab7-7984e101428a", .path = "lost_empire-RGBA.png", .category = cat });
+        _ = try register(.{ .urn = "00923d64-c2ca-4d36-abbd-90b1fbde7a48", .path = "1x1.png", .category = cat });
+        _ = try register(.{ .urn = "54dff348-3f93-429a-83c0-2d29b1ae00dd", .path = "1x1b.png", .category = cat });
+        _ = try register(.{ .urn = "c4340d7a-caab-4925-965c-5ea71d8e447e", .path = "1x1h.png", .category = cat });
+        _ = try register(.{ .urn = "ac6b9d14-0a56-458a-a7cc-fd36ede79468", .path = "lost_empire.obj", .category = cat });
+        _ = try register(.{ .urn = "6d4f3849-e3d7-4cb0-b593-095a9afafb99", .path = "suzanne.obj", .category = cat });
+        _ = try register(.{ .urn = "23400ade-52d7-416b-9679-884a49de1722", .path = "cube.obj", .category = cat });
+        _ = try register(.{ .urn = "ab7151f0-1f77-4ae8-99ad-17695c6ab9de", .path = "sphere.obj", .category = cat });
     }
 
-    {
-        _ = try registerBuiltinShader("cf64bfc9-703c-43b0-9d01-c8032706872c", "tri_mesh.vert.glsl");
-        _ = try registerBuiltinShader("79d1e1cc-607d-491c-b2e8-d1d3a44bd6a4", "pbr.frag.glsl");
-        _ = try registerBuiltinShader("8b4db7d0-33a6-4f42-96cc-7b1d88566f27", "default_lit.frag.glsl");
-        _ = try registerBuiltinShader("9939ab1b-d72c-4463-b039-58211f2d6531", "textured_lit.frag.glsl");
+    { // builtin shaders
+        const cat = "builtin-shaders";
+        _ = try register(.{ .urn = "cf64bfc9-703c-43b0-9d01-c8032706872c", .path = "simple.vert", .category = cat });
+        _ = try register(.{ .urn = "79d1e1cc-607d-491c-b2e8-d1d3a44bd6a4", .path = "pbr.frag", .category = cat });
+        _ = try register(.{ .urn = "361d3e88-c823-41fa-821d-5a7811af41ce", .path = "pbr.shader", .category = cat });
+        _ = try register(.{ .urn = "8b4db7d0-33a6-4f42-96cc-7b1d88566f27", .path = "default_unlit.frag", .category = cat });
+        _ = try register(.{ .urn = "7166c8c1-9f74-4093-b626-e226d4ce63ff", .path = "default_unlit.shader", .category = cat });
+        _ = try register(.{ .urn = "9939ab1b-d72c-4463-b039-58211f2d6531", .path = "textured_unlit.frag", .category = cat });
+        _ = try register(.{ .urn = "603b93fe-9d75-48af-88f5-3c2af8e72b0b", .path = "textured_unlit.shader", .category = cat });
     }
 
-    {
+    { // editor resources
         _ = try register(.{ .urn = "2d02fa29-3740-4dfc-ab04-e77539734053", .path = "icons/play.png", .category = "editor" });
         _ = try register(.{ .urn = "f4f6b6d6-66f8-4e8a-a575-3316b6a8a684", .path = "icons/pause.png", .category = "editor" });
         _ = try register(.{ .urn = "b3cd9d64-6708-4d40-9f2b-9723df7bf3b1", .path = "icons/stop.png", .category = "editor" });
@@ -447,6 +475,7 @@ pub fn init(allocator: std.mem.Allocator) !void {
         _ = try register(.{ .urn = "4bf6d06c-2d96-4b12-8c20-f9a03a5152e1", .path = "icons/transform-tool.png", .category = "editor" });
         _ = try register(.{ .urn = "eab7824b-f71c-4b90-a468-a5d91f4a3f7b", .path = "icons/close.png", .category = "editor" });
         _ = try register(.{ .urn = "715b644d-f9a5-4aad-9cf9-6328cc849006", .path = "icons/browse.png", .category = "editor" });
+        _ = try register(.{ .urn = "dc031587-841a-4665-99f2-65be5007a1ab", .path = "icons/search.png", .category = "editor" });
         _ = try register(.{ .urn = "48d0e511-cdaf-4111-8ffa-f7e31fbe9636", .path = "icons/home.png", .category = "editor" });
         _ = try register(.{ .urn = "55cfea70-2c07-470f-a60c-7e8269ee2497", .path = "icons/editor.png", .category = "editor" });
         _ = try register(.{ .urn = "dd8f5337-cf79-489e-849c-5331a044a578", .path = "icons/library.png", .category = "editor" });
@@ -456,6 +485,10 @@ pub fn init(allocator: std.mem.Allocator) !void {
         _ = try register(.{ .urn = "849d928a-a459-4df7-97c4-49877fba782c", .path = "icons/material.png", .category = "editor" });
         _ = try register(.{ .urn = "e54f4382-dc55-4380-89db-0475bc02dd03", .path = "icons/point-light.png", .category = "editor" });
         _ = try register(.{ .urn = "e17a74c7-cb8e-4cd3-90f2-d76ee499a13e", .path = "icons/sun.png", .category = "editor" });
+
+        _ = try register(.{ .urn = "6be190a7-d244-4d7e-976b-0f3d4ab622d1", .path = "icons/list.png", .category = "editor" });
+        _ = try register(.{ .urn = "28e44106-f545-4fa3-9ce9-387dbdee4f57", .path = "icons/grid.png", .category = "editor" });
+        _ = try register(.{ .urn = "841c688a-b205-4db2-b6a8-6bed87b3e46c", .path = "icons/filter.png", .category = "editor" });
 
         _ = try register(.{ .urn = "d16bc474-c896-4aec-b35d-fcdfac790fbb", .path = "icons/filetypes/fbx.png", .category = "editor" });
         _ = try register(.{ .urn = "825643b1-6054-49a8-8ec1-fce29767e512", .path = "icons/filetypes/mat.png", .category = "editor" });
@@ -480,16 +513,40 @@ pub fn init(allocator: std.mem.Allocator) !void {
 }
 
 pub fn reinit(new_allocator: std.mem.Allocator) !void {
-    if (singleton != null) {
+    var reg_cbs = OnRegisterEvent.List.init(new_allocator);
+    errdefer reg_cbs.deinit();
+    var unreg_cbs = OnRegisterEvent.List.init(new_allocator);
+    errdefer unreg_cbs.deinit();
+    var reinit_cbs = OnReinitEvent.List.init(new_allocator);
+    errdefer reinit_cbs.deinit();
+
+    if (singleton) |s| {
+        try reg_cbs.copyFrom(&s.on_register);
+        try unreg_cbs.copyFrom(&s.on_unregister);
+        try reinit_cbs.copyFrom(&s.on_reinit);
         try deinit();
         singleton = null;
     }
     try init(new_allocator);
+
+    singleton.?.on_register.deinit();
+    singleton.?.on_register = reg_cbs;
+
+    singleton.?.on_unregister.deinit();
+    singleton.?.on_unregister = unreg_cbs;
+
+    singleton.?.on_reinit.deinit();
+    singleton.?.on_reinit = reinit_cbs;
+    singleton.?.on_reinit.fire(.{});
 }
 
 pub fn deinit() !void {
     var self = instance();
     if (self.watcher) |w| w.deinit();
+    self.on_register.deinit();
+    self.on_unregister.deinit();
+    self.on_reinit.deinit();
+
     {
         var it = self.resources_index.iterator();
         while (it.next()) |kv| {
@@ -540,6 +597,21 @@ pub fn getResourceId(uri: []const u8) !Uuid {
     const self = instance();
     if (self.resources_index.get(uri)) |id| {
         return id;
+    }
+    return error.ResourceNotFound;
+}
+
+pub fn getAssetHandle(
+    uri: []const u8,
+    comptime opts: struct { expect: ?assets.AssetType = null },
+) !if (opts.expect) |expect| expect.HandleType() else assets.AssetHandle {
+    const self = instance();
+    if (self.resources_index.get(uri)) |id| {
+        const handle = assets.AssetHandle{
+            .uuid = id,
+            .type = getResourcePtr(id).?.type.toAssetType(),
+        };
+        return if (comptime opts.expect) |expect| handle.unbox(expect) else handle;
     }
     return error.ResourceNotFound;
 }
@@ -694,7 +766,7 @@ pub fn register(opts: struct {
     category: []const u8 = "project",
     ensure_meta: bool = true,
 }) !Uuid {
-    const is_builtin = std.mem.eql(u8, opts.category, "builtin") or std.mem.eql(u8, opts.category, "editor");
+    const is_builtin = std.mem.eql(u8, opts.category, "builtin") or std.mem.eql(u8, opts.category, "builtin-shaders") or std.mem.eql(u8, opts.category, "editor");
     var self = instance();
     const id = try Uuid.fromUrnSlice(opts.urn);
     const editor_root = try Editor.rootDir(self.allocator);
@@ -738,24 +810,21 @@ pub fn register(opts: struct {
     index_entry.value_ptr.* = id;
     res_ptr.value_ptr.save(self.allocator, opts.ensure_meta) catch |err| if (opts.ensure_meta) return err else log.warn("something went wrong while saving the resource's meta {}", .{err});
 
+    self.on_register.fire(.{res_node.value});
+
     return res_ptr.key_ptr.*;
 }
 
-// TODO: shaders should register like any other resource
-fn registerBuiltinShader(urn: []const u8, path: []const u8) !void {
-    const self = instance();
-    const id = try Uuid.fromUrnSlice(urn);
-    const editor_root = try Editor.rootDir(self.allocator);
-    defer self.allocator.free(editor_root);
-    const pathspv = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ path[0 .. path.len - ".glsl".len], "spv" });
-    defer self.allocator.free(pathspv);
-    const uri = try std.fmt.allocPrint(self.allocator, "builtin-shaders://{s}", .{path});
-    try self.resources.put(id, Resource{
-        .id = id,
-        .uri = try Uri.initWithProtocolLen(self.allocator, uri, "builtin-shaders".len),
-        .type = .shader,
-    });
-    try self.resources_index.put(uri, id);
+pub fn onRegister() *OnRegisterEvent.List {
+    return &instance().on_register;
+}
+
+pub fn onUnregister() *OnUnregisterEvent.List {
+    return &instance().on_unregister;
+}
+
+pub fn onReinit() *OnReinitEvent.List {
+    return &instance().on_reinit;
 }
 
 // if resource isn't a project asset this function has undefined behavior.
@@ -833,6 +902,7 @@ pub fn indexCwd() !void {
                     dir_node.deinit(false);
                 } else {
                     gop.value.* = dir_node;
+                    self.on_register.fire(.{gop.value});
                 }
             },
             else => {},
@@ -936,6 +1006,7 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                     dir_node.deinit(false);
                 } else {
                     gop.value.* = dir_node;
+                    self.on_register.fire(.{gop.value});
                 }
 
                 var dir_iter = dir.iterate();
@@ -1316,10 +1387,6 @@ pub const Uri = extern struct {
             if (buf.len <= slice.len) return error.NoSpaceLeft;
             buf[slice.len] = 0;
             return utils.normalizePathSepZ(@ptrCast(slice.ptr))[0..slice.len :0];
-        } else if (std.mem.eql(u8, uri.protocol(), "builtin-shaders")) { // TODO: use builtin://shaders/*
-            var editor_root_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const editor_root = try Editor.bufRootDir(&editor_root_buf);
-            return try std.fmt.bufPrintZ(buf, "{s}/shaders/{s}", .{ editor_root, uri.path() });
         } else {
             var editor_root_buf: [std.fs.max_path_bytes]u8 = undefined;
             const editor_root = try Editor.bufRootDir(&editor_root_buf);

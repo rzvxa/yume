@@ -10,7 +10,6 @@ const components = @import("ecs.zig").components;
 
 const Mesh = components.Mesh;
 const Vertex = components.mesh.Vertex;
-const load_from_obj = components.mesh.load_from_obj2;
 
 const Material = components.Material;
 
@@ -22,6 +21,7 @@ const check_vk = @import("vulkan_init.zig").check_vk;
 const log = std.log.scoped(.assets);
 
 const default_max_bytes = 30_000_000;
+const Image = Engine.AllocatedImage;
 
 pub const Assets = struct {
     const Self = @This();
@@ -33,6 +33,9 @@ pub const Assets = struct {
     loaded_ids: std.AutoHashMap(Uuid, void),
     loaded_assets: std.AutoHashMap(AssetHandle, LoadedAsset),
 
+    unused_assets_maps: [4]std.AutoHashMap(AssetHandle, void),
+    unused_assets_active_idx: u3 = 3,
+
     loader: ResourceLoader,
 
     pub fn init(allocator: std.mem.Allocator, engine: *Engine, loader: ResourceLoader) void {
@@ -41,78 +44,155 @@ pub const Assets = struct {
             .engine = engine,
             .loaded_ids = std.AutoHashMap(Uuid, void).init(allocator),
             .loaded_assets = std.AutoHashMap(AssetHandle, LoadedAsset).init(allocator),
+            .unused_assets_maps = undefined,
 
             .loader = loader,
         };
+
+        for (0..instance.unused_assets_maps.len) |i| {
+            instance.unused_assets_maps[i] = std.AutoHashMap(AssetHandle, void).init(allocator);
+        }
     }
 
     pub fn deinit() void {
+        collect(.{ .force = true }) catch @panic("Failed to collect assets");
         {
-            const RecursiveReverseUnloader = struct {
-                fn unload(assets: std.AutoHashMap(AssetHandle, LoadedAsset)) void {
-                    var iter = assets.valueIterator();
-                    @This().f(&iter);
+            if (instance.loaded_assets.count() > 0) {
+                log.err("Memory leak", .{});
+                var iter = instance.loaded_assets.iterator();
+                while (iter.next()) |next| {
+                    log.err("leaked asset {s} -> {}", .{ next.key_ptr.uuid.urn(), next.value_ptr.assetType() });
                 }
-
-                fn f(iter: *std.AutoHashMap(AssetHandle, LoadedAsset).ValueIterator) void {
-                    if (iter.next()) |it| {
-                        @This().f(iter);
-                        it.unload();
-                    }
-                }
-            };
-
-            RecursiveReverseUnloader.unload(instance.loaded_assets);
+            }
         }
         instance.loaded_ids.deinit();
         instance.loaded_assets.deinit();
-    }
-
-    pub fn getOrLoadImage(id: Uuid) !*Engine.AllocatedImage {
-        const hndl = try loadImage(id);
-        return getImage(hndl);
-    }
-
-    pub fn getImage(hndl: ImageAssetHandle) !*Engine.AllocatedImage {
-        const asset = try getLoadedAsset(hndl.toAssetHandle(), .image);
-        return asset.data.image;
-    }
-
-    pub fn loadImage(id: Uuid) !ImageAssetHandle {
-        if (instance.loaded_ids.contains(id)) {
-            return ImageAssetHandle.fromAssetIdUnsafe(id);
+        for (0..instance.unused_assets_maps.len) |i| {
+            instance.unused_assets_maps[i].deinit();
         }
-        const handle = ImageAssetHandle{ .uuid = id };
+    }
 
-        const bytes = try instance.loader(instance.allocator, id, default_max_bytes);
+    pub fn get(handle: anytype) !ty: {
+        const T = @TypeOf(handle);
+        if (@hasDecl(T, "BackingType") and @hasDecl(T, "toAssetHandle")) {
+            break :ty *T.BackingType;
+        } else if (T == AssetHandle) {
+            @compileError("Invalid use of AssetHandle, use `.unbox` method to get an asserted handle");
+        } else {
+            @compileError("Invalid handle type " ++ @typeName(T));
+        }
+    } {
+        const tag = @TypeOf(handle).Tag;
+        const generic_handle = handle.toAssetHandle();
+
+        var loaded = getLoadedAsset(generic_handle) catch |err| r: {
+            switch (err) {
+                error.AssetNotLoaded => {
+                    _ = try switch (tag) {
+                        .binary => @panic("TODO"),
+                        .image => loadImage(handle),
+                        .texture => loadTexture(handle),
+                        .mesh => loadMesh(handle),
+                        .material => loadMaterial(handle),
+                        .scene => loadScene(handle),
+                    };
+                    break :r try getLoadedAsset(generic_handle);
+                },
+                else => return err,
+            }
+        };
+        loaded.ref_count += 1;
+        return switch (tag) {
+            .binary => loaded.data.binary,
+            .image => loaded.data.image,
+            .texture => loaded.data.texture,
+            .mesh => loaded.data.mesh,
+            .material => loaded.data.material,
+            .scene => loaded.data.scene,
+        };
+    }
+
+    pub fn release(asset: anytype) !void {
+        comptime var actual_ty = @TypeOf(asset);
+        const ty_info = @typeInfo(actual_ty);
+        if (ty_info == .Pointer) {
+            actual_ty = ty_info.Pointer.child;
+        }
+        const handle: AssetHandle = if (comptime @hasDecl(actual_ty, "toAssetHandle"))
+            asset.toAssetHandle()
+        else
+            asset.handle.toAssetHandle();
+
+        var loaded = try getLoadedAsset(handle);
+        if (loaded.ref_count == 0) {
+            // item released more times that borrowed
+            return error.DoubleRelease;
+        }
+        loaded.ref_count -= 1;
+        if (loaded.ref_count == 0) {
+            try unused(handle);
+        }
+    }
+
+    pub fn collect(comptime opts: struct { force: bool = false }) !void {
+        var unused_assets = unused_assets_map();
+        if (unused_assets.count() == 0) return;
+        // round robin between active maps on each collection,
+        // this is mostly here to allow buffering of collectable assets released during this collection
+        instance.unused_assets_active_idx = @mod(instance.unused_assets_active_idx + 1, @as(u3, @intCast(instance.unused_assets_maps.len)));
+        var iter = unused_assets.keyIterator();
+        while (iter.next()) |handle| {
+            var loaded = try getLoadedAsset(handle.*);
+            // it is possible for an asset to get rescued if it's referenced again before collection
+            // if that is the case, we just ignore this entry
+            if (loaded.ref_count > 0) {
+                continue;
+            }
+
+            loaded.unload();
+            std.debug.assert(instance.loaded_ids.remove(handle.uuid));
+            std.debug.assert(instance.loaded_assets.remove(handle.toAssetHandle()));
+        }
+        unused_assets.clearRetainingCapacity();
+
+        if (comptime opts.force) {
+            if (unused_assets_map().count() > 0) {
+                return collect(opts);
+            }
+        }
+    }
+
+    fn unused(handle: AssetHandle) !void {
+        try unused_assets_map().put(handle, {});
+    }
+
+    inline fn unused_assets_map() *std.AutoHashMap(AssetHandle, void) {
+        return &instance.unused_assets_maps[instance.unused_assets_active_idx];
+    }
+
+    fn loadImage(handle: ImageHandle) !void {
+        if (instance.loaded_ids.contains(handle.uuid)) {
+            return;
+        }
+
+        const bytes = try instance.loader(instance.allocator, handle.uuid, default_max_bytes);
         defer instance.allocator.free(bytes);
 
-        const image = try instance.allocator.create(Engine.AllocatedImage);
-        image.* = try texs.load_image(instance.engine, bytes, id.urn());
+        const image = try instance.allocator.create(Image);
+        image.* = try texs.loadImage(instance.engine, bytes, handle.uuid.urn());
+        image.handle = handle;
 
         const loaded = LoadedAsset{ .data = .{ .image = image } };
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
-        try instance.loaded_ids.put(id, {});
-        return handle;
+        try instance.loaded_ids.put(handle.uuid, {});
     }
 
-    pub fn getOrLoadTexture(id: Uuid) !*Texture {
-        const hndl = try loadTexture(id);
-        return getTexture(hndl);
-    }
-
-    pub fn getTexture(hndl: TextureAssetHandle) !*Texture {
-        const asset = try getLoadedAsset(hndl.toAssetHandle(), .texture);
-        return asset.data.texture;
-    }
-
-    pub fn loadTexture(img_id: Uuid) !TextureAssetHandle {
-        if (instance.loaded_ids.contains(img_id)) {
-            return TextureAssetHandle.fromAssetIdUnsafe(img_id);
+    fn loadTexture(handle: TextureHandle) !void {
+        if (instance.loaded_ids.contains(handle.uuid)) {
+            return;
         }
-        const handle = TextureAssetHandle.fromAssetIdUnsafe(img_id);
 
-        const image = try Self.getOrLoadImage(img_id);
+        const image = try Self.get(handle.toImage());
 
         const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -136,6 +216,7 @@ pub const Assets = struct {
 
         var texture = try instance.allocator.create(Texture);
         texture.* = Texture{
+            .handle = handle,
             .image = image.*,
             .image_view = null,
         };
@@ -145,69 +226,56 @@ pub const Assets = struct {
         const loaded = LoadedAsset{ .data = .{ .texture = texture } };
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
         try instance.loaded_ids.put(handle.uuid, {});
-        return handle;
     }
 
-    pub fn getOrLoadMesh(id: Uuid) !*Mesh {
-        const hndl = try loadMesh(id);
-        return getMesh(hndl);
-    }
-
-    pub fn getMesh(hndl: MeshAssetHandle) !*Mesh {
-        const asset = try getLoadedAsset(hndl.toAssetHandle(), .mesh);
-        return asset.data.mesh;
-    }
-
-    pub fn loadMesh(id: Uuid) !MeshAssetHandle {
-        if (instance.loaded_ids.contains(id)) {
-            return MeshAssetHandle.fromAssetIdUnsafe(id);
+    fn loadMesh(handle: MeshHandle) !void {
+        if (instance.loaded_ids.contains(handle.uuid)) {
+            return;
         }
-        const handle = MeshAssetHandle{ .uuid = id };
-        const bytes = try instance.loader(instance.allocator, id, default_max_bytes);
+        const bytes = try instance.loader(instance.allocator, handle.uuid, default_max_bytes);
         defer instance.allocator.free(bytes);
 
         const mesh = try instance.allocator.create(Mesh);
-        mesh.* = load_from_obj(instance.allocator, bytes);
-        mesh.uuid = id;
+        mesh.* = components.mesh.load_from_obj(instance.allocator, handle, bytes);
         instance.engine.uploadMesh(mesh);
 
         const loaded = LoadedAsset{ .data = .{ .mesh = mesh } };
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
-        try instance.loaded_ids.put(id, {});
-        return handle;
+        try instance.loaded_ids.put(handle.uuid, {});
     }
 
-    pub fn getOrLoadMaterial(id: Uuid) !*Material {
-        const hndl = try loadMaterial(id);
-        return getMaterial(hndl);
-    }
-
-    pub fn getMaterial(hndl: MaterialAssetHandle) !*Material {
-        const asset = try getLoadedAsset(hndl.toAssetHandle(), .material);
-        return asset.data.material;
-    }
-
-    pub fn loadMaterial(id: Uuid) !MaterialAssetHandle {
-        if (instance.loaded_ids.contains(id)) {
-            return MaterialAssetHandle.fromAssetIdUnsafe(id);
+    fn loadMaterial(handle: MaterialHandle) !void {
+        if (instance.loaded_ids.contains(handle.uuid)) {
+            return;
         }
-        const handle = MaterialAssetHandle{ .uuid = id };
-        const matjson = try instance.loader(instance.allocator, id, 20_000);
+        const matjson = try instance.loader(instance.allocator, handle.uuid, 20_000);
         defer instance.allocator.free(matjson);
 
-        const matparsed = std.json.parseFromSlice(
+        const mat_parsed = std.json.parseFromSlice(
             MaterialDef,
             instance.allocator,
             matjson,
             .{},
         ) catch @panic("Failed to parse the material json");
-        defer matparsed.deinit();
+        defer mat_parsed.deinit();
+
+        const shader_json = try instance.loader(instance.allocator, mat_parsed.value.shader, 20_000);
+        defer instance.allocator.free(shader_json);
+
+        const shader_parsed = std.json.parseFromSlice(
+            ShaderDef,
+            instance.allocator,
+            shader_json,
+            .{},
+        ) catch @panic("Failed to parse the shader json");
+        defer shader_parsed.deinit();
 
         const material = try instance.allocator.create(Material);
 
         // NOTE: we are currently destroying the shader modules as soon as we are done
         // creating the pipeline. This is not great if we needed the modules for multiple pipelines.
         // Howver, for the sake of simplicity, we are doing it this way for now.
+        // shaders including their variants should be treated like any other loaded asset
 
         const vertex_input_state_ci = std.mem.zeroInit(c.VkPipelineVertexInputStateCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -292,7 +360,7 @@ pub const Assets = struct {
         pipeline_builder.vertex_input_state.pVertexBindingDescriptions = vertex_descritpion.bindings.ptr;
         pipeline_builder.vertex_input_state.vertexBindingDescriptionCount = @as(u32, @intCast(vertex_descritpion.bindings.len));
 
-        const vert_code = try instance.loader(instance.allocator, matparsed.value.shader.passes.vertex, 20_000);
+        const vert_code = try instance.loader(instance.allocator, shader_parsed.value.passes.vertex, 20_000);
         defer instance.allocator.free(vert_code);
         const vert_module = instance.engine.createShaderModule(vert_code) orelse null;
         defer c.vkDestroyShaderModule(instance.engine.device, vert_module, Engine.vk_alloc_cbs);
@@ -309,9 +377,9 @@ pub const Assets = struct {
         var set_layouts = [3]c.VkDescriptorSetLayout{
             instance.engine.global_set_layout,
             instance.engine.object_set_layout,
-            instance.engine.getDescriptorSetLayout(matparsed.value.shader.layouts) catch @panic("Failed to create shader resouces descriptor set layout"),
+            instance.engine.getDescriptorSetLayout(shader_parsed.value.layouts) catch @panic("Failed to create shader resouces descriptor set layout"),
         };
-        const resources_uuids = try instance.allocator.alloc(Uuid, matparsed.value.resources.len);
+        const resources_handles = try instance.allocator.alloc(AssetHandle, mat_parsed.value.resources.len);
 
         // Allocate descriptor set for shader resources
         const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
@@ -324,10 +392,12 @@ pub const Assets = struct {
         var resource_set: c.VkDescriptorSet = undefined;
         check_vk(c.vkAllocateDescriptorSets(instance.engine.device, &descriptor_set_alloc_info, &resource_set)) catch @panic("Failed to allocate descriptor set");
 
-        for (matparsed.value.shader.layouts, matparsed.value.resources, 0..) |layout, resource, i| {
+        for (shader_parsed.value.layouts, mat_parsed.value.resources, 0..) |layout, resource, i| {
             switch (layout) {
                 .texture => {
-                    resources_uuids[i] = resource.?;
+                    const tex = Self.get((ImageHandle{ .uuid = resource.? }).toTexture()) catch @panic("Failed to load texture");
+                    resources_handles[i] = tex.handle.toAssetHandle();
+
                     const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
                         .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
                         .magFilter = c.VK_FILTER_NEAREST,
@@ -340,7 +410,6 @@ pub const Assets = struct {
                     check_vk(c.vkCreateSampler(instance.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
                     instance.engine.deletion_queue.append(Engine.VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("Out of memory");
 
-                    const tex = Self.getOrLoadTexture(resource.?) catch @panic("Failed to load texture");
                     const descriptor_image_info = std.mem.zeroInit(c.VkDescriptorImageInfo, .{
                         .sampler = sampler,
                         .imageView = tex.image_view,
@@ -377,7 +446,7 @@ pub const Assets = struct {
             &pipeline_layout,
         )) catch @panic("Failed to create textured mesh pipeline layout");
 
-        const frag_code = try instance.loader(instance.allocator, matparsed.value.shader.passes.fragment, 20_000);
+        const frag_code = try instance.loader(instance.allocator, shader_parsed.value.passes.fragment, 20_000);
         defer instance.allocator.free(frag_code);
         const frag_module = instance.engine.createShaderModule(frag_code) orelse null;
         defer c.vkDestroyShaderModule(instance.engine.device, frag_module, Engine.vk_alloc_cbs);
@@ -388,161 +457,176 @@ pub const Assets = struct {
         const pipeline = pipeline_builder.build(instance.engine.device, instance.engine.render_pass);
 
         material.* = Material{
-            .uuid = id,
+            .handle = handle,
             .pipeline = pipeline,
             .pipeline_layout = pipeline_layout,
 
-            .rsc_count = @intCast(resources_uuids.len),
-            .rsc_uuids = resources_uuids.ptr,
+            .rsc_count = @intCast(resources_handles.len),
+            .rsc_handles = resources_handles.ptr,
             .rsc_descriptor_set = resource_set,
         };
 
         const loaded = LoadedAsset{ .data = .{ .material = material } };
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
-        try instance.loaded_ids.put(id, {});
-        return handle;
+        try instance.loaded_ids.put(handle.uuid, {});
     }
 
-    pub fn getOrLoadScene(id: Uuid) !*Scene {
-        const hndl = try loadScene(id);
-        return getScene(hndl);
-    }
-
-    pub fn getScene(hndl: SceneAssetHandle) !*Scene {
-        const asset = try getLoadedAsset(hndl.toAssetHandle(), .scene);
-        return asset.data.scene;
-    }
-
-    pub fn loadScene(id: Uuid) !SceneAssetHandle {
-        if (instance.loaded_ids.contains(id)) {
-            return SceneAssetHandle.fromAssetIdUnsafe(id);
+    fn loadScene(handle: SceneHandle) !void {
+        if (instance.loaded_ids.contains(handle.uuid)) {
+            return;
         }
-        const handle = SceneAssetHandle{ .uuid = id };
-        const bytes = try instance.loader(instance.allocator, id, default_max_bytes);
+        const bytes = try instance.loader(instance.allocator, handle.uuid, default_max_bytes);
         defer instance.allocator.free(bytes);
 
         const scene = try Scene.fromJson(instance.allocator, bytes, .{});
+        scene.handle = handle;
 
         const loaded = LoadedAsset{ .data = .{ .scene = scene } };
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
-        try instance.loaded_ids.put(id, {});
-        return handle;
+        try instance.loaded_ids.put(handle.uuid, {});
     }
 
-    pub fn getLoadedAsset(hndl: AssetHandle, ty: AssetType) !LoadedAsset {
-        const it = instance.loaded_assets.get(hndl) orelse return error.AssetNotLoaded;
-        if (it.assetType() != ty) return error.InvalidType;
+    fn getLoadedAsset(hndl: AssetHandle) !*LoadedAsset {
+        const it = instance.loaded_assets.getPtr(hndl) orelse return error.AssetNotLoaded;
         return it;
-    }
-
-    pub fn unload(hndl: AssetHandle) !void {
-        var it = instance.loaded_assets.fetchRemove(hndl) orelse return error.AssetNotLoaded;
-        std.debug.assert(instance.loaded_ids.remove(hndl.uuid));
-        it.value.unload();
     }
 };
 
-const AssetType = enum {
+pub const AssetType = enum(u8) {
+    binary,
     image,
     texture,
     mesh,
     material,
     scene,
+
+    pub fn BackingType(ty: AssetType) type {
+        return switch (ty) {
+            .binary => []u8,
+            .image => Image,
+            .texture => Texture,
+            .mesh => Mesh,
+            .material => Material,
+            .scene => Scene,
+        };
+    }
+
+    pub fn HandleType(ty: AssetType) type {
+        return switch (ty) {
+            .binary => BinaryHandle,
+            .image => ImageHandle,
+            .texture => TextureHandle,
+            .mesh => MeshHandle,
+            .material => MaterialHandle,
+            .scene => SceneHandle,
+        };
+    }
 };
 
-pub const AssetHandle = struct {
+pub const AssetHandle = extern struct {
     uuid: Uuid,
-};
+    type: AssetType,
 
-pub const ImageAssetHandle = struct {
-    uuid: Uuid,
-
-    pub inline fn toAssetHandle(hndl: @This()) AssetHandle {
-        return .{ .uuid = hndl.uuid };
+    pub inline fn unbox(handle: AssetHandle, comptime expect: AssetType) expect.HandleType() {
+        std.debug.assert(handle.type == expect);
+        return .{ .uuid = handle.uuid };
     }
 
-    inline fn fromAssetHandleUnsafe(hndl: AssetHandle) @This() {
-        return .{ .uuid = hndl.uuid };
-    }
-
-    inline fn fromAssetIdUnsafe(id: Uuid) @This() {
-        return .{ .uuid = id };
+    pub inline fn toAssetHandle(handle: AssetHandle) AssetHandle {
+        return handle;
     }
 };
 
-pub const TextureAssetHandle = struct {
-    uuid: Uuid,
+pub fn AssetHandleOf(comptime tag: AssetType, comptime opts: struct {
+    extensions: type = struct {},
+    overrides: type = struct {},
+}) type {
+    return extern struct {
+        usingnamespace opts.extensions;
 
-    pub inline fn toAssetHandle(hndl: @This()) AssetHandle {
-        return .{ .uuid = hndl.uuid };
-    }
+        pub const BackingType = tag.BackingType();
+        pub const Tag = tag;
 
-    inline fn fromAssetHandleUnsafe(hndl: AssetHandle) @This() {
-        return fromAssetIdUnsafe(hndl.uuid);
-    }
+        uuid: Uuid,
 
-    inline fn fromAssetIdUnsafe(id: Uuid) @This() {
-        return .{ .uuid = .{ .raw = id.raw + 1 } };
-    }
-};
+        pub inline fn toAssetHandle(hndl: @This()) AssetHandle {
+            if (comptime @hasDecl(opts.overrides, "toAssetHandle")) {
+                return opts.overrides.toAssetHandle(hndl);
+            } else {
+                return .{
+                    .uuid = hndl.uuid,
+                    .type = @This().Tag,
+                };
+            }
+        }
 
-pub const MeshAssetHandle = struct {
-    uuid: Uuid,
+        inline fn fromAssetHandleUnsafe(hndl: AssetHandle) @This() {
+            if (comptime @hasDecl(opts.overrides, "fromAssetHandleUnsafe")) {
+                return opts.overrides.fromAssetHandleUnsafe(hndl);
+            } else {
+                return fromAssetIdUnsafe(hndl.uuid);
+            }
+        }
 
-    pub inline fn toAssetHandle(hndl: @This()) AssetHandle {
-        return .{ .uuid = hndl.uuid };
-    }
+        inline fn fromAssetIdUnsafe(id: Uuid) @This() {
+            if (comptime @hasDecl(opts.overrides, "fromAssetIdUnsafe")) {
+                return opts.overrides.fromAssetIdUnsafe(id);
+            } else {
+                return .{ .uuid = id };
+            }
+        }
 
-    inline fn fromAssetHandleUnsafe(hndl: AssetHandle) @This() {
-        return .{ .uuid = hndl.uuid };
-    }
+        pub fn jsonStringify(hndl: @This(), jws: anytype) !void {
+            try jws.write(hndl.uuid);
+        }
 
-    inline fn fromAssetIdUnsafe(id: Uuid) @This() {
-        return .{ .uuid = id };
-    }
-};
+        pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, po: std.json.ParseOptions) !@This() {
+            return .{ .uuid = try Uuid.jsonParse(a, jrs, po) };
+        }
+    };
+}
 
-pub const MaterialAssetHandle = struct {
-    uuid: Uuid,
+pub const BinaryHandle = AssetHandleOf(.binary, .{});
+pub const ImageHandle = AssetHandleOf(.image, .{
+    .extensions = struct {
+        pub inline fn fromTexture(tex: TextureHandle) ImageHandle {
+            return TextureHandle.toImage(tex);
+        }
 
-    pub inline fn toAssetHandle(hndl: @This()) AssetHandle {
-        return .{ .uuid = hndl.uuid };
-    }
+        pub inline fn toTexture(img: ImageHandle) TextureHandle {
+            return TextureHandle.fromImage(img);
+        }
+    },
+});
+pub const TextureHandle = AssetHandleOf(.texture, .{
+    .extensions = struct {
+        // perhaps use a mask over this? given the randomness of UUID this should work at least for now
+        pub const offset_with_image = 1;
 
-    inline fn fromAssetHandleUnsafe(hndl: AssetHandle) @This() {
-        return .{ .uuid = hndl.uuid };
-    }
+        pub inline fn fromImage(img: ImageHandle) TextureHandle {
+            return .{ .uuid = .{ .raw = img.uuid.raw + offset_with_image } };
+        }
 
-    inline fn fromAssetIdUnsafe(id: Uuid) @This() {
-        return .{ .uuid = id };
-    }
-};
-
-pub const SceneAssetHandle = struct {
-    uuid: Uuid,
-
-    pub inline fn toAssetHandle(hndl: @This()) AssetHandle {
-        return .{ .uuid = hndl.uuid };
-    }
-
-    inline fn fromAssetHandleUnsafe(hndl: AssetHandle) @This() {
-        return .{ .uuid = hndl.uuid };
-    }
-
-    inline fn fromAssetIdUnsafe(id: Uuid) @This() {
-        return .{ .uuid = id };
-    }
-};
+        pub inline fn toImage(tex: TextureHandle) ImageHandle {
+            return .{ .uuid = .{ .raw = tex.uuid.raw - offset_with_image } };
+        }
+    },
+});
+pub const MeshHandle = AssetHandleOf(.mesh, .{});
+pub const MaterialHandle = AssetHandleOf(.material, .{});
+pub const SceneHandle = AssetHandleOf(.scene, .{});
 
 const LoadedAsset = struct {
     const Self = @This();
     data: union(AssetType) {
-        image: *Engine.AllocatedImage,
+        binary: []u8,
+        image: *Image,
         texture: *Texture,
         mesh: *Mesh,
         material: *Material,
         scene: *Scene,
     },
+    ref_count: usize = 0,
 
     pub fn assetType(self: *const Self) AssetType {
         return @enumFromInt(@intFromEnum(self.data));
@@ -550,6 +634,10 @@ const LoadedAsset = struct {
 
     fn unload(self: *Self) void {
         switch (self.data) {
+            .binary => {
+                const it = self.data.binary;
+                Assets.instance.allocator.free(it);
+            },
             .image => {
                 const it = self.data.image;
                 var img_del = Engine.VmaImageDeleter{ .image = it.* };
@@ -563,6 +651,7 @@ const LoadedAsset = struct {
                     c.vkDestroyImageView,
                 );
                 view_del.delete(Assets.instance.engine);
+                Assets.release(it.image) catch {};
                 Assets.instance.allocator.destroy(it);
             },
             .mesh => {
@@ -576,7 +665,11 @@ const LoadedAsset = struct {
                 layout_del.delete(Assets.instance.engine);
                 var pipeline_del = Engine.VulkanDeleter.make(it.pipeline, c.vkDestroyPipeline);
                 pipeline_del.delete(Assets.instance.engine);
-                Assets.instance.allocator.free(it.rsc_uuids[0..@intCast(it.rsc_count)]);
+                const slice = it.rsc_handles[0..@intCast(it.rsc_count)];
+                for (slice) |res| {
+                    Assets.release(res) catch {};
+                }
+                Assets.instance.allocator.free(slice);
                 Assets.instance.allocator.destroy(it);
             },
             .scene => {
@@ -598,7 +691,7 @@ const ShaderDef = struct {
 
 const MaterialDef = struct {
     name: []const u8,
-    shader: ShaderDef,
+    shader: Uuid,
     resources: []?Uuid,
 
     pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, opts: anytype) !@This() {
@@ -629,7 +722,7 @@ const MaterialDef = struct {
                     },
                 };
             } else if (std.mem.eql(u8, field_name, "shader")) {
-                result.shader = try std.json.innerParse(ShaderDef, a, jrs, opts);
+                result.shader = try std.json.innerParse(Uuid, a, jrs, opts);
             } else if (std.mem.eql(u8, field_name, "resources")) {
                 resources = try std.json.innerParse([]?Uuid, a, jrs, opts);
             } else {

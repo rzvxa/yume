@@ -13,6 +13,7 @@ const Editors = @import("editors/editors.zig");
 const Resources = @import("Resources.zig");
 const Project = @import("Project.zig");
 const Assets = @import("yume").Assets;
+const assets = @import("yume").assets;
 
 const HierarchyWindow = @import("windows/HierarchyWindow.zig");
 const ResourcesWindow = @import("windows/ResourcesWindow.zig");
@@ -20,6 +21,8 @@ const PropertiesWindow = @import("windows/PropertiesWindow.zig");
 const SceneWindow = @import("windows/SceneWindow.zig");
 const GameWindow = @import("windows/GameWindow.zig");
 const LogsWindow = @import("windows/LogsWindow.zig");
+
+const ProjectExplorerWindow = @import("windows/ProjectExplorerWindow.zig");
 
 const imutils = @import("imutils.zig");
 
@@ -143,6 +146,8 @@ scene_window: SceneWindow,
 game_window: GameWindow,
 logs_windows: LogsWindow,
 
+project_explorer_window: ProjectExplorerWindow,
+
 pub fn init(ctx: *GameApp) *Self {
     ctx.world.tag(RunInEditor);
     ctx.world.tag(Playing);
@@ -163,11 +168,6 @@ pub fn init(ctx: *GameApp) *Self {
 
     const home_dir = std.fs.selfExeDirPathAlloc(ctx.allocator) catch @panic("OOM");
     defer ctx.allocator.free(home_dir);
-    std.debug.print("{s}\n", .{home_dir});
-    std.debug.print("{s}\n", .{home_dir});
-    std.debug.print("{s}\n", .{home_dir});
-    std.debug.print("{s}\n", .{home_dir});
-    std.debug.print("{s}\n", .{home_dir});
     const db_path = std.fs.path.join(ctx.allocator, &[_][]const u8{ home_dir, ".user-data", "db.json" }) catch @panic("OOM");
     defer ctx.allocator.free(db_path);
 
@@ -184,12 +184,16 @@ pub fn init(ctx: *GameApp) *Self {
         .properties_window = PropertiesWindow.init(ctx.allocator),
         .game_window = GameWindow.init(ctx),
         .logs_windows = LogsWindow.init(ctx.allocator),
+        .project_explorer_window = ProjectExplorerWindow.init(ctx.allocator) catch @panic("Failed to initialize `Project Explorer`"),
         .scene_window = undefined,
     };
     singleton.scene_window = SceneWindow.init(ctx, @ptrCast(&Editors.onDrawGizmos), &singleton.editors);
     singleton.bootstrapEditorPipeline(ctx.world);
     singleton.initDescriptors(&ctx.engine);
+
     initImGui(&ctx.engine) catch @panic("failed to init imgui");
+
+    singleton.project_explorer_window.setup() catch @panic("Failed to start project explorer indexing");
 
     if (EditorDatabase.storage().project.last_open_project) |lop| {
         Project.load(ctx.allocator, lop) catch {
@@ -229,6 +233,7 @@ pub fn deinit(self: *Self) void {
     self.open_project_modal.deinit();
     self.game_window.deinit();
     self.logs_windows.deinit();
+    self.project_explorer_window.deinit();
     self.hierarchy_window.deinit();
     self.properties_window.deinit();
     self.resources_window.deinit();
@@ -236,17 +241,24 @@ pub fn deinit(self: *Self) void {
         p.unload();
     }
     self.ctx.allocator.free(std.mem.span(c.ImGui_GetIO().*.IniFilename));
-    loaded_imgui_images.deinit();
-    check_vk(c.vkDeviceWaitIdle(self.ctx.engine.device)) catch @panic("Failed to wait for device idle");
-    c.cImGui_ImplVulkan_Shutdown();
     EditorDatabase.flush() catch log.err("Failed to flush the editor database\n", .{});
     EditorDatabase.deinit();
+
+    check_vk(c.vkDeviceWaitIdle(self.ctx.engine.device)) catch @panic("Failed to wait for device idle");
+    c.cImGui_ImplVulkan_Shutdown();
+    {
+        var iter = loaded_imgui_images.iterator();
+        while (iter.next()) |next| {
+            Assets.release(next.value_ptr.handle) catch {};
+        }
+        loaded_imgui_images.deinit();
+    }
 }
 
 pub fn windowTitle(self: *Self) ![]u8 {
     const title = "Yume Editor";
     if (Project.current()) |proj| {
-        if (self.ctx.scene_handle) |scene| {
+        if (self.ctx.scene.handle) |scene| {
             return try std.fmt.allocPrint(self.ctx.allocator, "{s} - {s} - {s}", .{
                 proj.project_name,
                 Resources.getResourcePath(scene.uuid) catch "UNKNOWN",
@@ -322,9 +334,7 @@ pub fn sanitizeSelection(self: *Self, sel: *Selection) void {
 pub fn draw(self: *Self) !void {
     const cmd = self.ctx.engine.beginFrame();
 
-    c.cImGui_ImplVulkan_NewFrame();
-    c.cImGui_ImplSDL3_NewFrame();
-    c.ImGui_NewFrame();
+    imutils.newFrame();
 
     c.ImGuizmo_SetOrthographic(!self.scene_window.is_perspective);
     c.ImGuizmo_BeginFrame();
@@ -349,7 +359,7 @@ pub fn draw(self: *Self) !void {
             if (c.ImGui_MenuItem("New*")) {}
             if (c.ImGui_MenuItem("Load*")) {}
             if (c.ImGui_MenuItemEx("Save", "CTRL+S", false, true)) {
-                if (self.ctx.scene_handle) |hndl| {
+                if (self.ctx.scene.handle) |hndl| {
                     const scene = self.ctx.snapshotLiveScene() catch @panic("Faield to serialize scene");
                     defer scene.deinit();
                     var resource_path_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -428,6 +438,8 @@ pub fn draw(self: *Self) !void {
 
     _ = c.ImGui_DockSpaceOverViewportEx(dockspace_id, viewport, 0, null);
 
+    try self.project_explorer_window.draw(self.ctx);
+
     try self.resources_window.draw();
     self.hierarchy_window.draw(self.ctx);
     try self.properties_window.draw(self.ctx);
@@ -439,7 +451,7 @@ pub fn draw(self: *Self) !void {
     try self.new_project_modal.show(self.ctx);
     try self.open_project_modal.show(self.ctx);
 
-    c.ImGui_Render();
+    imutils.render();
 
     // UI
     c.cImGui_ImplVulkan_RenderDrawData(c.ImGui_GetDrawData(), cmd);
@@ -568,7 +580,7 @@ fn initImGui(engine: *Engine) !void {
     var imgui_pool: c.VkDescriptorPool = undefined;
     check_vk(c.vkCreateDescriptorPool(engine.device, &pool_ci, Engine.vk_alloc_cbs, &imgui_pool)) catch @panic("Failed to create imgui descriptor pool");
 
-    _ = c.ImGui_CreateContext(null);
+    imutils.createContext();
     _ = c.cImGui_ImplSDL3_InitForVulkan(engine.window);
 
     var init_info = std.mem.zeroInit(c.ImGui_ImplVulkan_InitInfo, .{
@@ -593,7 +605,7 @@ fn initImGui(engine: *Engine) !void {
     _ = c.cImGui_ImplVulkan_Init(&init_info);
     _ = c.cImGui_ImplVulkan_CreateFontsTexture();
 
-    loaded_imgui_images = std.StringHashMap(c.ImTextureID).init(engine.allocator);
+    loaded_imgui_images = std.StringHashMap(LoadedImGuiImage).init(engine.allocator);
 
     yume_logo_ds = try getImGuiTexture("editor://icons/yume.png");
 
@@ -621,13 +633,13 @@ pub fn openProject(self: *Self) void {
     self.open_project_modal.open();
 }
 
-pub fn openScene(self: *Self, scene_id: Uuid) !void {
+pub fn openScene(self: *Self, scene: assets.SceneHandle) !void {
     switch (self.selection) {
         .entity => self.selection = .none,
         else => {},
     }
-    try self.ctx.loadScene(scene_id);
-    EditorDatabase.storage().project.last_open_scene = scene_id;
+    try self.ctx.loadScene(scene);
+    EditorDatabase.storage().project.last_open_scene = scene;
 }
 
 pub fn trySetParentKeepUniquePathName(world: ecs.World, entity: ecs.Entity, new_parent: ecs.Entity, allocator: std.mem.Allocator) !void {
@@ -775,9 +787,9 @@ pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
         _ = loaded_imgui_images.remove(uri);
     };
     if (entry.found_existing) {
-        return entry.value_ptr.*;
+        return entry.value_ptr.texture;
     }
-    const image = try Assets.getOrLoadImage(try Resources.getResourceId(uri));
+    const image = try Assets.get(try Resources.getAssetHandle(uri, .{ .expect = .image }));
 
     // Create the Image View
     var image_view: c.VkImageView = undefined;
@@ -814,8 +826,12 @@ pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
         check_vk(c.vkCreateSampler(engine.device, &sampler_info, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
     }
     engine.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("OOM");
-    entry.value_ptr.* = @intFromPtr(c.cImGui_ImplVulkan_AddTexture(sampler, image_view, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
-    return entry.value_ptr.*;
+    const texture = @intFromPtr(c.cImGui_ImplVulkan_AddTexture(sampler, image_view, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+    entry.value_ptr.* = .{
+        .handle = image.handle.toAssetHandle(),
+        .texture = texture,
+    };
+    return texture;
 }
 
 fn bootstrapEditorPipeline(self: *const Self, world: ecs.World) void {
@@ -879,7 +895,11 @@ pub var roboto14: *c.ImFont = undefined;
 pub var roboto24: *c.ImFont = undefined;
 pub var roboto32: *c.ImFont = undefined;
 
-pub var loaded_imgui_images: std.StringHashMap(c.ImTextureID) = undefined;
+const LoadedImGuiImage = struct {
+    handle: assets.AssetHandle,
+    texture: c.ImTextureID,
+};
+var loaded_imgui_images: std.StringHashMap(LoadedImGuiImage) = undefined;
 
 pub var yume_logo_ds: c.ImTextureID = undefined;
 
