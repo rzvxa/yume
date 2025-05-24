@@ -73,16 +73,8 @@ pub const Resource = struct {
         return self.uri.pathZ();
     }
 
-    pub fn bufLoadPath(self: *const Resource, buf: []u8) ![:0]const u8 {
-        const result = try self.bufFullpath(buf);
-        if (std.mem.eql(u8, self.uri.protocol(), "builtin-shaders")) {
-            var backing_buf: [std.fs.max_path_bytes]u8 = undefined;
-            @memcpy(backing_buf[0..result.len], result);
-            const baseext = utils.baseExtensionSplit(backing_buf[0..result.len]);
-            return try std.fmt.bufPrintZ(buf, "{s}.spv", .{baseext.base});
-        } else {
-            return result;
-        }
+    pub inline fn bufLoadPath(self: *const Resource, buf: []u8) ![:0]const u8 {
+        return try self.bufFullpath(buf);
     }
 
     pub inline fn bufFullpath(self: *const Resource, buf: []u8) ![:0]const u8 {
@@ -118,6 +110,7 @@ pub const Resource = struct {
         const meta_path = try self.bufMetaPath(&buf);
         var file = f: {
             if (create_if_missing) {
+                std.log.debug("{s}", .{meta_path});
                 break :f try std.fs.cwd().createFile(meta_path, .{ .truncate = true });
             } else {
                 const file = try std.fs.cwd().openFile(meta_path, .{ .mode = .read_write });
@@ -437,28 +430,30 @@ pub fn init(allocator: std.mem.Allocator) !void {
 
     errdefer deinit() catch {};
 
-    {
-        _ = try register(.{ .urn = "3e21192b-6c22-4a4f-98ca-a4a43f675986", .path = "materials/default.mat", .category = "builtin" });
-        _ = try register(.{ .urn = "e732bb0c-19bb-492b-a79d-24fde85964d2", .path = "materials/none.mat", .category = "builtin" });
-        _ = try register(.{ .urn = "61de2700-0eac-4fd5-9c56-0bd5b6b9ba10", .path = "materials/pbr.mat", .category = "builtin" });
-        _ = try register(.{ .urn = "ad4bc22b-3765-4a9d-bab7-7984e101428a", .path = "lost_empire-RGBA.png", .category = "builtin" });
-        _ = try register(.{ .urn = "00923d64-c2ca-4d36-abbd-90b1fbde7a48", .path = "1x1.png", .category = "builtin" });
-        _ = try register(.{ .urn = "54dff348-3f93-429a-83c0-2d29b1ae00dd", .path = "1x1b.png", .category = "builtin" });
-        _ = try register(.{ .urn = "c4340d7a-caab-4925-965c-5ea71d8e447e", .path = "1x1h.png", .category = "builtin" });
-        _ = try register(.{ .urn = "ac6b9d14-0a56-458a-a7cc-fd36ede79468", .path = "lost_empire.obj", .category = "builtin" });
-        _ = try register(.{ .urn = "6d4f3849-e3d7-4cb0-b593-095a9afafb99", .path = "suzanne.obj", .category = "builtin" });
-        _ = try register(.{ .urn = "23400ade-52d7-416b-9679-884a49de1722", .path = "cube.obj", .category = "builtin" });
-        _ = try register(.{ .urn = "ab7151f0-1f77-4ae8-99ad-17695c6ab9de", .path = "sphere.obj", .category = "builtin" });
+    { // builtin assets
+        const cat = "builtin";
+        _ = try register(.{ .urn = "3e21192b-6c22-4a4f-98ca-a4a43f675986", .path = "materials/default.mat", .category = cat });
+        _ = try register(.{ .urn = "e732bb0c-19bb-492b-a79d-24fde85964d2", .path = "materials/none.mat", .category = cat });
+        _ = try register(.{ .urn = "61de2700-0eac-4fd5-9c56-0bd5b6b9ba10", .path = "materials/pbr.mat", .category = cat });
+        _ = try register(.{ .urn = "ad4bc22b-3765-4a9d-bab7-7984e101428a", .path = "lost_empire-RGBA.png", .category = cat });
+        _ = try register(.{ .urn = "00923d64-c2ca-4d36-abbd-90b1fbde7a48", .path = "1x1.png", .category = cat });
+        _ = try register(.{ .urn = "54dff348-3f93-429a-83c0-2d29b1ae00dd", .path = "1x1b.png", .category = cat });
+        _ = try register(.{ .urn = "c4340d7a-caab-4925-965c-5ea71d8e447e", .path = "1x1h.png", .category = cat });
+        _ = try register(.{ .urn = "ac6b9d14-0a56-458a-a7cc-fd36ede79468", .path = "lost_empire.obj", .category = cat });
+        _ = try register(.{ .urn = "6d4f3849-e3d7-4cb0-b593-095a9afafb99", .path = "suzanne.obj", .category = cat });
+        _ = try register(.{ .urn = "23400ade-52d7-416b-9679-884a49de1722", .path = "cube.obj", .category = cat });
+        _ = try register(.{ .urn = "ab7151f0-1f77-4ae8-99ad-17695c6ab9de", .path = "sphere.obj", .category = cat });
     }
 
-    {
-        _ = try registerBuiltinShader("cf64bfc9-703c-43b0-9d01-c8032706872c", "tri_mesh.vert.glsl");
-        _ = try registerBuiltinShader("79d1e1cc-607d-491c-b2e8-d1d3a44bd6a4", "pbr.frag.glsl");
-        _ = try registerBuiltinShader("8b4db7d0-33a6-4f42-96cc-7b1d88566f27", "default_lit.frag.glsl");
-        _ = try registerBuiltinShader("9939ab1b-d72c-4463-b039-58211f2d6531", "textured_lit.frag.glsl");
+    { // builtin shaders
+        const cat = "builtin-shaders";
+        _ = try register(.{ .urn = "cf64bfc9-703c-43b0-9d01-c8032706872c", .path = "simple.vert", .category = cat });
+        _ = try register(.{ .urn = "79d1e1cc-607d-491c-b2e8-d1d3a44bd6a4", .path = "pbr.frag", .category = cat });
+        _ = try register(.{ .urn = "8b4db7d0-33a6-4f42-96cc-7b1d88566f27", .path = "default_unlit.frag", .category = cat });
+        _ = try register(.{ .urn = "9939ab1b-d72c-4463-b039-58211f2d6531", .path = "textured_unlit.frag", .category = cat });
     }
 
-    {
+    { // editor resources
         _ = try register(.{ .urn = "2d02fa29-3740-4dfc-ab04-e77539734053", .path = "icons/play.png", .category = "editor" });
         _ = try register(.{ .urn = "f4f6b6d6-66f8-4e8a-a575-3316b6a8a684", .path = "icons/pause.png", .category = "editor" });
         _ = try register(.{ .urn = "b3cd9d64-6708-4d40-9f2b-9723df7bf3b1", .path = "icons/stop.png", .category = "editor" });
@@ -763,7 +758,7 @@ pub fn register(opts: struct {
     category: []const u8 = "project",
     ensure_meta: bool = true,
 }) !Uuid {
-    const is_builtin = std.mem.eql(u8, opts.category, "builtin") or std.mem.eql(u8, opts.category, "editor");
+    const is_builtin = std.mem.eql(u8, opts.category, "builtin") or std.mem.eql(u8, opts.category, "builtin-shaders") or std.mem.eql(u8, opts.category, "editor");
     var self = instance();
     const id = try Uuid.fromUrnSlice(opts.urn);
     const editor_root = try Editor.rootDir(self.allocator);
@@ -830,8 +825,6 @@ fn registerBuiltinShader(urn: []const u8, path: []const u8) !void {
     const id = try Uuid.fromUrnSlice(urn);
     const editor_root = try Editor.rootDir(self.allocator);
     defer self.allocator.free(editor_root);
-    const pathspv = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ path[0 .. path.len - ".glsl".len], "spv" });
-    defer self.allocator.free(pathspv);
     const uri = try std.fmt.allocPrint(self.allocator, "builtin-shaders://{s}", .{path});
     try self.resources.put(id, Resource{
         .id = id,
@@ -1401,10 +1394,6 @@ pub const Uri = extern struct {
             if (buf.len <= slice.len) return error.NoSpaceLeft;
             buf[slice.len] = 0;
             return utils.normalizePathSepZ(@ptrCast(slice.ptr))[0..slice.len :0];
-        } else if (std.mem.eql(u8, uri.protocol(), "builtin-shaders")) { // TODO: use builtin://shaders/*
-            var editor_root_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const editor_root = try Editor.bufRootDir(&editor_root_buf);
-            return try std.fmt.bufPrintZ(buf, "{s}/shaders/{s}", .{ editor_root, uri.path() });
         } else {
             var editor_root_buf: [std.fs.max_path_bytes]u8 = undefined;
             const editor_root = try Editor.bufRootDir(&editor_root_buf);
