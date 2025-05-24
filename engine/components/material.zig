@@ -3,6 +3,7 @@ const std = @import("std");
 const log = std.log.scoped(.material);
 
 const ecs = @import("../ecs.zig");
+const Engine = @import("../VulkanEngine.zig");
 const GameApp = @import("../GameApp.zig");
 const assets = @import("../assets.zig");
 const Assets = assets.Assets;
@@ -12,6 +13,8 @@ const Uuid = @import("../uuid.zig").Uuid;
 
 pub const Material = extern struct {
     handle: assets.MaterialHandle,
+    shader: assets.ShaderHandle,
+
     pipeline: c.VkPipeline,
     pipeline_layout: c.VkPipelineLayout,
 

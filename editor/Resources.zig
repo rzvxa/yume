@@ -58,10 +58,10 @@ pub const Resource = struct {
 
         pub fn toAssetType(self: Type) assets.AssetType {
             return switch (self) {
-                .shader, .shader_stage => .binary, // TODO: we need to treat shaders as assets, use .shader
-                .unknown, .project => .binary,
+                .unknown, .project, .shader_stage => .binary,
                 .scene => .scene,
                 .mat => .material,
+                .shader => .shader,
                 .obj, .fbx => .mesh,
                 .png => .image,
             };

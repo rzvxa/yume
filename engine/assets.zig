@@ -12,6 +12,7 @@ const Mesh = components.Mesh;
 const Vertex = components.mesh.Vertex;
 
 const Material = components.Material;
+const Shader = @import("shaders.zig").Shader;
 
 const Engine = @import("VulkanEngine.zig");
 const Scene = @import("scene.zig").Scene;
@@ -94,6 +95,7 @@ pub const Assets = struct {
                         .texture => loadTexture(handle),
                         .mesh => loadMesh(handle),
                         .material => loadMaterial(handle),
+                        .shader => loadShader(handle),
                         .scene => loadScene(handle),
                     };
                     break :r try getLoadedAsset(generic_handle);
@@ -108,6 +110,7 @@ pub const Assets = struct {
             .texture => loaded.data.texture,
             .mesh => loaded.data.mesh,
             .material => loaded.data.material,
+            .shader => loaded.data.shader,
             .scene => loaded.data.scene,
         };
     }
@@ -259,16 +262,8 @@ pub const Assets = struct {
         ) catch @panic("Failed to parse the material json");
         defer mat_parsed.deinit();
 
-        const shader_json = try instance.loader(instance.allocator, mat_parsed.value.shader, 20_000);
-        defer instance.allocator.free(shader_json);
-
-        const shader_parsed = std.json.parseFromSlice(
-            ShaderDef,
-            instance.allocator,
-            shader_json,
-            .{},
-        ) catch @panic("Failed to parse the shader json");
-        defer shader_parsed.deinit();
+        const shader = try get(ShaderHandle{ .uuid = mat_parsed.value.shader });
+        errdefer release(shader) catch {};
 
         const material = try instance.allocator.create(Material);
 
@@ -360,13 +355,6 @@ pub const Assets = struct {
         pipeline_builder.vertex_input_state.pVertexBindingDescriptions = vertex_descritpion.bindings.ptr;
         pipeline_builder.vertex_input_state.vertexBindingDescriptionCount = @as(u32, @intCast(vertex_descritpion.bindings.len));
 
-        const vert_code = try instance.loader(instance.allocator, shader_parsed.value.passes.vertex, 20_000);
-        defer instance.allocator.free(vert_code);
-        const vert_module = instance.engine.createShaderModule(vert_code) orelse null;
-        defer c.vkDestroyShaderModule(instance.engine.device, vert_module, Engine.vk_alloc_cbs);
-
-        if (vert_module != null) log.info("vert module loaded successfully", .{});
-
         // New layout for push constants
         const push_constant_range = std.mem.zeroInit(c.VkPushConstantRange, .{
             .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT,
@@ -377,7 +365,7 @@ pub const Assets = struct {
         var set_layouts = [3]c.VkDescriptorSetLayout{
             instance.engine.global_set_layout,
             instance.engine.object_set_layout,
-            instance.engine.getDescriptorSetLayout(shader_parsed.value.layouts) catch @panic("Failed to create shader resouces descriptor set layout"),
+            instance.engine.getDescriptorSetLayout(shader.def.layouts) catch @panic("Failed to create shader resouces descriptor set layout"),
         };
         const resources_handles = try instance.allocator.alloc(AssetHandle, mat_parsed.value.resources.len);
 
@@ -392,7 +380,7 @@ pub const Assets = struct {
         var resource_set: c.VkDescriptorSet = undefined;
         check_vk(c.vkAllocateDescriptorSets(instance.engine.device, &descriptor_set_alloc_info, &resource_set)) catch @panic("Failed to allocate descriptor set");
 
-        for (shader_parsed.value.layouts, mat_parsed.value.resources, 0..) |layout, resource, i| {
+        for (shader.def.layouts, mat_parsed.value.resources, 0..) |layout, resource, i| {
             switch (layout) {
                 .texture => {
                     const tex = Self.get((ImageHandle{ .uuid = resource.? }).toTexture()) catch @panic("Failed to load texture");
@@ -446,18 +434,15 @@ pub const Assets = struct {
             &pipeline_layout,
         )) catch @panic("Failed to create textured mesh pipeline layout");
 
-        const frag_code = try instance.loader(instance.allocator, shader_parsed.value.passes.fragment, 20_000);
-        defer instance.allocator.free(frag_code);
-        const frag_module = instance.engine.createShaderModule(frag_code) orelse null;
-        defer c.vkDestroyShaderModule(instance.engine.device, frag_module, Engine.vk_alloc_cbs);
-
-        pipeline_builder.shader_stages[0].module = vert_module;
-        pipeline_builder.shader_stages[1].module = frag_module;
+        pipeline_builder.shader_stages[0].module = shader.modules.vertex;
+        pipeline_builder.shader_stages[1].module = shader.modules.fragment;
         pipeline_builder.pipeline_layout = pipeline_layout;
         const pipeline = pipeline_builder.build(instance.engine.device, instance.engine.render_pass);
 
         material.* = Material{
             .handle = handle,
+            .shader = shader.handle,
+
             .pipeline = pipeline,
             .pipeline_layout = pipeline_layout,
 
@@ -467,6 +452,52 @@ pub const Assets = struct {
         };
 
         const loaded = LoadedAsset{ .data = .{ .material = material } };
+        try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
+        try instance.loaded_ids.put(handle.uuid, {});
+    }
+
+    fn loadShader(handle: ShaderHandle) !void {
+        if (instance.loaded_ids.contains(handle.uuid)) {
+            return;
+        }
+        const shader_json = try instance.loader(instance.allocator, handle.uuid, 20_000);
+        defer instance.allocator.free(shader_json);
+
+        var shader_def = std.json.parseFromSliceLeaky(
+            Shader.Def,
+            instance.allocator,
+            shader_json,
+            .{},
+        ) catch @panic("Failed to parse the shader json");
+        errdefer shader_def.deinit(instance.allocator);
+
+        const shader = try instance.allocator.create(Shader);
+
+        const vert_code = try instance.loader(instance.allocator, shader_def.passes.vertex, 20_000);
+        defer instance.allocator.free(vert_code);
+        const vert_module = instance.engine.createShaderModule(vert_code) orelse null;
+        errdefer c.vkDestroyShaderModule(instance.engine.device, vert_module, Engine.vk_alloc_cbs);
+
+        if (vert_module == null) return error.FailedToLoadVertModule;
+
+        log.info("vert module loaded successfully: {s}", .{handle.uuid.urn()});
+
+        const frag_code = try instance.loader(instance.allocator, shader_def.passes.fragment, 20_000);
+        defer instance.allocator.free(frag_code);
+        const frag_module = instance.engine.createShaderModule(frag_code) orelse null;
+        errdefer c.vkDestroyShaderModule(instance.engine.device, frag_module, Engine.vk_alloc_cbs);
+
+        if (frag_module == null) return error.FailedToLoadFragModule;
+
+        log.info("frag module loaded successfully: {s}", .{handle.uuid.urn()});
+
+        shader.* = Shader{
+            .handle = handle,
+            .def = shader_def,
+            .modules = .{ .vertex = vert_module, .fragment = frag_module },
+        };
+
+        const loaded = LoadedAsset{ .data = .{ .shader = shader } };
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
         try instance.loaded_ids.put(handle.uuid, {});
     }
@@ -498,6 +529,7 @@ pub const AssetType = enum(u8) {
     texture,
     mesh,
     material,
+    shader,
     scene,
 
     pub fn BackingType(ty: AssetType) type {
@@ -507,6 +539,7 @@ pub const AssetType = enum(u8) {
             .texture => Texture,
             .mesh => Mesh,
             .material => Material,
+            .shader => Shader,
             .scene => Scene,
         };
     }
@@ -518,6 +551,7 @@ pub const AssetType = enum(u8) {
             .texture => TextureHandle,
             .mesh => MeshHandle,
             .material => MaterialHandle,
+            .shader => ShaderHandle,
             .scene => SceneHandle,
         };
     }
@@ -614,6 +648,7 @@ pub const TextureHandle = AssetHandleOf(.texture, .{
 });
 pub const MeshHandle = AssetHandleOf(.mesh, .{});
 pub const MaterialHandle = AssetHandleOf(.material, .{});
+pub const ShaderHandle = AssetHandleOf(.shader, .{});
 pub const SceneHandle = AssetHandleOf(.scene, .{});
 
 const LoadedAsset = struct {
@@ -624,6 +659,7 @@ const LoadedAsset = struct {
         texture: *Texture,
         mesh: *Mesh,
         material: *Material,
+        shader: *Shader,
         scene: *Scene,
     },
     ref_count: usize = 0,
@@ -670,6 +706,14 @@ const LoadedAsset = struct {
                     Assets.release(res) catch {};
                 }
                 Assets.instance.allocator.free(slice);
+                Assets.release(it.shader) catch {};
+                Assets.instance.allocator.destroy(it);
+            },
+            .shader => {
+                const it = self.data.shader;
+                it.def.deinit(Assets.instance.allocator);
+                c.vkDestroyShaderModule(Assets.instance.engine.device, it.modules.vertex, Engine.vk_alloc_cbs);
+                c.vkDestroyShaderModule(Assets.instance.engine.device, it.modules.fragment, Engine.vk_alloc_cbs);
                 Assets.instance.allocator.destroy(it);
             },
             .scene => {
@@ -678,15 +722,6 @@ const LoadedAsset = struct {
             },
         }
     }
-};
-
-const ShaderDef = struct {
-    const Passes = struct {
-        vertex: Uuid,
-        fragment: Uuid,
-    };
-    passes: Passes,
-    layouts: []Engine.UniformBindingKind,
 };
 
 const MaterialDef = struct {
