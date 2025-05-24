@@ -8,6 +8,8 @@ const Watch = @import("Watch.zig");
 const GameApp = @import("yume").GameApp;
 const assets = @import("yume").assets;
 
+const collections = @import("yume").collections;
+
 const Editor = @import("Editor.zig");
 
 const log = std.log.scoped(.Resources);
@@ -292,7 +294,7 @@ pub const ResourceNode = struct {
 
     pub const DfsPostOrder = struct {
         pub const Result = struct {
-            key_ptr: ?*[]const u8,
+            key_ptr: ?*[:0]const u8,
             value_ptr: *ResourceNode,
         };
         stack: std.ArrayList(Result),
@@ -329,12 +331,12 @@ pub const ResourceNode = struct {
     };
 
     node: Node,
-    children: std.StringArrayHashMap(ResourceNode),
+    children: collections.StringSentinelArrayHashMap(0, ResourceNode),
 
     fn init(allocator: std.mem.Allocator, node: Node) ResourceNode {
         return .{
             .node = node,
-            .children = std.StringArrayHashMap(ResourceNode).init(allocator),
+            .children = collections.StringSentinelArrayHashMap(0, ResourceNode).init(allocator),
         };
     }
 
@@ -367,7 +369,7 @@ pub const ResourceNode = struct {
         var node = self;
 
         while (segments.next()) |seg| {
-            if (node.children.getPtr(seg.name)) |child| {
+            if (node.children.getPtrAdapted(seg.name, collections.ArrayHashMapStringAdaptedContext)) |child| {
                 node = child;
             } else {
                 return null;
@@ -384,24 +386,26 @@ pub const ResourceNode = struct {
     fn getOrPutInternal(parent: *ResourceNode, segments: *std.fs.path.NativeComponentIterator) !GetOrPutResult {
         const allocator = parent.children.allocator;
         const segment = segments.next() orelse unreachable;
-        const entry = try parent.children.getOrPut(segment.name);
+        const name = try allocator.dupeZ(u8, segment.name);
+        const entry = try parent.children.getOrPut(name);
         const has_next = segments.peekNext() != null;
         if (!entry.found_existing) {
-            entry.key_ptr.* = try allocator.dupe(u8, segment.name);
             if (has_next) {
                 if (parent.node == .root) {
                     entry.value_ptr.* = ResourceNode.init(allocator, .{
                         .directory = Uri.fromOwnedSliceWithProtocolLen(
-                            try std.fmt.allocPrintZ(allocator, "{s}://", .{segment.name}),
-                            segment.name.len,
+                            try std.fmt.allocPrintZ(allocator, "{s}://", .{name}),
+                            name.len,
                         ),
                     });
                 } else {
                     entry.value_ptr.* = ResourceNode.init(allocator, .{
-                        .directory = try (try parent.node.uri()).join(allocator, &[_][]const u8{segment.name}),
+                        .directory = try (try parent.node.uri()).join(allocator, &[_][]const u8{name}),
                     });
                 }
             }
+        } else {
+            allocator.free(name);
         }
 
         return if (has_next)
@@ -846,7 +850,10 @@ fn unregister(id: Uuid) !void {
     };
     self.allocator.free(index_kv.key);
 
-    var rnode = parent.children.fetchOrderedRemove(std.fs.path.basename(res_ptr.path())) orelse
+    var rnode = parent.children.fetchOrderedRemoveAdapted(
+        std.fs.path.basename(res_ptr.path()),
+        collections.ArrayHashMapStringAdaptedContext,
+    ) orelse
         return error.UnexpectedError;
 
     self.allocator.free(rnode.key);
@@ -1054,7 +1061,10 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                 }
 
                 std.debug.assert(res.children.count() == 0);
-                var res_entry = parent_res.children.fetchOrderedRemove(std.fs.path.basename(uri.path())).?;
+                var res_entry = parent_res.children.fetchOrderedRemoveAdapted(
+                    std.fs.path.basename(uri.path()),
+                    collections.ArrayHashMapStringAdaptedContext,
+                ).?;
                 res_entry.value.deinit(true);
                 self.allocator.free(res_entry.key);
             },

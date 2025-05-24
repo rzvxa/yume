@@ -58,7 +58,7 @@ const ItemResult = union(enum) {
 };
 
 const OrderedItem = struct {
-    key: []const u8,
+    key: [:0]const u8,
     res: *ResourceNode,
     type: Resources.Resource.Type,
 
@@ -164,7 +164,7 @@ pub fn draw(self: *Self) !void {
 
 fn drawItem(
     self: *Self,
-    key: []const u8,
+    key: [:0]const u8,
     node: *const Node,
     typ: RType,
     item_sz: f32,
@@ -201,7 +201,7 @@ fn drawItem(
     defer allocator.free(name);
     const is_selected = if (self.selected_file) |sel| sel.eql(node) else false;
     const is_renaming = self.state.isRenaming(node);
-    c.ImGui_PushID(name.ptr);
+    c.ImGui_PushID(key);
     const pos = c.ImGui_GetCursorPos();
     const wrap_width = item_sz;
     const text_size = c.ImGui_CalcTextSizeEx(name.ptr, null, false, wrap_width);

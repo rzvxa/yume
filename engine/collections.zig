@@ -21,6 +21,15 @@ pub fn ArrayHashMapStringSentinelContext(comptime sentinel: u8) type {
     };
 }
 
+pub const ArrayHashMapStringAdaptedContext = struct {
+    pub fn hash(s: []const u8) u32 {
+        return @as(u32, @truncate(std.hash.Wyhash.hash(0, s)));
+    }
+    pub fn eql(a: []const u8, b: []const u8, _: usize) bool {
+        return std.mem.eql(u8, a, b);
+    }
+};
+
 pub fn ArrayHashMapStringSentinelSortContext(comptime sentinel: u8) type {
     return struct {
         keys: [][:sentinel]const u8,
@@ -40,3 +49,12 @@ pub fn HashMapStringSentinelContext(comptime sentinel: u8) type {
         }
     };
 }
+
+pub const HashMapStringAdaptedContext = struct {
+    pub fn hash(s: []const u8) u64 {
+        return std.hash.Wyhash.hash(0, s);
+    }
+    pub fn eql(a: []const u8, b: []const u8) bool {
+        return std.mem.eql(u8, a, b);
+    }
+};
