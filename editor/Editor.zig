@@ -618,7 +618,7 @@ fn initImGui(engine: *Engine) !void {
     defer engine.allocator.free(root_dir);
     io.*.IniFilename = try std.fs.path.joinZ(engine.allocator, &[_][]const u8{ root_dir, "imgui.ini" });
 
-    styles.visualStudioStyles();
+    styles.defaultStyles();
 }
 
 pub fn instance() *Self {
