@@ -15,18 +15,27 @@ const Self = @This();
 
 allocator: std.mem.Allocator,
 
-pub fn init(a: std.mem.Allocator) *anyopaque {
+pub fn asComponentEditor() ComponentEditor {
+    return .{
+        .init = @This().init,
+        .deinit = @This().deinit,
+        .edit = @This().edit,
+        .gizmo = @This().onGizmo,
+    };
+}
+
+fn init(a: std.mem.Allocator) *anyopaque {
     const ptr = a.create(@This()) catch @panic("OOM");
     ptr.* = @This(){ .allocator = a };
     return ptr;
 }
 
-pub fn deinit(ptr: *anyopaque) void {
+fn deinit(ptr: *anyopaque) void {
     const me = @as(*@This(), @ptrCast(@alignCast(ptr)));
     me.allocator.destroy(me);
 }
 
-pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
+fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
     var light = ctx.world.getMut(entity, ecs.components.PointLight).?;
     c.ImGui_PushID("point-light-editor");
     var changed: bool = false;
@@ -58,13 +67,4 @@ fn onGizmo(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void
     const color = c.ImGui_GetColorU32ImVec4(c.ImVec4{ .x = 228.0 / 255.0, .y = 143.0 / 255.0, .z = 32.0 / 255.0, .w = 1 });
 
     gizmo.drawSphere(origin, radius, color, segments);
-}
-
-pub fn asComponentEditor() ComponentEditor {
-    return .{
-        .init = @This().init,
-        .deinit = @This().deinit,
-        .edit = @This().edit,
-        .gizmo = @This().onGizmo,
-    };
 }

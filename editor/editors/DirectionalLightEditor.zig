@@ -15,18 +15,27 @@ const Self = @This();
 
 allocator: std.mem.Allocator,
 
-pub fn init(a: std.mem.Allocator) *anyopaque {
+pub fn asComponentEditor() ComponentEditor {
+    return .{
+        .init = @This().init,
+        .deinit = @This().deinit,
+        .edit = @This().edit,
+        .gizmo = Self.onGizmo,
+    };
+}
+
+fn init(a: std.mem.Allocator) *anyopaque {
     const ptr = a.create(@This()) catch @panic("OOM");
     ptr.* = @This(){ .allocator = a };
     return ptr;
 }
 
-pub fn deinit(ptr: *anyopaque) void {
+fn deinit(ptr: *anyopaque) void {
     const me = @as(*@This(), @ptrCast(@alignCast(ptr)));
     me.allocator.destroy(me);
 }
 
-pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
+fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
     var light = ctx.world.getMut(entity, ecs.components.DirectionalLight).?;
     c.ImGui_PushID("direcitonal-light-editor");
     var changed: bool = false;
@@ -61,13 +70,4 @@ fn onGizmo(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void
 
         gizmo.drawEdge(rayStart, rayEnd, color, 1, 0);
     }
-}
-
-pub fn asComponentEditor() ComponentEditor {
-    return .{
-        .init = @This().init,
-        .deinit = @This().deinit,
-        .edit = @This().edit,
-        .gizmo = Self.onGizmo,
-    };
 }

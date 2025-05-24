@@ -14,18 +14,28 @@ const Self = @This();
 
 allocator: std.mem.Allocator,
 
-pub fn init(a: std.mem.Allocator) *anyopaque {
+pub fn asComponentEditor() ComponentEditor {
+    return .{
+        .init = Self.init,
+        .deinit = Self.deinit,
+        .edit = Self.edit,
+        .gizmo = Self.onGizmo,
+        .flags = .{ .no_disable = true },
+    };
+}
+
+fn init(a: std.mem.Allocator) *anyopaque {
     const ptr = a.create(Self) catch @panic("OOM");
     ptr.* = Self{ .allocator = a };
     return ptr;
 }
 
-pub fn deinit(ptr: *anyopaque) void {
+fn deinit(ptr: *anyopaque) void {
     const me = @as(*Self, @ptrCast(@alignCast(ptr)));
     me.allocator.destroy(me);
 }
 
-pub fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
+fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
     var cam = ctx.world.getMut(entity, ecs.components.Camera).?;
     if (c.ImGui_BeginCombo("Camera Type", cam.opts.typeName().ptr, 0)) {
         if (c.ImGui_Selectable(ecs.components.camera.CameraKind.perspective_name)) {
@@ -68,14 +78,4 @@ fn onGizmo(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void
         },
         .orthographic => @panic("TODO"),
     }
-}
-
-pub fn asComponentEditor() ComponentEditor {
-    return .{
-        .init = Self.init,
-        .deinit = Self.deinit,
-        .edit = Self.edit,
-        .gizmo = Self.onGizmo,
-        .flags = .{ .no_disable = true },
-    };
 }

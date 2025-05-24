@@ -17,7 +17,15 @@ const Self = @This();
 allocator: std.mem.Allocator,
 shaders_root_uri: Resources.Uri,
 
-pub fn init(a: std.mem.Allocator) *anyopaque {
+pub fn asComponentEditor() ComponentEditor {
+    return .{
+        .init = @This().init,
+        .deinit = @This().deinit,
+        .edit = @This().editAsComponent,
+    };
+}
+
+fn init(a: std.mem.Allocator) *anyopaque {
     const ptr = a.create(@This()) catch @panic("OOM");
     ptr.* = @This(){
         .allocator = a,
@@ -26,28 +34,30 @@ pub fn init(a: std.mem.Allocator) *anyopaque {
     return ptr;
 }
 
-pub fn deinit(ptr: *anyopaque) void {
+fn deinit(ptr: *anyopaque) void {
     const me = @as(*@This(), @ptrCast(@alignCast(ptr)));
     me.shaders_root_uri.deinit(me.allocator);
     me.allocator.destroy(me);
 }
 
-pub fn edit(ptr: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
+fn editAsComponent(ptr: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
     const me = @as(*@This(), @ptrCast(@alignCast(ptr)));
-    var mat = ctx.world.getMut(entity, ecs.components.Material).?;
+    const mat = ctx.world.getMut(entity, ecs.components.Material).?;
+    me.edit(mat, ctx) catch @panic("Failed to edit the material");
+}
+
+fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
     if (c.ImGui_BeginCombo("Shader", "selected shader", c.ImGuiComboFlags_None)) {
         defer c.ImGui_EndCombo();
-        const shaders = Resources.findResourceNodeByUri(&me.shaders_root_uri) catch @panic("shaders not found") orelse unreachable;
-        var dfs = shaders.dfs(me.allocator, .pre) catch @panic("Failed to walk the shaders");
+        const shaders = try Resources.findResourceNodeByUri(&self.shaders_root_uri) orelse unreachable;
+        var dfs = try shaders.dfs(self.allocator, .pre);
         defer dfs.deinit();
-        while (dfs.next() catch @panic("Failed to walk the shaders")) |e| {
+        while (try dfs.next()) |e| {
             switch (e.event) {
                 .enter => |res| {
                     if (res.node != .resource) continue;
-                    if (Resources.getResourceType(res.node.resource) catch .unknown != .shader) continue;
-                    const path = res.node.path() catch "ERROR";
-                    // var buf: [std.fs.max_path_bytes]u8 = undefined;
-                    // const pathz = std.fmt.bufPrintZ(&buf, "{s}", .{std.fs.path.basename(path)}) catch "ERROR";
+                    if (try Resources.getResourceType(res.node.resource) != .shader) continue;
+                    const path = try res.node.path();
                     _ = c.ImGui_Selectable(path);
                 },
                 .leave => {},
@@ -62,12 +72,4 @@ pub fn edit(ptr: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) v
     _ = c.ImGui_Button("...");
     c.ImGui_SameLine();
     _ = c.ImGui_Text("Material");
-}
-
-pub fn asComponentEditor() ComponentEditor {
-    return .{
-        .init = @This().init,
-        .deinit = @This().deinit,
-        .edit = @This().edit,
-    };
 }

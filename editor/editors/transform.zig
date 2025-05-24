@@ -81,7 +81,7 @@ pub fn edit(self: *Self, entity: ecs.Entity, ctx: *GameApp) void {
     }
 }
 
-pub fn inputVec3(label: [*c]const u8, v: *Vec3, speed: f32) bool {
+fn inputVec3(label: [*c]const u8, v: *Vec3, speed: f32) bool {
     c.ImGui_PushID(label);
     defer c.ImGui_PopID();
     var changed = false;
@@ -99,6 +99,6 @@ pub fn inputVec3(label: [*c]const u8, v: *Vec3, speed: f32) bool {
     return changed;
 }
 
-pub fn dragFloatWithSpeed(label: [*c]const u8, v: *f32, speed: f32) bool {
+fn dragFloatWithSpeed(label: [*c]const u8, v: *f32, speed: f32) bool {
     return c.ImGui_DragFloatEx(label, v, speed, 0, 0, null, 0);
 }
