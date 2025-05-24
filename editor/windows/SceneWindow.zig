@@ -177,7 +177,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
         const active_col = c.ImGui_GetStyle().*.Colors[c.ImGuiCol_ButtonHovered];
         if (c.ImGui_BeginChildFrame(c.ImGui_GetID("##toolbox"), c.ImVec2{
             .x = icon_sz.x + (c.ImGui_GetStyle().*.FramePadding.x * 4),
-            .y = ((icon_sz.y + c.ImGui_GetStyle().*.FramePadding.y * 4) * 6) - 2,
+            .y = ((icon_sz.y + c.ImGui_GetStyle().*.FramePadding.y * 4 - 2) * 6),
         })) {
             var clicked = false;
             c.ImGui_PushStyleColorImVec4(
