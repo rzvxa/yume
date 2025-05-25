@@ -4,6 +4,7 @@ const std = @import("std");
 
 const Uuid = @import("uuid.zig").Uuid;
 const texs = @import("textures.zig");
+const Vec4 = @import("math3d.zig").Vec4;
 const Texture = texs.Texture;
 
 const components = @import("ecs.zig").components;
@@ -11,8 +12,9 @@ const components = @import("ecs.zig").components;
 const Mesh = components.Mesh;
 const Vertex = components.mesh.Vertex;
 
-const Material = components.Material;
-const Shader = @import("shaders.zig").Shader;
+const shading = @import("shading.zig");
+const Shader = shading.Shader;
+const Material = shading.Material;
 
 const Engine = @import("VulkanEngine.zig");
 const Scene = @import("scene.zig").Scene;
@@ -231,6 +233,51 @@ pub const Assets = struct {
         try instance.loaded_ids.put(handle.uuid, {});
     }
 
+    pub fn loadColorTexture(self: *Self, color: Vec4) !void {
+        // convert normalized Vec3 color to 8-bit per channel RGBA data.
+        const r: u8 = @intCast(color.x * 255);
+        const g: u8 = @intCast(color.y * 255);
+        const b: u8 = @intCast(color.z * 255);
+        const a: u8 = @intCast(color.w * 255);
+        const pixel: [4]u8 = .{ r, g, b, a };
+
+        // create a 1x1 image from the single pixel.
+        const image = try self.createImageFromPixels(pixel[0..], 1, 1, c.VK_FORMAT_R8G8B8A8_UNORM);
+
+        const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
+            .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
+            .image = image.image,
+            .format = c.VK_FORMAT_R8G8B8A8_UNORM,
+            .components = .{
+                .r = c.VK_COMPONENT_SWIZZLE_IDENTITY,
+                .g = c.VK_COMPONENT_SWIZZLE_IDENTITY,
+                .b = c.VK_COMPONENT_SWIZZLE_IDENTITY,
+                .a = c.VK_COMPONENT_SWIZZLE_IDENTITY,
+            },
+            .subresourceRange = .{
+                .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+        });
+
+        var texture = try self.instance.allocator.create(Texture);
+        texture.* = Texture{
+            // Generate a texture handle; here we assume a helper that creates one from the provided color.
+            .handle = TextureHandle{ .uuid = self.generateColorTextureUUID(color) },
+            .image = image,
+            .image_view = null,
+        };
+
+        // Create the image view associated with this image.
+        check_vk(c.vkCreateImageView(self.instance.engine.device, &image_view_ci, Engine.vk_alloc_cbs, &texture.image_view)) catch @panic("Failed to create image view for color texture");
+
+        // return texture;
+    }
+
     fn loadMesh(handle: MeshHandle) !void {
         if (instance.loaded_ids.contains(handle.uuid)) {
             return;
@@ -255,7 +302,7 @@ pub const Assets = struct {
         defer instance.allocator.free(matjson);
 
         const mat_parsed = std.json.parseFromSlice(
-            MaterialDef,
+            Material.Def,
             instance.allocator,
             matjson,
             .{},
@@ -266,11 +313,6 @@ pub const Assets = struct {
         errdefer release(shader) catch {};
 
         const material = try instance.allocator.create(Material);
-
-        // NOTE: we are currently destroying the shader modules as soon as we are done
-        // creating the pipeline. This is not great if we needed the modules for multiple pipelines.
-        // Howver, for the sake of simplicity, we are doing it this way for now.
-        // shaders including their variants should be treated like any other loaded asset
 
         const vertex_input_state_ci = std.mem.zeroInit(c.VkPipelineVertexInputStateCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -365,7 +407,7 @@ pub const Assets = struct {
         var set_layouts = [3]c.VkDescriptorSetLayout{
             instance.engine.global_set_layout,
             instance.engine.object_set_layout,
-            instance.engine.getDescriptorSetLayout(shader.def.layouts) catch @panic("Failed to create shader resouces descriptor set layout"),
+            instance.engine.getDescriptorSetLayout(shader.def.layout) catch @panic("Failed to create shader resouces descriptor set layout"),
         };
         const resources_handles = try instance.allocator.alloc(AssetHandle, mat_parsed.value.resources.len);
 
@@ -380,10 +422,11 @@ pub const Assets = struct {
         var resource_set: c.VkDescriptorSet = undefined;
         check_vk(c.vkAllocateDescriptorSets(instance.engine.device, &descriptor_set_alloc_info, &resource_set)) catch @panic("Failed to allocate descriptor set");
 
-        for (shader.def.layouts, mat_parsed.value.resources, 0..) |layout, resource, i| {
-            switch (layout) {
+        for (shader.def.layout, mat_parsed.value.resources, 0..) |uniform, resource, i| {
+            switch (uniform.kind) {
                 .texture => {
-                    const tex = Self.get((ImageHandle{ .uuid = resource.? }).toTexture()) catch @panic("Failed to load texture");
+                    const texture_handle = try resource.expect(.texture);
+                    const tex = Self.get(texture_handle) catch @panic("Failed to load texture");
                     resources_handles[i] = tex.handle.toAssetHandle();
 
                     const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
@@ -576,7 +619,7 @@ pub fn AssetHandleOf(comptime tag: AssetType, comptime opts: struct {
     overrides: type = struct {},
 }) type {
     return extern struct {
-        usingnamespace opts.extensions;
+        pub usingnamespace opts.extensions;
 
         pub const BackingType = tag.BackingType();
         pub const Tag = tag;
@@ -721,53 +764,6 @@ const LoadedAsset = struct {
                 it.deinit();
             },
         }
-    }
-};
-
-const MaterialDef = struct {
-    name: []const u8,
-    shader: Uuid,
-    resources: []?Uuid,
-
-    pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, opts: anytype) !@This() {
-        var tk = try jrs.next();
-        if (tk != .object_begin) return error.UnexpectedEndOfInput;
-
-        var result: MaterialDef = undefined;
-        var resources: ?[]?Uuid = null;
-
-        while (true) {
-            tk = try jrs.nextAlloc(a, .alloc_if_needed);
-            if (tk == .object_end) break;
-
-            const field_name = switch (tk) {
-                inline .string, .allocated_string => |slice| slice,
-                else => {
-                    log.err("{}\n", .{tk});
-                    return error.UnexpectedToken;
-                },
-            };
-
-            if (std.mem.eql(u8, field_name, "name")) {
-                result.name = switch (try jrs.next()) {
-                    inline .string => |slice| try a.dupeZ(u8, slice),
-                    else => {
-                        log.err("{}\n", .{tk});
-                        return error.UnexpectedToken;
-                    },
-                };
-            } else if (std.mem.eql(u8, field_name, "shader")) {
-                result.shader = try std.json.innerParse(Uuid, a, jrs, opts);
-            } else if (std.mem.eql(u8, field_name, "resources")) {
-                resources = try std.json.innerParse([]?Uuid, a, jrs, opts);
-            } else {
-                try jrs.skipValue();
-            }
-        }
-
-        result.resources = resources orelse try a.alloc(?Uuid, 0);
-
-        return result;
     }
 };
 

@@ -23,6 +23,8 @@ const Vertex = components.mesh.Vertex;
 const BoundingBox = components.mesh.BoundingBox;
 const Material = components.Material;
 
+const Shader = @import("shading.zig").Shader;
+
 const log = std.log.scoped(.vulkan_engine);
 
 const Self = @This();
@@ -31,6 +33,10 @@ const MAX_OBJECTS = 10000;
 pub const vk_alloc_cbs: ?*c.VkAllocationCallbacks = null;
 
 pub const RenderCommand = c.VkCommandBuffer;
+pub const ShaderModule = c.VkShaderModule;
+pub const Pipeline = c.VkPipeline;
+pub const PipelineLayout = c.VkPipelineLayout;
+pub const DescriptorSet = c.VkDescriptorSet;
 
 pub const AllocatedBuffer = extern struct {
     buffer: c.VkBuffer,
@@ -1393,29 +1399,29 @@ pub fn drawObjects(
     self.object_buffer_offset += num_objects;
 
     // ----- Issue Draw Calls Using the Correct Buffer Region -----
-    for (opts.materials, opts.meshes, 0..) |*material, *mesh, index| {
-        if (index == 0 or material != &opts.materials[index - 1]) {
-            c.vkCmdBindPipeline(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline);
+    for (opts.materials, opts.meshes, 0..) |material, *mesh, index| {
+        if (index == 0 or material.ref != opts.materials[index - 1].ref) {
+            c.vkCmdBindPipeline(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.ref.pipeline);
 
             const uniform_offsets = [_]u32{
                 @as(u32, @intCast(camera_data_offset)),
                 @as(u32, @intCast(scene_data_offset)),
             };
 
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 0, 1, &opts.ubo_set, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.ref.pipeline_layout, 0, 1, &opts.ubo_set, @as(u32, @intCast(uniform_offsets.len)), &uniform_offsets[0]);
 
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 1, 1, &currentFrame.object_descriptor_set, 0, null);
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.ref.pipeline_layout, 1, 1, &currentFrame.object_descriptor_set, 0, null);
         }
 
-        if (material.rsc_descriptor_set != null) {
-            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.pipeline_layout, 2, 1, &material.rsc_descriptor_set, 0, null);
+        if (material.ref.rsc_descriptor_set != null) {
+            c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_GRAPHICS, material.ref.pipeline_layout, 2, 1, &material.ref.rsc_descriptor_set, 0, null);
         }
 
         // const push_constants = MeshPushConstants{
         //     .render_matrix = ltw.value.mul(matrix.value),
         // };
         //
-        // c.vkCmdPushConstants(cmd, material.pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &push_constants);
+        // c.vkCmdPushConstants(cmd, material.ref.pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &push_constants);
 
         if (index == 0 or mesh != &opts.meshes[index - 1]) {
             const offset: c.VkDeviceSize = 0;
@@ -1519,8 +1525,8 @@ pub fn immediateSubmit(self: *Self, submit_ctx: anytype) void {
     check_vk(c.vkResetCommandPool(self.device, self.upload_context.command_pool, 0)) catch @panic("Failed to reset command pool");
 }
 
-pub fn getDescriptorSetLayout(self: *Self, layout: []const UniformBindingKind) !c.VkDescriptorSetLayout {
-    const pattern = uniformBindingLayoutHash(layout);
+pub fn getDescriptorSetLayout(self: *Self, layout: []const Shader.Def.Uniform) !c.VkDescriptorSetLayout {
+    const pattern = Shader.Def.Uniform.bindingLayoutHash(layout);
     const entry = try self.shaders_set_layouts.getOrPut(pattern);
     if (entry.found_existing) {
         return entry.value_ptr.*;
@@ -1529,8 +1535,8 @@ pub fn getDescriptorSetLayout(self: *Self, layout: []const UniformBindingKind) !
     const bindings = try self.allocator.alloc(c.VkDescriptorSetLayoutBinding, layout.len);
     defer self.allocator.free(bindings);
 
-    for (layout, 0..) |binding, i| {
-        bindings[i] = switch (binding) {
+    for (layout, 0..) |uniform, i| {
+        bindings[i] = switch (uniform.kind) {
             .texture => std.mem.zeroInit(c.VkDescriptorSetLayoutBinding, .{
                 .binding = @as(u32, @intCast(i)),
                 .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -1552,21 +1558,3 @@ pub fn getDescriptorSetLayout(self: *Self, layout: []const UniformBindingKind) !
     self.deletion_queue.append(VulkanDeleter.make(entry.value_ptr.*, c.vkDestroyDescriptorSetLayout)) catch @panic("Out of memory");
     return entry.value_ptr.*;
 }
-
-pub const UniformBindingKind = enum {
-    texture,
-    cube,
-};
-
-pub fn uniformBindingLayoutHash(layout: []const UniformBindingKind) u32 {
-    var hash: u32 = 0;
-    const prime: u32 = 31;
-
-    for (layout) |binding| {
-        hash = hash * prime + @intFromEnum(binding);
-    }
-
-    return hash;
-}
-
-pub const ShaderModule = c.VkShaderModule;
