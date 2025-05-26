@@ -60,7 +60,6 @@ pub const Shader = struct {
     };
 
     handle: assets.ShaderHandle,
-    def: Def,
     modules: Modules,
 };
 
@@ -133,6 +132,11 @@ pub const Material = struct {
         name: [:0]const u8,
         shader: Uuid,
         resources: []ResourceDef,
+
+        pub fn deinit(def: *Def, allocator: std.mem.Allocator) void {
+            allocator.free(def.name);
+            allocator.free(def.resources);
+        }
 
         pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, opts: anytype) !@This() {
             var tk = try jrs.next();

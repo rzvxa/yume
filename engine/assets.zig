@@ -29,6 +29,23 @@ const Image = Engine.AllocatedImage;
 pub const RGBA8 = [4]u8;
 
 pub const Assets = struct {
+    pub const Loaders = struct {
+        pub const Error = error{
+            OutOfMemory,
+            ResourceNotFound,
+            FailedToOpenResource,
+            FailedToReadResource,
+            FailedToParseResource,
+        };
+
+        pub const ResourceLoader = *const fn (allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) Error![]u8;
+        pub const ShaderDefLoader = *const fn (id: Uuid) Error!*const Shader.Def;
+        pub const MaterialDefLoader = *const fn (id: Uuid) Error!*const Material.Def;
+
+        resource: ResourceLoader,
+        shader_def: ShaderDefLoader,
+        material_def: MaterialDefLoader,
+    };
     const Self = @This();
 
     var instance: Assets = undefined;
@@ -43,9 +60,9 @@ pub const Assets = struct {
     unused_assets_maps: [4]std.AutoHashMap(AssetHandle, void),
     unused_assets_active_idx: u3 = 3,
 
-    loader: ResourceLoader,
+    loaders: Loaders,
 
-    pub fn init(allocator: std.mem.Allocator, engine: *Engine, loader: ResourceLoader) void {
+    pub fn init(allocator: std.mem.Allocator, engine: *Engine, loaders: Loaders) void {
         instance = .{
             .allocator = allocator,
             .engine = engine,
@@ -56,7 +73,7 @@ pub const Assets = struct {
 
             .unused_assets_maps = undefined,
 
-            .loader = loader,
+            .loaders = loaders,
         };
 
         for (0..instance.unused_assets_maps.len) |i| {
@@ -201,7 +218,7 @@ pub const Assets = struct {
             return;
         }
 
-        const bytes = try instance.loader(instance.allocator, handle.uuid, default_max_bytes);
+        const bytes = try instance.loaders.resource(instance.allocator, handle.uuid, default_max_bytes);
         defer instance.allocator.free(bytes);
 
         const image = try instance.allocator.create(Image);
@@ -308,7 +325,7 @@ pub const Assets = struct {
         if (instance.loaded_ids.contains(handle.uuid)) {
             return;
         }
-        const bytes = try instance.loader(instance.allocator, handle.uuid, default_max_bytes);
+        const bytes = try instance.loaders.resource(instance.allocator, handle.uuid, default_max_bytes);
         defer instance.allocator.free(bytes);
 
         const mesh = try instance.allocator.create(Mesh);
@@ -324,18 +341,10 @@ pub const Assets = struct {
         if (instance.loaded_ids.contains(handle.uuid)) {
             return;
         }
-        const matjson = try instance.loader(instance.allocator, handle.uuid, 20_000);
-        defer instance.allocator.free(matjson);
+        const material_def = try instance.loaders.material_def(handle.uuid);
 
-        const mat_parsed = std.json.parseFromSlice(
-            Material.Def,
-            instance.allocator,
-            matjson,
-            .{},
-        ) catch @panic("Failed to parse the material json");
-        defer mat_parsed.deinit();
-
-        const shader = try get(ShaderHandle{ .uuid = mat_parsed.value.shader });
+        const shader_def = try instance.loaders.shader_def(material_def.shader);
+        const shader = try get(ShaderHandle{ .uuid = material_def.shader });
         errdefer release(shader) catch {};
 
         const material = try instance.allocator.create(Material);
@@ -433,9 +442,9 @@ pub const Assets = struct {
         var set_layouts = [3]c.VkDescriptorSetLayout{
             instance.engine.global_set_layout,
             instance.engine.object_set_layout,
-            instance.engine.getDescriptorSetLayout(shader.def.layout) catch @panic("Failed to create shader resouces descriptor set layout"),
+            instance.engine.getDescriptorSetLayout(shader_def.layout) catch @panic("Failed to create shader resouces descriptor set layout"),
         };
-        const resources_handles = try instance.allocator.alloc(AssetHandle, mat_parsed.value.resources.len);
+        const resources_handles = try instance.allocator.alloc(AssetHandle, material_def.resources.len);
 
         // Allocate descriptor set for shader resources
         const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
@@ -448,7 +457,7 @@ pub const Assets = struct {
         var resource_set: c.VkDescriptorSet = undefined;
         check_vk(c.vkAllocateDescriptorSets(instance.engine.device, &descriptor_set_alloc_info, &resource_set)) catch @panic("Failed to allocate descriptor set");
 
-        for (shader.def.layout, mat_parsed.value.resources, 0..) |uniform, resource, i| {
+        for (shader_def.layout, material_def.resources, 0..) |uniform, resource, i| {
             switch (uniform.kind) {
                 .texture => {
                     const tex = try resource.get(.texture);
@@ -528,20 +537,11 @@ pub const Assets = struct {
         if (instance.loaded_ids.contains(handle.uuid)) {
             return;
         }
-        const shader_json = try instance.loader(instance.allocator, handle.uuid, 20_000);
-        defer instance.allocator.free(shader_json);
 
-        var shader_def = std.json.parseFromSliceLeaky(
-            Shader.Def,
-            instance.allocator,
-            shader_json,
-            .{},
-        ) catch @panic("Failed to parse the shader json");
-        errdefer shader_def.deinit(instance.allocator);
-
+        const shader_def = try instance.loaders.shader_def(handle.uuid);
         const shader = try instance.allocator.create(Shader);
 
-        const vert_code = try instance.loader(instance.allocator, shader_def.passes.vertex, 20_000);
+        const vert_code = try instance.loaders.resource(instance.allocator, shader_def.passes.vertex, 20_000);
         defer instance.allocator.free(vert_code);
         const vert_module = instance.engine.createShaderModule(vert_code) orelse null;
         errdefer c.vkDestroyShaderModule(instance.engine.device, vert_module, Engine.vk_alloc_cbs);
@@ -550,7 +550,7 @@ pub const Assets = struct {
 
         log.info("vert module loaded successfully: {s}", .{handle.uuid.urn()});
 
-        const frag_code = try instance.loader(instance.allocator, shader_def.passes.fragment, 20_000);
+        const frag_code = try instance.loaders.resource(instance.allocator, shader_def.passes.fragment, 20_000);
         defer instance.allocator.free(frag_code);
         const frag_module = instance.engine.createShaderModule(frag_code) orelse null;
         errdefer c.vkDestroyShaderModule(instance.engine.device, frag_module, Engine.vk_alloc_cbs);
@@ -561,7 +561,6 @@ pub const Assets = struct {
 
         shader.* = Shader{
             .handle = handle,
-            .def = shader_def,
             .modules = .{ .vertex = vert_module, .fragment = frag_module },
         };
 
@@ -574,7 +573,7 @@ pub const Assets = struct {
         if (instance.loaded_ids.contains(handle.uuid)) {
             return;
         }
-        const bytes = try instance.loader(instance.allocator, handle.uuid, default_max_bytes);
+        const bytes = try instance.loaders.resource(instance.allocator, handle.uuid, default_max_bytes);
         defer instance.allocator.free(bytes);
 
         const scene = try Scene.fromJson(instance.allocator, bytes, .{});
@@ -779,7 +778,6 @@ const LoadedAsset = struct {
             },
             .shader => {
                 const it = self.data.shader;
-                it.def.deinit(Assets.instance.allocator);
                 c.vkDestroyShaderModule(Assets.instance.engine.device, it.modules.vertex, Engine.vk_alloc_cbs);
                 c.vkDestroyShaderModule(Assets.instance.engine.device, it.modules.fragment, Engine.vk_alloc_cbs);
                 Assets.instance.allocator.destroy(it);
@@ -791,5 +789,3 @@ const LoadedAsset = struct {
         }
     }
 };
-
-pub const ResourceLoader = *const fn (allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) error{ ResourceNotFound, FailedToOpenResource, FailedToReadResource }![]u8;

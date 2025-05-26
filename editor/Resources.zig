@@ -7,6 +7,7 @@ const Watch = @import("Watch.zig");
 
 const GameApp = @import("yume").GameApp;
 const assets = @import("yume").assets;
+const shading = @import("yume").shading;
 
 const collections = @import("yume").collections;
 
@@ -180,6 +181,9 @@ resources: ResourceStorage,
 resources_index: std.StringHashMap(Uuid), // key is the resource URI
 
 resource_tree: ResourceNode,
+
+loaded_shader_defs: std.AutoHashMap(Uuid, *shading.Shader.Def),
+loaded_material_defs: std.AutoHashMap(Uuid, *shading.Material.Def),
 
 watcher: ?*Watch = null,
 watcher_counter: f32 = 0,
@@ -430,6 +434,9 @@ pub fn init(allocator: std.mem.Allocator) !void {
         .resources_index = std.StringHashMap(Uuid).init(allocator),
         .resource_tree = ResourceNode.init(allocator, .root),
 
+        .loaded_shader_defs = std.AutoHashMap(Uuid, *shading.Shader.Def).init(allocator),
+        .loaded_material_defs = std.AutoHashMap(Uuid, *shading.Material.Def).init(allocator),
+
         .watcher = if (Watch.supported_platform) try Watch.init(allocator, ".") else null,
 
         .on_register = OnRegisterEvent.List.init(allocator),
@@ -550,6 +557,24 @@ pub fn deinit() !void {
     self.on_register.deinit();
     self.on_unregister.deinit();
     self.on_reinit.deinit();
+
+    {
+        var it = self.loaded_shader_defs.valueIterator();
+        while (it.next()) |def| {
+            def.*.deinit(self.allocator);
+            self.allocator.destroy(def.*);
+        }
+        self.loaded_shader_defs.deinit();
+    }
+
+    {
+        var it = self.loaded_material_defs.valueIterator();
+        while (it.next()) |def| {
+            def.*.deinit(self.allocator);
+            self.allocator.destroy(def.*);
+        }
+        self.loaded_material_defs.deinit();
+    }
 
     {
         var it = self.resources_index.iterator();
@@ -712,6 +737,64 @@ pub fn readAssetAlloc(allocator: std.mem.Allocator, id: Uuid, max_bytes: usize) 
     var file = std.fs.cwd().openFile(fullpath, .{}) catch return error.FailedToOpenResource;
     defer file.close();
     return file.readToEndAlloc(allocator, max_bytes) catch return error.FailedToReadResource;
+}
+
+pub fn getShaderDef(id: Uuid) !*const shading.Shader.Def {
+    return try getShaderDefMut(id);
+}
+
+pub fn getShaderDefMut(id: Uuid) !*shading.Shader.Def {
+    const max_bytes = 20_000;
+    const self = instance();
+    const gop = try self.loaded_shader_defs.getOrPut(id);
+    if (gop.found_existing) {
+        return gop.value_ptr.*;
+    }
+    errdefer self.loaded_shader_defs.removeByPtr(gop.key_ptr);
+
+    const json = try readAssetAlloc(self.allocator, id, max_bytes);
+    defer self.allocator.free(json);
+
+    gop.value_ptr.* = try self.allocator.create(shading.Shader.Def);
+    errdefer gop.value_ptr.*.deinit(self.allocator);
+
+    gop.value_ptr.*.* = std.json.parseFromSliceLeaky(
+        shading.Shader.Def,
+        self.allocator,
+        json,
+        .{},
+    ) catch return error.FailedToParseResource;
+
+    return gop.value_ptr.*;
+}
+
+pub fn getMaterialDef(id: Uuid) !*const shading.Material.Def {
+    return try getMaterialDefMut(id);
+}
+
+pub fn getMaterialDefMut(id: Uuid) !*shading.Material.Def {
+    const max_bytes = 20_000;
+    const self = instance();
+    const gop = try self.loaded_material_defs.getOrPut(id);
+    if (gop.found_existing) {
+        return gop.value_ptr.*;
+    }
+    errdefer self.loaded_material_defs.removeByPtr(gop.key_ptr);
+
+    const json = try readAssetAlloc(self.allocator, id, max_bytes);
+    defer self.allocator.free(json);
+
+    gop.value_ptr.* = try self.allocator.create(shading.Material.Def);
+    errdefer gop.value_ptr.*.deinit(self.allocator);
+
+    gop.value_ptr.*.* = std.json.parseFromSliceLeaky(
+        shading.Material.Def,
+        self.allocator,
+        json,
+        .{},
+    ) catch return error.FailedToParseResource;
+
+    return gop.value_ptr.*;
 }
 
 pub fn dfsPreOrder(allocator: std.mem.Allocator) !ResourceNode.DfsPreOrder {

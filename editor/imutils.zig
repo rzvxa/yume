@@ -313,12 +313,13 @@ pub fn fourwayInputs() enum { none, up, down, left, right } {
     }
 }
 
-pub fn assetHandleInput(label: [*:0]const u8, handle: assets.AssetHandle) !?assets.AssetHandle {
-    var urn = handle.uuid.urnZ();
+pub fn assetHandleInput(label: [*:0]const u8, handle: ?assets.AssetHandle) !?assets.AssetHandle {
     c.ImGui_PushID(label);
     defer c.ImGui_PopID();
     const id = c.ImGui_GetItemID();
-    _ = c.ImGui_InputText("##reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);
+    var value_buf: [37]u8 = undefined;
+    const value = try std.fmt.bufPrintZ(&value_buf, "{s}", .{if (handle) |h| &h.uuid.urnZ() else "null"});
+    _ = c.ImGui_InputText("##reference", value, value.len + 1, c.ImGuiInputTextFlags_ReadOnly);
     c.ImGui_SameLine();
     if (c.ImGui_Button("...")) {
         imutils_context.active_asset_handle_input = id;

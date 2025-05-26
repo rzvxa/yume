@@ -44,9 +44,9 @@ delta: f32 = 0.016,
 
 pub fn init(opts: struct {
     allocator: std.mem.Allocator,
-    loader: assets.ResourceLoader,
     window_title: []const u8,
     window_extent: Vec2U,
+    loaders: Assets.Loaders,
 }) *Self {
     utils.checkSdl(c.SDL_Init(c.SDL_INIT_VIDEO));
 
@@ -77,7 +77,7 @@ pub fn init(opts: struct {
 
     self.scene_root = self.world.create("root");
 
-    Assets.init(opts.allocator, &self.engine, opts.loader);
+    Assets.init(opts.allocator, &self.engine, opts.loaders);
 
     self.registerComponent(ecs.components.Uuid);
     self.registerComponent(ecs.components.Meta);

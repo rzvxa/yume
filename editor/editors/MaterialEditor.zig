@@ -13,6 +13,7 @@ const Mat4 = @import("yume").Mat4;
 const Quat = @import("yume").Quat;
 
 const ComponentEditor = @import("editors.zig").ComponentEditor;
+const imutils = @import("../imutils.zig");
 
 const Resources = @import("../Resources.zig");
 
@@ -20,7 +21,6 @@ const Self = @This();
 
 allocator: std.mem.Allocator,
 shaders_root_uri: Resources.Uri,
-shaders: std.AutoHashMap(Uuid, *Shader),
 
 pub fn asComponentEditor() ComponentEditor {
     return .{
@@ -35,20 +35,12 @@ fn init(a: std.mem.Allocator) *anyopaque {
     ptr.* = @This(){
         .allocator = a,
         .shaders_root_uri = Resources.Uri.parse(a, "builtin-shaders://") catch @panic("OOM"),
-        .shaders = std.AutoHashMap(Uuid, *Shader).init(a),
     };
     return ptr;
 }
 
 fn deinit(ptr: *anyopaque) void {
     const me = @as(*@This(), @ptrCast(@alignCast(ptr)));
-    {
-        var iter = me.shaders.iterator();
-        while (iter.next()) |it| {
-            Assets.release(it.value_ptr.*) catch {};
-        }
-        me.shaders.deinit();
-    }
     me.shaders_root_uri.deinit(me.allocator);
     me.allocator.destroy(me);
 }
@@ -61,7 +53,7 @@ fn editAsComponent(ptr: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *Gam
 
 fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
     const shaders = try Resources.findResourceNodeByUri(&self.shaders_root_uri) orelse unreachable;
-    const active_shader = try self.getShaderDef(mat.ref.shader);
+    const active_shader = try Resources.getShaderDef(mat.ref.shader.uuid);
     if (c.ImGui_BeginCombo("Shader", active_shader.name, c.ImGuiComboFlags_None)) {
         defer c.ImGui_EndCombo();
         var dfs = try shaders.dfs(self.allocator, .pre);
@@ -71,7 +63,7 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
                 .enter => |res| {
                     if (res.node != .resource) continue;
                     if (try Resources.getResourceType(res.node.resource) != .shader) continue;
-                    const shader = try self.getShaderDef(assets.ShaderHandle{ .uuid = res.node.resource });
+                    const shader = try Resources.getShaderDef(res.node.resource);
                     _ = c.ImGui_Selectable(shader.name);
                 },
                 .leave => {},
@@ -89,16 +81,7 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
 
     var col = Vec3.scalar(0).toArray();
     for (active_shader.layout) |uniform| {
+        // imutils.assetHandleInput(uniform.name, uniform.kind)
         _ = c.ImGui_ColorEdit3(uniform.name, &col, 0);
     }
-}
-
-fn getShaderDef(self: *Self, shader: assets.ShaderHandle) !Shader.Def {
-    const gop = try self.shaders.getOrPut(shader.uuid);
-    if (gop.found_existing) {
-        return gop.value_ptr.*.def;
-    }
-
-    gop.value_ptr.* = try Assets.get(shader);
-    return gop.value_ptr.*.def;
 }
