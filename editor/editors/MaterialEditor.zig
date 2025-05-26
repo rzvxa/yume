@@ -8,10 +8,11 @@ const assets = @import("yume").assets;
 const Assets = assets.Assets;
 const Shader = @import("yume").shading.Shader;
 const Uuid = @import("yume").Uuid;
-const Vec3 = @import("yume").Vec3;
+const Vec4 = @import("yume").Vec4;
 const Mat4 = @import("yume").Mat4;
 const Quat = @import("yume").Quat;
 
+const Editor = @import("../Editor.zig");
 const ComponentEditor = @import("editors.zig").ComponentEditor;
 const imutils = @import("../imutils.zig");
 
@@ -52,6 +53,10 @@ fn editAsComponent(ptr: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *Gam
 }
 
 fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
+    _ = imutils.assetHandleInput("Material", mat.ref.handle.toAssetHandle()) catch |err| blk: {
+        std.log.err("Failed to display asset handle editor on the Material component, {}", .{err});
+        break :blk null;
+    };
     const shaders = try Resources.findResourceNodeByUri(&self.shaders_root_uri) orelse unreachable;
     const active_shader = try Resources.getShaderDef(mat.ref.shader.uuid);
     if (c.ImGui_BeginCombo("Shader", active_shader.name, c.ImGuiComboFlags_None)) {
@@ -70,18 +75,74 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
             }
         }
     }
-    c.ImGui_PushID("material-reference");
-    defer c.ImGui_PopID();
-    var urn = mat.ref.handle.uuid.urnZ();
-    _ = c.ImGui_InputText("##material-reference", &urn, 37, c.ImGuiInputTextFlags_ReadOnly);
-    c.ImGui_SameLine();
-    _ = c.ImGui_Button("...");
-    c.ImGui_SameLine();
-    _ = c.ImGui_Text("Material");
 
-    var col = Vec3.scalar(0).toArray();
-    for (active_shader.layout) |uniform| {
-        // imutils.assetHandleInput(uniform.name, uniform.kind)
-        _ = c.ImGui_ColorEdit3(uniform.name, &col, 0);
+    const material_def = try Resources.getMaterialDefMut(mat.ref.handle.uuid);
+    for (active_shader.layout, material_def.resources, mat.ref.rsc_handles[0..mat.ref.rsc_count]) |uniform, *res_def, res_handle| {
+        c.ImGui_PushIDPtr(res_def);
+        defer c.ImGui_PopID();
+
+        const text_height = c.ImGui_GetTextLineHeightWithSpacing();
+
+        _ = c.ImGui_Text(uniform.name);
+        c.ImGui_SameLine();
+
+        c.ImGui_SetNextItemWidth(text_height * 3);
+        if (c.ImGui_BeginCombo("##type", null, c.ImGuiComboFlags_CustomPreview)) {
+            defer c.ImGui_EndCombo();
+            _ = c.ImGui_Selectable("##color");
+            c.ImGui_SameLineEx(0, 0);
+            c.ImGui_Image(try Editor.getImGuiTexture("editor://icons/color-picker-small.png"), .{ .x = text_height, .y = text_height });
+            c.ImGui_SameLine();
+            _ = c.ImGui_Text("Color");
+
+            _ = c.ImGui_Selectable("##image");
+            c.ImGui_SameLineEx(0, 0);
+            c.ImGui_Image(try Editor.getImGuiTexture("editor://icons/image-small.png"), .{ .x = text_height, .y = text_height });
+            c.ImGui_SameLine();
+            _ = c.ImGui_Text("Image");
+        }
+        if (c.ImGui_BeginComboPreview()) {
+            defer c.ImGui_EndComboPreview();
+            const icon_uri = if (res_def.* == .color)
+                "editor://icons/color-picker-small.png"
+            else if (res_def.* == .uuid)
+                "editor://icons/image-small.png"
+            else
+                "editor://icons/image-small.png";
+
+            c.ImGui_Image(try Editor.getImGuiTexture(icon_uri), .{ .x = text_height, .y = text_height });
+        }
+
+        c.ImGui_SameLine();
+
+        switch (res_def.*) {
+            .uuid => {
+                _ = imutils.assetHandleInput("##uuid", res_handle) catch |err| blk: {
+                    std.log.err("Failed to display asset handle editor on the Material component, {}", .{err});
+                    break :blk null;
+                };
+            },
+            .number => {
+                const n: *f32 = &res_def.number;
+                _ = c.ImGui_SliderFloat("##number", @ptrCast(n), 0, 0);
+            },
+            .color => |col01| {
+                var col = [4]f32{
+                    @as(f32, @floatFromInt(col01[0])) / 255,
+                    @as(f32, @floatFromInt(col01[1])) / 255,
+                    @as(f32, @floatFromInt(col01[2])) / 255,
+                    @as(f32, @floatFromInt(col01[3])) / 255,
+                };
+
+                if (c.ImGui_ColorEdit4("##color", &col, c.ImGuiColorEditFlags_NoInputs)) {
+                    res_def.color = .{
+                        @intFromFloat(col[0] * 255),
+                        @intFromFloat(col[1] * 255),
+                        @intFromFloat(col[2] * 255),
+                        @intFromFloat(col[3] * 255),
+                    };
+                }
+            },
+        }
     }
 }

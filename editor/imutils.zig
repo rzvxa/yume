@@ -330,8 +330,11 @@ pub fn assetHandleInput(label: [*:0]const u8, handle: ?assets.AssetHandle) !?ass
             .callback = Project.OnSelectAsset.callback(Context, &imutils_context, Context.onSelectAsset),
         });
     }
-    c.ImGui_SameLine();
-    _ = c.ImGui_Text("Mesh");
+
+    if (!(label[0] != 0 and label[1] != 0 and label[0] == '#' and label[1] == '#')) {
+        c.ImGui_SameLine();
+        _ = c.ImGui_Text(label);
+    }
 
     if (imutils_context.active_asset_handle_input == id) {
         return imutils_context.new_asset_handle;

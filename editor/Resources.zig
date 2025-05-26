@@ -519,6 +519,9 @@ pub fn init(allocator: std.mem.Allocator) !void {
         _ = try register(.{ .urn = "fc2d47e6-9777-4c80-8c52-7d49fbec5d8a", .path = "icons/info-mono.png", .category = "editor" });
         _ = try register(.{ .urn = "4306862e-7010-4063-8084-1cb6713ac701", .path = "icons/debug-mono.png", .category = "editor" });
 
+        _ = try register(.{ .urn = "cfccdd2d-3e72-4133-b42f-d988d5602da8", .path = "icons/image-small.png", .category = "editor" });
+        _ = try register(.{ .urn = "a2d609ba-86f0-493d-854d-6f2f1279e932", .path = "icons/color-picker-small.png", .category = "editor" });
+
         _ = try register(.{ .urn = "9660e8f4-6809-4d57-9507-511117128bc3", .path = "icons/yume.png", .category = "editor" });
     }
 }

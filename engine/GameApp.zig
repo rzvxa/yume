@@ -206,13 +206,13 @@ pub fn loadScene(self: *Self, handle: SceneHandle) !void {
 
         try entity_map.put(decl.uuid, entity);
 
-        log.debug("entity {s} {d}\n", .{ decl.name, entity });
+        log.debug("entity {s} {d}", .{ decl.name, entity });
 
         var idx: usize = 0;
         if (decl.parent) |parent| {
             idx = parent.findChildren(decl).?;
             const parent_entity = entity_map.get(parent.uuid).?;
-            log.debug("entity {s} parent {d}\n", .{ decl.name, parent_entity });
+            log.debug("entity {s} parent {d}", .{ decl.name, parent_entity });
             self.world.addPair(entity, ecs.relations.ChildOf, parent_entity);
         }
 
@@ -229,15 +229,15 @@ pub fn loadScene(self: *Self, handle: SceneHandle) !void {
                     self.world.addId(entity, def.id);
                     const ptr = c.ecs_get_mut_id(self.world.inner, entity, def.id).?;
                     if (!de(ptr, it.value_ptr, &self.allocator)) {
-                        log.err("error: Failed to deserialize {s}.\n", .{it.key_ptr.*});
+                        log.err("error: Failed to deserialize {s}.", .{it.key_ptr.*});
                         return error.FailedToLoadScene;
                     }
                 } else {
-                    log.err("error: Component {s} found but has no deserializer\n", .{it.key_ptr.*});
+                    log.err("error: Component {s} found but has no deserializer", .{it.key_ptr.*});
                     return error.FailedToLoadScene;
                 }
             } else {
-                log.err("error: Component {s} not found!\n", .{it.key_ptr.*});
+                log.err("error: Component {s} not found!", .{it.key_ptr.*});
                 return error.FailedToLoadScene;
             }
         }
