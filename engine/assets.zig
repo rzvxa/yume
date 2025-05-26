@@ -26,6 +26,8 @@ const log = std.log.scoped(.assets);
 const default_max_bytes = 30_000_000;
 const Image = Engine.AllocatedImage;
 
+pub const RGBA8 = [4]u8;
+
 pub const Assets = struct {
     const Self = @This();
 
@@ -35,6 +37,8 @@ pub const Assets = struct {
     engine: *Engine,
     loaded_ids: std.AutoHashMap(Uuid, void),
     loaded_assets: std.AutoHashMap(AssetHandle, LoadedAsset),
+
+    color_texture_map: std.AutoHashMap(RGBA8, TextureHandle),
 
     unused_assets_maps: [4]std.AutoHashMap(AssetHandle, void),
     unused_assets_active_idx: u3 = 3,
@@ -47,6 +51,9 @@ pub const Assets = struct {
             .engine = engine,
             .loaded_ids = std.AutoHashMap(Uuid, void).init(allocator),
             .loaded_assets = std.AutoHashMap(AssetHandle, LoadedAsset).init(allocator),
+
+            .color_texture_map = std.AutoHashMap(RGBA8, TextureHandle).init(allocator),
+
             .unused_assets_maps = undefined,
 
             .loader = loader,
@@ -70,6 +77,7 @@ pub const Assets = struct {
         }
         instance.loaded_ids.deinit();
         instance.loaded_assets.deinit();
+        instance.color_texture_map.deinit();
         for (0..instance.unused_assets_maps.len) |i| {
             instance.unused_assets_maps[i].deinit();
         }
@@ -167,6 +175,19 @@ pub const Assets = struct {
         }
     }
 
+    pub fn getColorTexture(color: RGBA8) !*Texture {
+        const gop = try instance.color_texture_map.getOrPut(color);
+        if (gop.found_existing) {
+            return get(gop.value_ptr.*);
+        }
+
+        gop.value_ptr.* = .{ .uuid = Uuid.new() };
+
+        try loadColorTexture(color, gop.value_ptr.*);
+
+        return get(gop.value_ptr.*);
+    }
+
     fn unused(handle: AssetHandle) !void {
         try unused_assets_map().put(handle, {});
     }
@@ -184,8 +205,8 @@ pub const Assets = struct {
         defer instance.allocator.free(bytes);
 
         const image = try instance.allocator.create(Image);
-        image.* = try texs.loadImage(instance.engine, bytes, handle.uuid.urn());
-        image.handle = handle;
+        errdefer instance.allocator.destroy(image);
+        image.* = try texs.loadImage(instance.engine, bytes, handle);
 
         const loaded = LoadedAsset{ .data = .{ .image = image } };
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
@@ -233,16 +254,21 @@ pub const Assets = struct {
         try instance.loaded_ids.put(handle.uuid, {});
     }
 
-    pub fn loadColorTexture(self: *Self, color: Vec4) !void {
-        // convert normalized Vec3 color to 8-bit per channel RGBA data.
-        const r: u8 = @intCast(color.x * 255);
-        const g: u8 = @intCast(color.y * 255);
-        const b: u8 = @intCast(color.z * 255);
-        const a: u8 = @intCast(color.w * 255);
-        const pixel: [4]u8 = .{ r, g, b, a };
+    fn loadColorTexture(color: RGBA8, handle: TextureHandle) !void {
+        if (instance.loaded_ids.contains(handle.uuid)) {
+            return;
+        }
 
-        // create a 1x1 image from the single pixel.
-        const image = try self.createImageFromPixels(pixel[0..], 1, 1, c.VK_FORMAT_R8G8B8A8_UNORM);
+        const image = img: { // create the 1x1 image
+            const image_handle = handle.toImage();
+            const image = try instance.allocator.create(Image);
+            errdefer instance.allocator.destroy(image);
+            image.* = try texs.loadImageFromPixels(instance.engine, &color, 1, 1, c.VK_FORMAT_R8G8B8A8_UNORM, image_handle);
+            const loaded = LoadedAsset{ .data = .{ .image = image } };
+            try instance.loaded_assets.put(image_handle.toAssetHandle(), loaded);
+            try instance.loaded_ids.put(image_handle.uuid, {});
+            break :img try get(image_handle);
+        };
 
         const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -264,18 +290,18 @@ pub const Assets = struct {
             },
         });
 
-        var texture = try self.instance.allocator.create(Texture);
+        var texture = try instance.allocator.create(Texture);
         texture.* = Texture{
-            // Generate a texture handle; here we assume a helper that creates one from the provided color.
-            .handle = TextureHandle{ .uuid = self.generateColorTextureUUID(color) },
-            .image = image,
+            .handle = handle,
+            .image = image.*,
             .image_view = null,
         };
 
-        // Create the image view associated with this image.
-        check_vk(c.vkCreateImageView(self.instance.engine.device, &image_view_ci, Engine.vk_alloc_cbs, &texture.image_view)) catch @panic("Failed to create image view for color texture");
+        check_vk(c.vkCreateImageView(instance.engine.device, &image_view_ci, Engine.vk_alloc_cbs, &texture.image_view)) catch @panic("Failed to create image view");
 
-        // return texture;
+        const loaded = LoadedAsset{ .data = .{ .texture = texture } };
+        try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
+        try instance.loaded_ids.put(handle.uuid, {});
     }
 
     fn loadMesh(handle: MeshHandle) !void {
@@ -425,8 +451,7 @@ pub const Assets = struct {
         for (shader.def.layout, mat_parsed.value.resources, 0..) |uniform, resource, i| {
             switch (uniform.kind) {
                 .texture => {
-                    const texture_handle = try resource.expect(.texture);
-                    const tex = Self.get(texture_handle) catch @panic("Failed to load texture");
+                    const tex = try resource.get(.texture);
                     resources_handles[i] = tex.handle.toAssetHandle();
 
                     const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{

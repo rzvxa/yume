@@ -2,6 +2,7 @@ const c = @import("clibs");
 const std = @import("std");
 
 const assets = @import("assets.zig");
+const Assets = @import("assets.zig").Assets;
 const Engine = @import("VulkanEngine.zig");
 const Uuid = @import("uuid.zig").Uuid;
 const Vec4 = @import("math3d.zig").Vec4;
@@ -68,16 +69,20 @@ pub const Material = struct {
         pub const ResourceDef = union(enum) {
             uuid: Uuid,
             number: f32,
-            color: Vec4,
+            color: [4]u8,
 
-            pub fn expect(rd: ResourceDef, comptime kind: Shader.Def.Uniform.BindingKind) !switch (kind) {
-                .texture => assets.TextureHandle,
+            pub fn get(rd: ResourceDef, comptime kind: Shader.Def.Uniform.BindingKind) !switch (kind) {
+                .texture => *assets.TextureHandle.BackingType,
                 .cube => @compileError("TODO"),
             } {
                 switch (kind) {
                     .texture => switch (rd) {
-                        .uuid => |uuid| return (assets.ImageHandle{ .uuid = uuid }).toTexture(),
-                        // .color => |color| return assets.,
+                        .uuid => |uuid| {
+                            const texture_handle = (assets.ImageHandle{ .uuid = uuid }).toTexture();
+                            const tex = try Assets.get(texture_handle);
+                            return tex;
+                        },
+                        .color => |color| return try Assets.getColorTexture(color),
                         else => return error.UnexpectedResourceBinding,
                     },
                     .cube => unreachable,
@@ -105,8 +110,16 @@ pub const Material = struct {
                     else => return error.UnexpectedToken,
                 };
 
-                const result = if (std.mem.eql(u8, field_name, "color")) .{
-                    .color = try std.json.innerParse(Vec4, a, jrs, opts),
+                const result = if (std.mem.eql(u8, field_name, "color")) blk: {
+                    const color = try std.json.innerParse(Vec4, a, jrs, opts);
+                    break :blk .{
+                        .color = [4]u8{
+                            @intFromFloat(color.x * 255),
+                            @intFromFloat(color.y * 255),
+                            @intFromFloat(color.z * 255),
+                            @intFromFloat(color.w * 255),
+                        },
+                    };
                 } else {
                     return error.UnexpectedToken;
                 };
