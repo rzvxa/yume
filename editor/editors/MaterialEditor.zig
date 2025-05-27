@@ -77,6 +77,7 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
     }
 
     const material_def = try Resources.getMaterialDefMut(mat.ref.handle.uuid);
+    var updated: bool = false;
     for (active_shader.layout, material_def.resources, mat.ref.rsc_handles[0..mat.ref.rsc_count]) |uniform, *res_def, res_handle| {
         c.ImGui_PushIDPtr(res_def);
         defer c.ImGui_PopID();
@@ -86,7 +87,7 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
         _ = c.ImGui_Text(uniform.name);
         c.ImGui_SameLine();
 
-        c.ImGui_SetNextItemWidth(text_height * 3);
+        c.ImGui_SetNextItemWidth(text_height * 2 + c.ImGui_GetStyle().*.FramePadding.x * 2);
         if (c.ImGui_BeginCombo("##type", null, c.ImGuiComboFlags_CustomPreview)) {
             defer c.ImGui_EndCombo();
             _ = c.ImGui_Selectable("##color");
@@ -115,8 +116,10 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
 
         c.ImGui_SameLine();
 
+        const avail = c.ImGui_GetContentRegionAvail();
         switch (res_def.*) {
             .uuid => {
+                c.ImGui_SetNextItemWidth(avail.x - c.ImGui_GetStyle().*.FramePadding.x * 2);
                 _ = imutils.assetHandleInput("##uuid", res_handle) catch |err| blk: {
                     std.log.err("Failed to display asset handle editor on the Material component, {}", .{err});
                     break :blk null;
@@ -141,8 +144,13 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
                         @intFromFloat(col[2] * 255),
                         @intFromFloat(col[3] * 255),
                     };
+                    updated = true;
                 }
             },
         }
+    }
+
+    if (updated) {
+        try Assets.reload(mat.ref.handle);
     }
 }

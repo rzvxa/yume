@@ -32,6 +32,8 @@ const Self = @This();
 const MAX_OBJECTS = 10000;
 pub const vk_alloc_cbs: ?*c.VkAllocationCallbacks = null;
 
+pub const Error = vki.VulkanError;
+
 pub const RenderCommand = c.VkCommandBuffer;
 pub const ShaderModule = c.VkShaderModule;
 pub const Pipeline = c.VkPipeline;

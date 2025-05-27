@@ -317,11 +317,20 @@ pub fn assetHandleInput(label: [*:0]const u8, handle: ?assets.AssetHandle) !?ass
     c.ImGui_PushID(label);
     defer c.ImGui_PopID();
     const id = c.ImGui_GetItemID();
+
+    const total_width = c.ImGui_CalcItemWidth();
+    const browse_button_width: f32 = 30;
+
+    c.ImGui_SetNextItemWidth(total_width - browse_button_width);
+
     var value_buf: [37]u8 = undefined;
     const value = try std.fmt.bufPrintZ(&value_buf, "{s}", .{if (handle) |h| &h.uuid.urnZ() else "null"});
     _ = c.ImGui_InputText("##reference", value, value.len + 1, c.ImGuiInputTextFlags_ReadOnly);
     c.ImGui_SameLine();
-    if (c.ImGui_Button("...")) {
+
+    // Draw the browse button with a fixed width.
+    const button_size = c.ImVec2{ .x = browse_button_width, .y = 0 };
+    if (c.ImGui_ButtonEx("...", button_size)) {
         imutils_context.active_asset_handle_input = id;
         try Project.browseAssets(handle, .{
             .locked_filters = &.{
