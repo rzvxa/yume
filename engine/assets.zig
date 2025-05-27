@@ -99,6 +99,11 @@ pub const Assets = struct {
                 var iter = instance.loaded_assets.iterator();
                 while (iter.next()) |next| {
                     log.err("leaked asset {s} -> {}", .{ next.key_ptr.uuid.urn(), next.value_ptr.assetType() });
+                    if (next.value_ptr.assetType() == .texture) {
+                        if (instance.texture_color_map.contains(next.key_ptr.*.unbox(.texture))) {
+                            log.err("was a color texture", .{});
+                        }
+                    }
                 }
             }
         }
@@ -185,6 +190,7 @@ pub const Assets = struct {
     pub fn reload(asset: anytype) (std.mem.Allocator.Error ||
         Engine.Error || Loaders.Error || error{
         AssetNotLoaded,
+        DoubleRelease,
         failed_to_load_image,
         failed_to_create_image,
         FailedToLoadVertModule,
@@ -232,20 +238,6 @@ pub const Assets = struct {
             .scene => kv.value.data.scene.*,
         };
 
-        if (kv.value.ref_count > 0) {
-            try switch (Tag) {
-                .binary => @compileError("TODO"),
-                .image => loadImage(handle, kv.value.data.image),
-                .texture => loadTexture(handle, kv.value.data.texture),
-                .mesh => loadMesh(handle, kv.value.data.mesh),
-                .material => loadMaterial(handle, kv.value.data.material),
-                .shader => loadShader(handle, kv.value.data.shader),
-                .scene => @compileError("TODO"),
-            };
-            var new_loaded = try getLoadedAsset(generic_handle);
-            new_loaded.ref_count = kv.value.ref_count;
-        }
-
         {
             var copy = kv.value;
             copy.data = switch (comptime Tag) {
@@ -261,12 +253,17 @@ pub const Assets = struct {
         }
 
         switch (kv.value.data) {
-            .binary, .image, .mesh => {},
+            .binary, .image, .mesh, .shader => {},
             .texture => |t| {
+                try release(t.image.handle);
                 try reload(t.image.handle);
             },
             .material => |m| {
+                try release(m.shader);
+                try reload(m.shader);
                 for (0..m.rsc_count) |i| {
+                    try release(m.rsc_handles[i]);
+
                     if (m.rsc_handles[i].type == .texture and
                         instance.texture_color_map.contains(m.rsc_handles[i].unbox(.texture)))
                     {
@@ -278,6 +275,18 @@ pub const Assets = struct {
             },
             else => @panic("TODO"),
         }
+
+        try switch (Tag) {
+            .binary => @compileError("TODO"),
+            .image => loadImage(handle, kv.value.data.image),
+            .texture => loadTexture(handle, kv.value.data.texture),
+            .mesh => loadMesh(handle, kv.value.data.mesh),
+            .material => loadMaterial(handle, kv.value.data.material),
+            .shader => loadShader(handle, kv.value.data.shader),
+            .scene => @compileError("TODO"),
+        };
+        var new_loaded = try getLoadedAsset(generic_handle);
+        new_loaded.ref_count = kv.value.ref_count;
     }
 
     pub fn collect(comptime opts: struct { force: bool = false }) !void {
@@ -303,6 +312,13 @@ pub const Assets = struct {
                 continue;
             }
 
+            if (loaded.assetType() == .texture) {
+                // NOTE: this edge case is for removing color textures from the cache,
+                // it's a bit hacky and I don't like it at all.
+                if (instance.texture_color_map.fetchRemove(handle.unbox(.texture))) |kv| {
+                    _ = instance.color_texture_map.remove(kv.value);
+                }
+            }
             loaded.unload(true);
             std.debug.assert(instance.loaded_ids.remove(handle.uuid));
             std.debug.assert(instance.loaded_assets.remove(handle.toAssetHandle()));
@@ -354,7 +370,10 @@ pub const Assets = struct {
         const bytes = try instance.loaders.resource(instance.allocator, handle.uuid, default_max_bytes);
         defer instance.allocator.free(bytes);
 
-        const image = ptr orelse try instance.allocator.create(Image);
+        const image = ptr orelse blk: {
+            log.debug("HERE", .{});
+            break :blk try instance.allocator.create(Image);
+        };
         errdefer if (ptr == null) instance.allocator.destroy(image);
         image.* = try texs.loadImage(instance.engine, bytes, handle);
 
@@ -386,9 +405,21 @@ pub const Assets = struct {
             },
         });
 
+        const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
+            .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .magFilter = c.VK_FILTER_NEAREST,
+            .minFilter = c.VK_FILTER_NEAREST,
+            .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        });
+        var sampler: c.VkSampler = undefined;
+        try check_vk(c.vkCreateSampler(instance.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler));
+
         var texture = ptr orelse try instance.allocator.create(Texture);
         texture.* = Texture{
             .handle = handle,
+            .sampler = sampler,
             .image = image.*,
             .image_view = null,
         };
@@ -401,10 +432,6 @@ pub const Assets = struct {
     }
 
     fn loadColorTexture(color: RGBA8, handle: TextureHandle) !void {
-        if (instance.loaded_ids.contains(handle.uuid)) {
-            return;
-        }
-
         const image = img: { // create the 1x1 image
             const image_handle = handle.toImage();
             const image = try instance.allocator.create(Image);
@@ -436,9 +463,21 @@ pub const Assets = struct {
             },
         });
 
+        const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
+            .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .magFilter = c.VK_FILTER_NEAREST,
+            .minFilter = c.VK_FILTER_NEAREST,
+            .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        });
+        var sampler: c.VkSampler = undefined;
+        try check_vk(c.vkCreateSampler(instance.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler));
+
         var texture = try instance.allocator.create(Texture);
         texture.* = Texture{
             .handle = handle,
+            .sampler = sampler,
             .image = image.*,
             .image_view = null,
         };
@@ -468,7 +507,9 @@ pub const Assets = struct {
 
         const shader_def = try instance.loaders.shader_def(material_def.shader);
         const shader = try get(ShaderHandle{ .uuid = material_def.shader });
-        errdefer release(shader) catch {};
+        errdefer release(shader) catch |err| {
+            log.err("Failed to release shader on error loading the material {s}, {} ", .{ handle.uuid.urn(), err });
+        };
 
         const material = ptr orelse try instance.allocator.create(Material);
 
@@ -578,7 +619,7 @@ pub const Assets = struct {
         });
 
         var resource_set: c.VkDescriptorSet = undefined;
-        check_vk(c.vkAllocateDescriptorSets(instance.engine.device, &descriptor_set_alloc_info, &resource_set)) catch @panic("Failed to allocate descriptor set");
+        try check_vk(c.vkAllocateDescriptorSets(instance.engine.device, &descriptor_set_alloc_info, &resource_set));
 
         for (shader_def.layout, material_def.resources, 0..) |uniform, resource, i| {
             switch (uniform.kind) {
@@ -586,20 +627,8 @@ pub const Assets = struct {
                     const tex = try resource.get(.texture);
                     resources_handles[i] = tex.handle.toAssetHandle();
 
-                    const sampler_ci = std.mem.zeroInit(c.VkSamplerCreateInfo, .{
-                        .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-                        .magFilter = c.VK_FILTER_NEAREST,
-                        .minFilter = c.VK_FILTER_NEAREST,
-                        .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-                        .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-                        .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-                    });
-                    var sampler: c.VkSampler = undefined;
-                    check_vk(c.vkCreateSampler(instance.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
-                    instance.engine.deletion_queue.append(Engine.VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("Out of memory");
-
                     const descriptor_image_info = std.mem.zeroInit(c.VkDescriptorImageInfo, .{
-                        .sampler = sampler,
+                        .sampler = tex.sampler,
                         .imageView = tex.image_view,
                         .imageLayout = c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                     });
@@ -871,7 +900,16 @@ const LoadedAsset = struct {
                     c.vkDestroyImageView,
                 );
                 view_del.delete(Assets.instance.engine);
-                if (comptime recursive) Assets.release(it.image) catch {};
+
+                var sampler_del = Engine.VulkanDeleter.make(it.sampler, c.vkDestroySampler);
+                sampler_del.delete(Assets.instance.engine);
+
+                if (comptime recursive) Assets.release(it.image) catch |err| {
+                    log.err(
+                        "Failed to release image resource bound to the texture while unloading the texture: {s}, {}",
+                        .{ it.handle.uuid.urn(), err },
+                    );
+                };
                 Assets.instance.allocator.destroy(it);
             },
             .mesh => {
@@ -886,11 +924,23 @@ const LoadedAsset = struct {
                 var pipeline_del = Engine.VulkanDeleter.make(it.pipeline, c.vkDestroyPipeline);
                 pipeline_del.delete(Assets.instance.engine);
                 const slice = it.rsc_handles[0..@intCast(it.rsc_count)];
+                // TODO: this should only happen in the editor builds
+                check_vk(c.vkFreeDescriptorSets(Assets.instance.engine.device, Assets.instance.engine.descriptor_pool, 1, &[_]c.VkDescriptorSet{it.rsc_descriptor_set})) catch @panic("failed to free descriptor set");
                 if (comptime recursive) for (slice) |res| {
-                    Assets.release(res) catch {};
+                    Assets.release(res) catch |err| {
+                        log.err(
+                            "Failed to release texture resource bound to the material while unloading the material: {s}, {}",
+                            .{ it.handle.uuid.urn(), err },
+                        );
+                    };
                 };
                 Assets.instance.allocator.free(slice);
-                if (comptime recursive) Assets.release(it.shader) catch {};
+                if (comptime recursive) Assets.release(it.shader) catch |err| {
+                    log.err(
+                        "Failed to release shader resource bound to the material while unloading the material: {s}, {}",
+                        .{ it.handle.uuid.urn(), err },
+                    );
+                };
                 Assets.instance.allocator.destroy(it);
             },
             .shader => {

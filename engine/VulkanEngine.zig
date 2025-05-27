@@ -824,8 +824,8 @@ fn initDescriptors(self: *Self) void {
 
     const pool_ci = std.mem.zeroInit(c.VkDescriptorPoolCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .flags = 0,
-        .maxSets = 10,
+        .flags = c.VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT, // TODO: only apply this in editor, runtime can precalculate the pool size
+        .maxSets = 32,
         .poolSizeCount = @as(u32, @intCast(pool_sizes.len)),
         .pPoolSizes = &pool_sizes[0],
     });

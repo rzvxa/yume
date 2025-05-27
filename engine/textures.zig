@@ -12,6 +12,7 @@ pub const Texture = struct {
     handle: assets.TextureHandle,
     image: Engine.AllocatedImage,
     image_view: c.VkImageView,
+    sampler: c.VkSampler,
 };
 
 pub fn loadImage(engine: *Engine, buffer: []const u8, handle: assets.ImageHandle) !Engine.AllocatedImage {

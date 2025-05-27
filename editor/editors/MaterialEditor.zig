@@ -49,7 +49,10 @@ fn deinit(ptr: *anyopaque) void {
 fn editAsComponent(ptr: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
     const me = @as(*@This(), @ptrCast(@alignCast(ptr)));
     const mat = ctx.world.getMut(entity, ecs.components.Material).?;
-    me.edit(mat, ctx) catch @panic("Failed to edit the material");
+    me.edit(mat, ctx) catch |err| {
+        std.log.err("{}", .{err});
+        @panic("Failed to edit the material");
+    };
 }
 
 fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
