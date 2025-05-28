@@ -10,9 +10,9 @@ const log = std.log.scoped(.textures);
 
 pub const Texture = struct {
     handle: assets.TextureHandle,
-    image: Engine.AllocatedImage,
-    image_view: c.VkImageView,
-    sampler: c.VkSampler,
+    image: assets.ImageHandle,
+    image_view: Engine.ImageView,
+    sampler: Engine.Sampler,
 };
 
 pub fn loadImage(engine: *Engine, buffer: []const u8, handle: assets.ImageHandle) !Engine.AllocatedImage {

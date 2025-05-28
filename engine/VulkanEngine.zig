@@ -40,15 +40,21 @@ pub const Pipeline = c.VkPipeline;
 pub const PipelineLayout = c.VkPipelineLayout;
 pub const DescriptorSet = c.VkDescriptorSet;
 
+pub const Image = c.VkImage;
+pub const ImageView = c.VkImageView;
+pub const Sampler = c.VkSampler;
+
+pub const GPUAllocation = c.VmaAllocation;
+
 pub const AllocatedBuffer = extern struct {
     buffer: c.VkBuffer,
-    allocation: c.VmaAllocation,
+    allocation: GPUAllocation,
 };
 
 pub const AllocatedImage = extern struct {
     handle: assets.ImageHandle,
-    image: c.VkImage,
-    allocation: c.VmaAllocation,
+    image: Image,
+    allocation: GPUAllocation,
 };
 
 const FrameData = extern struct {

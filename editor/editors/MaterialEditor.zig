@@ -123,10 +123,14 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
         switch (res_def.*) {
             .uuid => {
                 c.ImGui_SetNextItemWidth(avail.x - c.ImGui_GetStyle().*.FramePadding.x * 2);
-                _ = imutils.assetHandleInput("##uuid", res_handle) catch |err| blk: {
+                const new_handle = imutils.assetHandleInput("##uuid", res_handle) catch |err| blk: {
                     std.log.err("Failed to display asset handle editor on the Material component, {}", .{err});
                     break :blk null;
                 };
+                if (new_handle) |h| {
+                    res_def.uuid = h.uuid;
+                    updated = true;
+                }
             },
             .number => {
                 const n: *f32 = &res_def.number;

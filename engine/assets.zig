@@ -58,11 +58,11 @@ pub const Assets = struct {
     color_texture_map: std.AutoHashMap(RGBA8, TextureHandle),
     texture_color_map: std.AutoHashMap(TextureHandle, RGBA8),
 
-    unused_assets_maps: [4]std.AutoHashMap(AssetHandle, void),
-    unused_assets_active_idx: u3 = 0,
+    unused_assets_maps: [Engine.FRAME_OVERLAP]std.AutoHashMap(AssetHandle, void),
+    unused_assets_active_idx: usize = 0,
 
-    orphan_assets_maps: [4]std.ArrayList(LoadedAsset),
-    orphan_assets_active_idx: u3 = 0,
+    orphan_assets_maps: [Engine.FRAME_OVERLAP]std.ArrayList(LoadedAsset),
+    orphan_assets_active_idx: usize = 0,
 
     loaders: Loaders,
 
@@ -255,8 +255,8 @@ pub const Assets = struct {
         switch (kv.value.data) {
             .binary, .image, .mesh, .shader => {},
             .texture => |t| {
-                try release(t.image.handle);
-                try reload(t.image.handle);
+                try release(t.image);
+                try reload(t.image);
             },
             .material => |m| {
                 try release(m.shader);
@@ -289,45 +289,62 @@ pub const Assets = struct {
         new_loaded.ref_count = kv.value.ref_count;
     }
 
-    pub fn collect(comptime opts: struct { force: bool = false }) !void {
-        var orphan_assets = orphan_assets_map();
-        // round robin between active maps on each collection,
-        instance.orphan_assets_active_idx = @mod(instance.orphan_assets_active_idx + 1, @as(u3, @intCast(instance.orphan_assets_maps.len)));
-        for (0..orphan_assets.items.len) |i| {
-            orphan_assets.items[i].unload(false);
-        }
-        orphan_assets.clearRetainingCapacity();
-
-        var unused_assets = unused_assets_map();
-        if (unused_assets.count() == 0) return;
-        // round robin between active maps on each collection,
-        // this is mostly here to allow buffering of collectable assets released during this collection
-        instance.unused_assets_active_idx = @mod(instance.unused_assets_active_idx + 1, @as(u3, @intCast(instance.unused_assets_maps.len)));
-        var iter = unused_assets.keyIterator();
-        while (iter.next()) |handle| {
-            var loaded = try getLoadedAsset(handle.*);
-            // it is possible for an asset to get rescued if it's referenced again before collection
-            // if that is the case, we just ignore this entry
-            if (loaded.ref_count > 0) {
-                continue;
+    pub fn collect(
+        comptime opts: struct {
+            // NOTE: disregards the thread safety with GPU frame buffers,
+            // can only be used safely while all frames are idle.
+            force: bool = false,
+        },
+    ) !void {
+        {
+            var orphan_assets = last_orphan_assets_map();
+            // round robin between active maps on each collection,
+            defer instance.orphan_assets_active_idx = @mod(instance.orphan_assets_active_idx + 1, instance.orphan_assets_maps.len);
+            for (0..orphan_assets.items.len) |i| {
+                orphan_assets.items[i].unload(false);
             }
+            orphan_assets.clearRetainingCapacity();
+        }
 
-            if (loaded.assetType() == .texture) {
-                // NOTE: this edge case is for removing color textures from the cache,
-                // it's a bit hacky and I don't like it at all.
-                if (instance.texture_color_map.fetchRemove(handle.unbox(.texture))) |kv| {
-                    _ = instance.color_texture_map.remove(kv.value);
+        {
+            var unused_assets = last_unused_assets_map();
+            // round robin between active maps on each collection,
+            defer instance.unused_assets_active_idx = @mod(instance.unused_assets_active_idx + 1, instance.unused_assets_maps.len);
+            var iter = unused_assets.keyIterator();
+            while (iter.next()) |handle| {
+                var loaded = try getLoadedAsset(handle.*);
+                // it is possible for an asset to get rescued if it's referenced again before collection
+                // if that is the case, we just ignore this entry
+                if (loaded.ref_count > 0) {
+                    log.info("Rescueda {s}, {}", .{ handle.uuid.urn(), loaded.assetType() });
+                    continue;
                 }
+
+                if (loaded.assetType() == .texture) {
+                    // NOTE: this edge case is for removing color textures from the cache,
+                    // it's a bit hacky and I don't like it at all.
+                    if (instance.texture_color_map.fetchRemove(handle.unbox(.texture))) |kv| {
+                        _ = instance.color_texture_map.remove(kv.value);
+                    }
+                }
+                loaded.unload(true);
+                std.debug.assert(instance.loaded_ids.remove(handle.uuid));
+                std.debug.assert(instance.loaded_assets.remove(handle.toAssetHandle()));
             }
-            loaded.unload(true);
-            std.debug.assert(instance.loaded_ids.remove(handle.uuid));
-            std.debug.assert(instance.loaded_assets.remove(handle.toAssetHandle()));
+            unused_assets.clearRetainingCapacity();
         }
-        unused_assets.clearRetainingCapacity();
 
         if (comptime opts.force) {
-            if (unused_assets_map().count() > 0 or orphan_assets_map().items.len > 0) {
-                return collect(opts);
+            for (instance.unused_assets_maps) |m| {
+                if (m.count() > 0) {
+                    return collect(opts);
+                }
+            }
+
+            for (instance.orphan_assets_maps) |m| {
+                if (m.items.len > 0) {
+                    return collect(opts);
+                }
             }
         }
     }
@@ -352,6 +369,10 @@ pub const Assets = struct {
 
     inline fn unused_assets_map() *std.AutoHashMap(AssetHandle, void) {
         return &instance.unused_assets_maps[instance.unused_assets_active_idx];
+    }
+
+    inline fn last_unused_assets_map() *std.AutoHashMap(AssetHandle, void) {
+        return &instance.unused_assets_maps[(if (instance.unused_assets_active_idx == 0) instance.unused_assets_maps.len else instance.unused_assets_active_idx) - 1];
     }
 
     fn orphan(asset: LoadedAsset) !void {
@@ -419,8 +440,8 @@ pub const Assets = struct {
         var texture = ptr orelse try instance.allocator.create(Texture);
         texture.* = Texture{
             .handle = handle,
+            .image = image.handle,
             .sampler = sampler,
-            .image = image.*,
             .image_view = null,
         };
 
@@ -477,8 +498,8 @@ pub const Assets = struct {
         var texture = try instance.allocator.create(Texture);
         texture.* = Texture{
             .handle = handle,
+            .image = image.handle,
             .sampler = sampler,
-            .image = image.*,
             .image_view = null,
         };
 

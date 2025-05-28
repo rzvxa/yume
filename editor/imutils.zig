@@ -346,7 +346,10 @@ pub fn assetHandleInput(label: [*:0]const u8, handle: ?assets.AssetHandle) !?ass
     }
 
     if (imutils_context.active_asset_handle_input == id) {
-        return imutils_context.new_asset_handle;
+        const new_asset_handle = imutils_context.new_asset_handle;
+        imutils_context.active_asset_handle_input = 0;
+        imutils_context.new_asset_handle = null;
+        return new_asset_handle;
     }
     return null;
 }
