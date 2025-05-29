@@ -81,6 +81,11 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
     }
 
     const material_def = try Resources.getMaterialDefMut(mat.ref.handle.uuid);
+    var max_label_width: f32 = 0;
+    for (active_shader.layout) |uniform| {
+        max_label_width = @max(max_label_width, c.ImGui_CalcTextSize(uniform.name).x + c.ImGui_GetStyle().*.FramePadding.x * 2);
+    }
+
     var updated: bool = false;
     for (active_shader.layout, material_def.resources, mat.ref.rsc_handles[0..mat.ref.rsc_count]) |uniform, *res_def, res_handle| {
         c.ImGui_PushIDPtr(res_def);
@@ -88,8 +93,8 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
 
         const text_height = c.ImGui_GetTextLineHeightWithSpacing();
 
-        _ = c.ImGui_Text(uniform.name);
-        c.ImGui_SameLine();
+        c.ImGui_Text(uniform.name);
+        c.ImGui_SameLineEx(max_label_width, 0);
 
         c.ImGui_SetNextItemWidth(text_height * 2 + c.ImGui_GetStyle().*.FramePadding.x * 2);
         if (c.ImGui_BeginCombo("##type", null, c.ImGuiComboFlags_CustomPreview)) {
