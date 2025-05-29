@@ -790,6 +790,7 @@ pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
         uri: []const u8,
         fn f(ptr: *@This(), handle: assets.AssetHandle) void {
             _ = handle;
+            log.debug("callback imgui", .{});
             const entry = loaded_imgui_images.fetchRemove(ptr.uri).?;
 
             c.cImGui_ImplVulkan_RemoveTexture(@ptrFromInt(entry.value.texture));
@@ -812,7 +813,7 @@ pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
     cb_instance.* = .{ .uri = uri };
 
     const hooks = try Assets.hooks(texture.handle.toAssetHandle());
-    try hooks.on_reload.append(.always, assets.AssetHooks.OnReload.callback(
+    try hooks.on_reload.append(.once, assets.AssetHooks.OnReload.callback(
         CbType,
         cb_instance,
         &CbType.f,

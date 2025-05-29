@@ -234,6 +234,7 @@ pub const Assets = struct {
         // we manage the dependencies manually during the reloads
         defer kv.value.dependants.deinit();
         defer kv.value.dependencies.deinit();
+        defer kv.value.hooks.deinit();
 
         for (kv.value.dependencies.items) |dep| {
             try undependency(dep, generic_handle);
@@ -250,29 +251,15 @@ pub const Assets = struct {
         }
 
         if (comptime opts.recursive) {
-            switch (kv.value.data) {
-                .binary, .image, .mesh, .shader => {},
-                .texture => |t| {
-                    try release(t.image);
-                    try reload(t.image, opts);
-                },
-                .material => |m| {
-                    try release(m.shader);
-                    try reload(m.shader, opts);
-                    for (0..m.rsc_count) |i| {
-                        try release(m.rsc_handles[i]);
-
-                        if (m.rsc_handles[i].type == .texture and
-                            instance.texture_color_map.contains(m.rsc_handles[i].unbox(.texture)))
-                        {
-                            // color textures don't need to be reloaded,
-                            continue;
-                        }
-
-                        try reload(m.rsc_handles[i], opts);
-                    }
-                },
-                else => @panic("TODO"),
+            for (kv.value.dependencies.items) |dep| {
+                try release(dep);
+                if (dep.type == .texture and
+                    instance.texture_color_map.contains(dep.unbox(.texture)))
+                {
+                    // color textures don't need to be reloaded,
+                    continue;
+                }
+                try reload(dep, opts);
             }
         }
 
@@ -285,8 +272,16 @@ pub const Assets = struct {
             .shader => loadShader(handle, kv.value.data.shader),
             .scene => @compileError("TODO"),
         };
+
         var new_loaded = try getLoadedAsset(generic_handle);
         new_loaded.ref_count = kv.value.ref_count;
+        {
+            var iter = kv.value.dependants.iterator();
+            while (iter.next()) |next| {
+                try new_loaded.dependants.putNoClobber(next.key_ptr.*, next.value_ptr.*);
+            }
+        }
+        try new_loaded.hooks.on_reload.copyFrom(&kv.value.hooks.on_reload);
         new_loaded.hooks.on_reload.fire(.{generic_handle});
     }
 
