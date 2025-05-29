@@ -1,6 +1,9 @@
 #version 450
 
+#define PI 3.1415926535897932384626433832795
 #define FORWARD_LIGHT_COUNT 4
+
+// #define DEBUG_NORMALS
 
 layout(location = 0) in vec3 in_world_pos;
 layout(location = 1) in vec3 in_normal;
@@ -36,8 +39,6 @@ layout (set = 2, binding = 4) uniform sampler2D roughness_map;
 
 
 layout (location = 0) out vec4 frag_color;
-
-#define PI 3.1415926535897932384626433832795
 
 // GGX Normal Distribution Function.
 float D_GGX(float dotNH, float roughness) {
@@ -149,5 +150,9 @@ void main() {
     color = vec3(1.0) - exp(-color * scene_data.exposure);
     color = pow(color, vec3(1.0 / scene_data.gamma));
 
+#ifdef DEBUG_NORMALS
+    frag_color = vec4(normalize(N) * 0.5 + 0.5, 1.0);
+#else
     frag_color = vec4(color, 1.0);
+#endif
 }
