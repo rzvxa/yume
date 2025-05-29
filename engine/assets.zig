@@ -2,6 +2,8 @@ const c = @import("clibs");
 
 const std = @import("std");
 
+const Event = @import("event.zig").Event;
+
 const Uuid = @import("uuid.zig").Uuid;
 const texs = @import("textures.zig");
 const Vec4 = @import("math3d.zig").Vec4;
@@ -187,7 +189,9 @@ pub const Assets = struct {
     }
 
     // does nothing if asset isn't loaded already
-    pub fn reload(asset: anytype) (std.mem.Allocator.Error ||
+    pub fn reload(asset: anytype, comptime opts: struct {
+        recursive: bool = true,
+    }) (std.mem.Allocator.Error ||
         Engine.Error || Loaders.Error || error{
         AssetNotLoaded,
         DoubleRelease,
@@ -207,15 +211,16 @@ pub const Assets = struct {
         else
             asset.handle;
 
+        // unwrap generic handle to explicit handle call
         if (@TypeOf(handle) == AssetHandle) {
             return switch (handle.type) {
-                // .binary => reload(handle.unbox(.binary)),
-                .image => reload(handle.unbox(.image)),
-                .texture => reload(handle.unbox(.texture)),
-                .mesh => reload(handle.unbox(.mesh)),
-                .material => reload(handle.unbox(.material)),
-                .shader => reload(handle.unbox(.shader)),
-                // .scene => reload(handle.unbox(.scene)),
+                // .binary => reload(handle.unbox(.binary), opts),
+                .image => reload(handle.unbox(.image), opts),
+                .texture => reload(handle.unbox(.texture), opts),
+                .mesh => reload(handle.unbox(.mesh), opts),
+                .material => reload(handle.unbox(.material), opts),
+                .shader => reload(handle.unbox(.shader), opts),
+                // .scene => reload(handle.unbox(.scene), opts),
                 else => @panic("TODO"),
             };
         }
@@ -227,18 +232,18 @@ pub const Assets = struct {
 
         const kv = instance.loaded_assets.fetchRemove(generic_handle) orelse return;
 
-        const orphan_data = try instance.allocator.create(BackingType);
-        orphan_data.* = switch (comptime Tag) {
-            .binary => @panic("TODO"),
-            .image => kv.value.data.image.*,
-            .texture => kv.value.data.texture.*,
-            .mesh => kv.value.data.mesh.*,
-            .material => kv.value.data.material.*,
-            .shader => kv.value.data.shader.*,
-            .scene => kv.value.data.scene.*,
-        };
-
         {
+            const orphan_data = try instance.allocator.create(BackingType);
+            orphan_data.* = switch (comptime Tag) {
+                .binary => @panic("TODO"),
+                .image => kv.value.data.image.*,
+                .texture => kv.value.data.texture.*,
+                .mesh => kv.value.data.mesh.*,
+                .material => kv.value.data.material.*,
+                .shader => kv.value.data.shader.*,
+                .scene => kv.value.data.scene.*,
+            };
+
             var copy = kv.value;
             copy.data = switch (comptime Tag) {
                 .binary => @compileError("TODO"),
@@ -252,28 +257,30 @@ pub const Assets = struct {
             try orphan(copy);
         }
 
-        switch (kv.value.data) {
-            .binary, .image, .mesh, .shader => {},
-            .texture => |t| {
-                try release(t.image);
-                try reload(t.image);
-            },
-            .material => |m| {
-                try release(m.shader);
-                try reload(m.shader);
-                for (0..m.rsc_count) |i| {
-                    try release(m.rsc_handles[i]);
+        if (comptime opts.recursive) {
+            switch (kv.value.data) {
+                .binary, .image, .mesh, .shader => {},
+                .texture => |t| {
+                    try release(t.image);
+                    try reload(t.image, opts);
+                },
+                .material => |m| {
+                    try release(m.shader);
+                    try reload(m.shader, opts);
+                    for (0..m.rsc_count) |i| {
+                        try release(m.rsc_handles[i]);
 
-                    if (m.rsc_handles[i].type == .texture and
-                        instance.texture_color_map.contains(m.rsc_handles[i].unbox(.texture)))
-                    {
-                        continue;
+                        if (m.rsc_handles[i].type == .texture and
+                            instance.texture_color_map.contains(m.rsc_handles[i].unbox(.texture)))
+                        {
+                            continue;
+                        }
+
+                        try reload(m.rsc_handles[i], opts);
                     }
-
-                    try reload(m.rsc_handles[i]);
-                }
-            },
-            else => @panic("TODO"),
+                },
+                else => @panic("TODO"),
+            }
         }
 
         try switch (Tag) {
@@ -287,6 +294,7 @@ pub const Assets = struct {
         };
         var new_loaded = try getLoadedAsset(generic_handle);
         new_loaded.ref_count = kv.value.ref_count;
+        new_loaded.hooks.on_reload.fire(.{generic_handle});
     }
 
     pub fn collect(
@@ -316,7 +324,7 @@ pub const Assets = struct {
                 // it is possible for an asset to get rescued if it's referenced again before collection
                 // if that is the case, we just ignore this entry
                 if (loaded.ref_count > 0) {
-                    log.info("Rescueda {s}, {}", .{ handle.uuid.urn(), loaded.assetType() });
+                    log.info("Rescued asset {s}, {}", .{ handle.uuid.urn(), loaded.assetType() });
                     continue;
                 }
 
@@ -363,6 +371,21 @@ pub const Assets = struct {
         return get(gop.value_ptr.*);
     }
 
+    pub fn hooks(handle: AssetHandle) !*AssetHooks {
+        var loaded = try getLoadedAsset(handle);
+        return &loaded.hooks;
+    }
+
+    // declares the dependency of the `depender` on the `dependee`
+    // both assets should be loaded
+    fn dependency(dependee: AssetHandle, depender: AssetHandle) !void {
+        const dependee_loaded = try getLoadedAsset(dependee);
+        const depender_loaded = try getLoadedAsset(depender);
+
+        try dependee_loaded.dependants.append(depender);
+        try depender_loaded.dependencies.append(dependee);
+    }
+
     fn unused(handle: AssetHandle) !void {
         try unused_assets_map().put(handle, {});
     }
@@ -391,20 +414,17 @@ pub const Assets = struct {
         const bytes = try instance.loaders.resource(instance.allocator, handle.uuid, default_max_bytes);
         defer instance.allocator.free(bytes);
 
-        const image = ptr orelse blk: {
-            log.debug("HERE", .{});
-            break :blk try instance.allocator.create(Image);
-        };
+        const image = ptr orelse try instance.allocator.create(Image);
         errdefer if (ptr == null) instance.allocator.destroy(image);
         image.* = try texs.loadImage(instance.engine, bytes, handle);
 
-        const loaded = LoadedAsset{ .data = .{ .image = image } };
+        const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .image = image });
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
         try instance.loaded_ids.put(handle.uuid, {});
     }
 
     fn loadTexture(handle: TextureHandle, ptr: ?*TextureHandle.BackingType) !void {
-        const image = try Self.get(handle.toImage());
+        const image = try get(handle.toImage());
 
         const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -447,9 +467,14 @@ pub const Assets = struct {
 
         check_vk(c.vkCreateImageView(instance.engine.device, &image_view_ci, Engine.vk_alloc_cbs, &texture.image_view)) catch @panic("Failed to create image view");
 
-        const loaded = LoadedAsset{ .data = .{ .texture = texture } };
+        const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .texture = texture });
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
         try instance.loaded_ids.put(handle.uuid, {});
+
+        try dependency(
+            image.handle.toAssetHandle(),
+            texture.handle.toAssetHandle(),
+        );
     }
 
     fn loadColorTexture(color: RGBA8, handle: TextureHandle) !void {
@@ -458,7 +483,7 @@ pub const Assets = struct {
             const image = try instance.allocator.create(Image);
             errdefer instance.allocator.destroy(image);
             image.* = try texs.loadImageFromPixels(instance.engine, &color, 1, 1, c.VK_FORMAT_R8G8B8A8_UNORM, image_handle);
-            const loaded = LoadedAsset{ .data = .{ .image = image } };
+            const loaded = LoadedAsset.init(instance.allocator, image.handle.toAssetHandle(), .{ .image = image });
             try instance.loaded_assets.put(image_handle.toAssetHandle(), loaded);
             try instance.loaded_ids.put(image_handle.uuid, {});
             break :img try get(image_handle);
@@ -505,9 +530,13 @@ pub const Assets = struct {
 
         check_vk(c.vkCreateImageView(instance.engine.device, &image_view_ci, Engine.vk_alloc_cbs, &texture.image_view)) catch @panic("Failed to create image view");
 
-        const loaded = LoadedAsset{ .data = .{ .texture = texture } };
+        const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .texture = texture });
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
         try instance.loaded_ids.put(handle.uuid, {});
+        try dependency(
+            image.handle.toAssetHandle(),
+            texture.handle.toAssetHandle(),
+        );
     }
 
     fn loadMesh(handle: MeshHandle, ptr: ?*MeshHandle.BackingType) !void {
@@ -518,7 +547,7 @@ pub const Assets = struct {
         mesh.* = components.mesh.load_from_obj(instance.allocator, handle, bytes);
         instance.engine.uploadMesh(mesh);
 
-        const loaded = LoadedAsset{ .data = .{ .mesh = mesh } };
+        const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .mesh = mesh });
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
         try instance.loaded_ids.put(handle.uuid, {});
     }
@@ -701,9 +730,17 @@ pub const Assets = struct {
             .rsc_descriptor_set = resource_set,
         };
 
-        const loaded = LoadedAsset{ .data = .{ .material = material } };
+        const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .material = material });
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
         try instance.loaded_ids.put(handle.uuid, {});
+
+        for (material.rsc_handles[0..material.rsc_count]) |rsc| {
+            try dependency(rsc, material.handle.toAssetHandle());
+        }
+        try dependency(
+            shader.handle.toAssetHandle(),
+            material.handle.toAssetHandle(),
+        );
     }
 
     fn loadShader(handle: ShaderHandle, ptr: ?*ShaderHandle.BackingType) !void {
@@ -733,7 +770,7 @@ pub const Assets = struct {
             .modules = .{ .vertex = vert_module, .fragment = frag_module },
         };
 
-        const loaded = LoadedAsset{ .data = .{ .shader = shader } };
+        const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .shader = shader });
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
         try instance.loaded_ids.put(handle.uuid, {});
     }
@@ -745,7 +782,7 @@ pub const Assets = struct {
         const scene = try Scene.fromJson(instance.allocator, bytes, .{});
         scene.handle = handle;
 
-        const loaded = LoadedAsset{ .data = .{ .scene = scene } };
+        const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .scene = scene });
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
         try instance.loaded_ids.put(handle.uuid, {});
     }
@@ -801,6 +838,10 @@ pub const AssetHandle = extern struct {
 
     pub inline fn toAssetHandle(handle: AssetHandle) AssetHandle {
         return handle;
+    }
+
+    pub fn format(handle: AssetHandle, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = try writer.print("[{s}]({s})", .{ @tagName(handle.type), handle.uuid.urn() });
     }
 };
 
@@ -884,9 +925,24 @@ pub const MaterialHandle = AssetHandleOf(.material, .{});
 pub const ShaderHandle = AssetHandleOf(.shader, .{});
 pub const SceneHandle = AssetHandleOf(.scene, .{});
 
+pub const AssetHooks = struct {
+    pub const OnReload = Event(.{AssetHandle});
+    on_reload: OnReload.List,
+
+    fn init(allocator: std.mem.Allocator) AssetHooks {
+        return .{
+            .on_reload = OnReload.List.init(allocator),
+        };
+    }
+
+    fn deinit(hooks: *AssetHooks) void {
+        hooks.on_reload.deinit();
+    }
+};
+
 const LoadedAsset = struct {
     const Self = @This();
-    data: union(AssetType) {
+    pub const Data = union(AssetType) {
         binary: *[]u8,
         image: *Image,
         texture: *Texture,
@@ -894,11 +950,26 @@ const LoadedAsset = struct {
         material: *Material,
         shader: *Shader,
         scene: *Scene,
-    },
+    };
+    handle: AssetHandle,
+    data: Data,
     ref_count: usize = 0,
+    hooks: AssetHooks,
+    dependencies: std.ArrayList(AssetHandle),
+    dependants: std.ArrayList(AssetHandle),
 
     pub fn assetType(self: *const Self) AssetType {
         return @enumFromInt(@intFromEnum(self.data));
+    }
+
+    fn init(allocator: std.mem.Allocator, handle: AssetHandle, data: Data) LoadedAsset {
+        return .{
+            .handle = handle,
+            .data = data,
+            .hooks = AssetHooks.init(allocator),
+            .dependencies = std.ArrayList(AssetHandle).init(allocator),
+            .dependants = std.ArrayList(AssetHandle).init(allocator),
+        };
     }
 
     fn unload(self: *Self, comptime recursive: bool) void {
@@ -925,12 +996,6 @@ const LoadedAsset = struct {
                 var sampler_del = Engine.VulkanDeleter.make(it.sampler, c.vkDestroySampler);
                 sampler_del.delete(Assets.instance.engine);
 
-                if (comptime recursive) Assets.release(it.image) catch |err| {
-                    log.err(
-                        "Failed to release image resource bound to the texture while unloading the texture: {s}, {}",
-                        .{ it.handle.uuid.urn(), err },
-                    );
-                };
                 Assets.instance.allocator.destroy(it);
             },
             .mesh => {
@@ -946,22 +1011,13 @@ const LoadedAsset = struct {
                 pipeline_del.delete(Assets.instance.engine);
                 const slice = it.rsc_handles[0..@intCast(it.rsc_count)];
                 // TODO: this should only happen in the editor builds
-                check_vk(c.vkFreeDescriptorSets(Assets.instance.engine.device, Assets.instance.engine.descriptor_pool, 1, &[_]c.VkDescriptorSet{it.rsc_descriptor_set})) catch @panic("failed to free descriptor set");
-                if (comptime recursive) for (slice) |res| {
-                    Assets.release(res) catch |err| {
-                        log.err(
-                            "Failed to release texture resource bound to the material while unloading the material: {s}, {}",
-                            .{ it.handle.uuid.urn(), err },
-                        );
-                    };
-                };
+                check_vk(c.vkFreeDescriptorSets(
+                    Assets.instance.engine.device,
+                    Assets.instance.engine.descriptor_pool,
+                    1,
+                    &[_]c.VkDescriptorSet{it.rsc_descriptor_set},
+                )) catch @panic("failed to free descriptor set");
                 Assets.instance.allocator.free(slice);
-                if (comptime recursive) Assets.release(it.shader) catch |err| {
-                    log.err(
-                        "Failed to release shader resource bound to the material while unloading the material: {s}, {}",
-                        .{ it.handle.uuid.urn(), err },
-                    );
-                };
                 Assets.instance.allocator.destroy(it);
             },
             .shader => {
@@ -975,5 +1031,18 @@ const LoadedAsset = struct {
                 it.deinit();
             },
         }
+
+        if (comptime recursive) for (self.dependencies.items) |dep| {
+            Assets.release(dep) catch |err| {
+                log.err(
+                    "Failed to release {s} dependency of {s}, {}",
+                    .{ dep, self.handle, err },
+                );
+            };
+        };
+
+        self.hooks.deinit();
+        self.dependants.deinit();
+        self.dependencies.deinit();
     }
 };

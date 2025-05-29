@@ -158,6 +158,6 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
     }
 
     if (updated) {
-        try Assets.reload(mat.ref.handle);
+        try Assets.reload(mat.ref.handle, .{});
     }
 }
