@@ -382,8 +382,39 @@ pub const Assets = struct {
         const dependee_loaded = try getLoadedAsset(dependee);
         const depender_loaded = try getLoadedAsset(depender);
 
-        try dependee_loaded.dependants.append(depender);
+        const gop = try dependee_loaded.dependants.getOrPut(depender);
+        gop.value_ptr.* = if (gop.found_existing) gop.value_ptr.* + 1 else 1;
+
         try depender_loaded.dependencies.append(dependee);
+    }
+
+    // undeclares the dependency of the `depender` on the `dependee`
+    // it is the opposite of the `dependency`, however the depender can already been unloaded
+    fn undependency(dependee: AssetHandle, depender: AssetHandle) !void {
+        const dependee_loaded = try getLoadedAsset(dependee);
+
+        if (dependee_loaded.dependants.getEntry(depender)) |entry| {
+            entry.value_ptr.* -= 1;
+            if (entry.value_ptr.* == 0) {
+                dependee_loaded.dependants.removeByPtr(entry.key_ptr);
+            }
+        } else {
+            return error.InvalidAssetDependency;
+        }
+
+        const depender_loaded = getLoadedAsset(depender) catch |err| switch (err) {
+            error.AssetNotLoaded => return,
+            else => return err,
+        };
+
+        for (depender_loaded.dependencies.items, 0..) |dep, i| {
+            if (dep.eql(dependee)) {
+                _ = depender_loaded.dependencies.swapRemove(i);
+                return;
+            }
+        } else {
+            return error.InvalidAssetDependency;
+        }
     }
 
     fn unused(handle: AssetHandle) !void {
@@ -843,6 +874,10 @@ pub const AssetHandle = extern struct {
     pub fn format(handle: AssetHandle, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         _ = try writer.print("[{s}]({s})", .{ @tagName(handle.type), handle.uuid.urn() });
     }
+
+    pub fn eql(lhs: AssetHandle, rhs: AssetHandle) bool {
+        return lhs.type == rhs.type and lhs.uuid.raw == rhs.uuid.raw;
+    }
 };
 
 pub fn AssetHandleOf(comptime tag: AssetType, comptime opts: struct {
@@ -956,7 +991,7 @@ const LoadedAsset = struct {
     ref_count: usize = 0,
     hooks: AssetHooks,
     dependencies: std.ArrayList(AssetHandle),
-    dependants: std.ArrayList(AssetHandle),
+    dependants: std.AutoHashMap(AssetHandle, usize),
 
     pub fn assetType(self: *const Self) AssetType {
         return @enumFromInt(@intFromEnum(self.data));
@@ -968,11 +1003,12 @@ const LoadedAsset = struct {
             .data = data,
             .hooks = AssetHooks.init(allocator),
             .dependencies = std.ArrayList(AssetHandle).init(allocator),
-            .dependants = std.ArrayList(AssetHandle).init(allocator),
+            .dependants = std.AutoHashMap(AssetHandle, usize).init(allocator),
         };
     }
 
     fn unload(self: *Self, comptime recursive: bool) void {
+        std.debug.assert(self.dependants.count() == 0); // all dependencies should've already been unloaded
         switch (self.data) {
             .binary => {
                 const it = self.data.binary;
@@ -1032,14 +1068,22 @@ const LoadedAsset = struct {
             },
         }
 
-        if (comptime recursive) for (self.dependencies.items) |dep| {
-            Assets.release(dep) catch |err| {
+        for (self.dependencies.items) |dep| {
+            Assets.undependency(dep, self.handle) catch |err| {
                 log.err(
-                    "Failed to release {s} dependency of {s}, {}",
+                    "Failed to undeclare the dependency between {s} and {s}, {}",
                     .{ dep, self.handle, err },
                 );
             };
-        };
+            if (comptime recursive) {
+                Assets.release(dep) catch |err| {
+                    log.err(
+                        "Failed to release {s} dependency of {s}, {}",
+                        .{ dep, self.handle, err },
+                    );
+                };
+            }
+        }
 
         self.hooks.deinit();
         self.dependants.deinit();
