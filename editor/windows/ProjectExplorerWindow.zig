@@ -8,6 +8,7 @@ const utils = @import("yume").utils;
 const Rect = @import("yume").Rect;
 const Event = @import("yume").Event;
 const collections = @import("yume").collections;
+const assets = @import("yume").assets;
 
 const Editor = @import("../Editor.zig");
 const EditorDatabase = @import("../EditorDatabase.zig");
@@ -391,10 +392,27 @@ fn indexFilterTags(self: *Self) !void {
                             };
                         }
                     }.f,
+                    .user_data = .{ .void = {} },
                 },
             },
             .thumbnail = try iconThumbnail("editor://icons/filter.png"),
         };
+    }
+
+    // asset type filters
+    inline for (@typeInfo(assets.AssetType).Enum.fields) |ty| {
+        const thumbnail = try iconThumbnail("editor://icons/filter.png");
+        const gop = try self.index.getOrPut("Asset type: " ++ ty.name);
+
+        if (!gop.found_existing) {
+            gop.value_ptr.* = try self.allocator.create(Entry);
+            gop.value_ptr.*.* = Entry{
+                .kind = .{
+                    .filter = filterByAssetType(@enumFromInt(ty.value)),
+                },
+                .thumbnail = thumbnail,
+            };
+        }
     }
 }
 
@@ -947,6 +965,11 @@ pub const Filter = struct {
         }
     },
     predicate: *const fn (*const Filter, *const Entry) bool,
+    user_data: union {
+        void: void,
+        ptr: *anyopaque,
+        int: isize,
+    },
 
     pub fn deinit(filter: *@This(), allocator: std.mem.Allocator) void {
         filter.tag_name.deinit(allocator);
@@ -957,17 +980,35 @@ pub const Filter = struct {
     }
 };
 
-pub fn filterByResourceType(comptime ty: Resources.Resource.Type) Filter {
+pub fn filterByResourceType(ty: Resources.Resource.Type) Filter {
     return .{
         .tag_name = .{ .constant = @tagName(ty) },
         .predicate = &struct {
-            fn f(_: *const Filter, it: *const Entry) bool {
+            fn pred(f: *const Filter, it: *const Entry) bool {
                 return switch (it.kind) {
-                    .resource => |r| r.type == ty,
+                    .resource => |r| @intFromEnum(r.type) == f.user_data.int,
                     else => false,
                 };
             }
-        }.f,
+        }.pred,
+        .user_data = .{ .int = @intFromEnum(ty) },
+    };
+}
+
+pub fn filterByAssetType(ty: assets.AssetType) Filter {
+    return .{
+        .tag_name = .{ .constant = @tagName(ty) },
+        .predicate = &struct {
+            fn pred(f: *const Filter, it: *const Entry) bool {
+                const t: assets.AssetType = @enumFromInt(f.user_data.int);
+                return switch (it.kind) {
+                    .resource => |r| r.type.toAssetType() == t or
+                        (t == .texture and r.type.toAssetType() == .image),
+                    else => false,
+                };
+            }
+        }.pred,
+        .user_data = .{ .int = @intFromEnum(ty) },
     };
 }
 

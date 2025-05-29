@@ -316,7 +316,6 @@ pub fn fourwayInputs() enum { none, up, down, left, right } {
 pub fn assetHandleInput(label: [*:0]const u8, handle: ?assets.AssetHandle) !?assets.AssetHandle {
     c.ImGui_PushID(label);
     defer c.ImGui_PopID();
-    const id = c.ImGui_GetItemID();
 
     const total_width = c.ImGui_CalcItemWidth();
     const browse_button_width: f32 = 30;
@@ -330,12 +329,14 @@ pub fn assetHandleInput(label: [*:0]const u8, handle: ?assets.AssetHandle) !?ass
 
     // Draw the browse button with a fixed width.
     const button_size = c.ImVec2{ .x = browse_button_width, .y = 0 };
-    if (c.ImGui_ButtonEx("...", button_size)) {
+    const clicked = c.ImGui_ButtonEx("...", button_size);
+    const id = c.ImGui_GetID("active_asset_handle_input");
+    if (clicked) {
         imutils_context.active_asset_handle_input = id;
         try Project.browseAssets(handle, .{
-            .locked_filters = &.{
-                ProjectExplorerWindow.filterByResourceType(.obj),
-            },
+            .locked_filters = if (handle) |h| &.{
+                ProjectExplorerWindow.filterByAssetType(h.toAssetHandle().type),
+            } else &.{},
             .callback = Project.OnSelectAsset.callback(Context, &imutils_context, Context.onSelectAsset),
         });
     }
@@ -346,10 +347,11 @@ pub fn assetHandleInput(label: [*:0]const u8, handle: ?assets.AssetHandle) !?ass
     }
 
     if (imutils_context.active_asset_handle_input == id) {
-        const new_asset_handle = imutils_context.new_asset_handle;
-        imutils_context.active_asset_handle_input = 0;
-        imutils_context.new_asset_handle = null;
-        return new_asset_handle;
+        if (imutils_context.new_asset_handle) |h| {
+            imutils_context.active_asset_handle_input = 0;
+            imutils_context.new_asset_handle = null;
+            return h;
+        }
     }
     return null;
 }
@@ -360,6 +362,7 @@ const Context = struct {
     new_asset_handle: ?assets.AssetHandle = null,
 
     fn onSelectAsset(ctx: *Context, handle: ?assets.AssetHandle) void {
+        std.log.debug("on_select active: {d}, selected: {?}", .{ ctx.active_asset_handle_input, handle });
         ctx.new_asset_handle = handle;
     }
 };
