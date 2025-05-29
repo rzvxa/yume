@@ -199,6 +199,7 @@ pub const Assets = struct {
         failed_to_create_image,
         FailedToLoadVertModule,
         FailedToLoadFragModule,
+        InvalidAssetDependency,
         UnexpectedResourceBinding,
     })!void {
         comptime var actual_ty = @TypeOf(asset);
@@ -225,36 +226,27 @@ pub const Assets = struct {
             };
         }
 
-        const BackingType = @TypeOf(handle).BackingType;
         const Tag = @TypeOf(handle).Tag;
 
         const generic_handle: AssetHandle = handle.toAssetHandle();
 
-        const kv = instance.loaded_assets.fetchRemove(generic_handle) orelse return;
+        var kv = instance.loaded_assets.fetchRemove(generic_handle) orelse return;
+        // we manage the dependencies manually during the reloads
+        defer kv.value.dependants.deinit();
+        defer kv.value.dependencies.deinit();
+
+        for (kv.value.dependencies.items) |dep| {
+            try undependency(dep, generic_handle);
+        }
 
         {
-            const orphan_data = try instance.allocator.create(BackingType);
-            orphan_data.* = switch (comptime Tag) {
-                .binary => @panic("TODO"),
-                .image => kv.value.data.image.*,
-                .texture => kv.value.data.texture.*,
-                .mesh => kv.value.data.mesh.*,
-                .material => kv.value.data.material.*,
-                .shader => kv.value.data.shader.*,
-                .scene => kv.value.data.scene.*,
-            };
-
-            var copy = kv.value;
-            copy.data = switch (comptime Tag) {
-                .binary => @compileError("TODO"),
-                .image => .{ .image = orphan_data },
-                .texture => .{ .texture = orphan_data },
-                .mesh => .{ .mesh = orphan_data },
-                .material => .{ .material = orphan_data },
-                .shader => .{ .shader = orphan_data },
-                .scene => .{ .scene = orphan_data },
-            };
-            try orphan(copy);
+            // queue the orphan asset for release
+            const orphan_copy = LoadedAsset.init(
+                instance.allocator,
+                kv.value.handle,
+                try kv.value.data.clone(instance.allocator),
+            );
+            try orphan(orphan_copy);
         }
 
         if (comptime opts.recursive) {
@@ -273,6 +265,7 @@ pub const Assets = struct {
                         if (m.rsc_handles[i].type == .texture and
                             instance.texture_color_map.contains(m.rsc_handles[i].unbox(.texture)))
                         {
+                            // color textures don't need to be reloaded,
                             continue;
                         }
 
@@ -309,7 +302,7 @@ pub const Assets = struct {
             // round robin between active maps on each collection,
             defer instance.orphan_assets_active_idx = @mod(instance.orphan_assets_active_idx + 1, instance.orphan_assets_maps.len);
             for (0..orphan_assets.items.len) |i| {
-                orphan_assets.items[i].unload(false);
+                orphan_assets.items[i].unload(.{ .orphan = true });
             }
             orphan_assets.clearRetainingCapacity();
         }
@@ -320,7 +313,13 @@ pub const Assets = struct {
             defer instance.unused_assets_active_idx = @mod(instance.unused_assets_active_idx + 1, instance.unused_assets_maps.len);
             var iter = unused_assets.keyIterator();
             while (iter.next()) |handle| {
-                var loaded = try getLoadedAsset(handle.*);
+                var loaded = getLoadedAsset(handle.*) catch |err| switch (err) {
+                    error.AssetNotLoaded => {
+                        log.debug("Unused asset {} already unloaded", .{handle.*});
+                        continue;
+                    },
+                    else => return err,
+                };
                 // it is possible for an asset to get rescued if it's referenced again before collection
                 // if that is the case, we just ignore this entry
                 if (loaded.ref_count > 0) {
@@ -335,7 +334,7 @@ pub const Assets = struct {
                         _ = instance.color_texture_map.remove(kv.value);
                     }
                 }
-                loaded.unload(true);
+                loaded.unload(.{});
                 std.debug.assert(instance.loaded_ids.remove(handle.uuid));
                 std.debug.assert(instance.loaded_assets.remove(handle.toAssetHandle()));
             }
@@ -985,6 +984,42 @@ const LoadedAsset = struct {
         material: *Material,
         shader: *Shader,
         scene: *Scene,
+
+        pub fn clone(data: *const Data, allocator: std.mem.Allocator) !Data {
+            switch (data.*) {
+                .binary => @panic("TODO"),
+                .image => |it| {
+                    const orphan_data = try allocator.create(Image);
+                    orphan_data.* = it.*;
+                    return .{ .image = orphan_data };
+                },
+                .texture => |it| {
+                    const orphan_data = try allocator.create(Texture);
+                    orphan_data.* = it.*;
+                    return .{ .texture = orphan_data };
+                },
+                .mesh => |it| {
+                    const orphan_data = try allocator.create(Mesh);
+                    orphan_data.* = it.*;
+                    return .{ .mesh = orphan_data };
+                },
+                .material => |it| {
+                    const orphan_data = try allocator.create(Material);
+                    orphan_data.* = it.*;
+                    return .{ .material = orphan_data };
+                },
+                .shader => |it| {
+                    const orphan_data = try allocator.create(Shader);
+                    orphan_data.* = it.*;
+                    return .{ .shader = orphan_data };
+                },
+                .scene => |it| {
+                    const orphan_data = try allocator.create(Scene);
+                    orphan_data.* = it.*;
+                    return .{ .scene = orphan_data };
+                },
+            }
+        }
     };
     handle: AssetHandle,
     data: Data,
@@ -1007,8 +1042,18 @@ const LoadedAsset = struct {
         };
     }
 
-    fn unload(self: *Self, comptime recursive: bool) void {
-        std.debug.assert(self.dependants.count() == 0); // all dependencies should've already been unloaded
+    fn unload(self: *Self, comptime opts: struct { orphan: bool = false }) void {
+        log.debug("unload {}", .{self.handle});
+        if (comptime !opts.orphan) {
+            if (self.dependants.count() > 0) {
+                var iter = self.dependants.iterator();
+                while (iter.next()) |kv| {
+                    log.err("Unexpected attempt to unload the {} while depended on by {}, depended N: {d}", .{ self.handle, kv.key_ptr.*, kv.value_ptr.* });
+                }
+                std.debug.assert(false); // all dependencies should've already been unloaded
+
+            }
+        }
         switch (self.data) {
             .binary => {
                 const it = self.data.binary;
@@ -1075,14 +1120,12 @@ const LoadedAsset = struct {
                     .{ dep, self.handle, err },
                 );
             };
-            if (comptime recursive) {
-                Assets.release(dep) catch |err| {
-                    log.err(
-                        "Failed to release {s} dependency of {s}, {}",
-                        .{ dep, self.handle, err },
-                    );
-                };
-            }
+            if (comptime !opts.orphan) Assets.release(dep) catch |err| {
+                log.err(
+                    "Failed to release {s} dependency of {s}, {}",
+                    .{ dep, self.handle, err },
+                );
+            };
         }
 
         self.hooks.deinit();
