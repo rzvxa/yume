@@ -76,9 +76,10 @@ pub fn browseAssets(selected: ?assets.AssetHandle, opts: struct {
             ptr.allocator.destroy(ptr);
         }
     };
-    const cb_instance = try instance.?.allocator.create(CbType);
+    const cb_allocator = Editor.instance().callbacks_arena.allocator();
+    const cb_instance = try cb_allocator.create(CbType);
 
-    cb_instance.* = .{ .allocator = instance.?.allocator, .tail = opts.callback };
+    cb_instance.* = .{ .allocator = cb_allocator, .tail = opts.callback };
 
     try Editor.instance().project_explorer_window.browse(sel, .{
         .locked_filters = opts.locked_filters,

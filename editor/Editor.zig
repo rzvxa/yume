@@ -790,7 +790,6 @@ pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
         uri: []const u8,
         fn f(ptr: *@This(), handle: assets.AssetHandle) void {
             _ = handle;
-            log.debug("callback imgui", .{});
             const entry = loaded_imgui_images.fetchRemove(ptr.uri).?;
 
             c.cImGui_ImplVulkan_RemoveTexture(@ptrFromInt(entry.value.texture));
