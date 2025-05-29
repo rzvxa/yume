@@ -279,6 +279,7 @@ pub const Assets = struct {
             var iter = kv.value.dependants.iterator();
             while (iter.next()) |next| {
                 try new_loaded.dependants.putNoClobber(next.key_ptr.*, next.value_ptr.*);
+                try reload(next.key_ptr.*, .{ .recursive = false });
             }
         }
         try new_loaded.hooks.on_reload.copyFrom(&kv.value.hooks.on_reload);
