@@ -95,14 +95,9 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
         if (c.ImGui_BeginCombo("##type", null, c.ImGuiComboFlags_CustomPreview)) {
             defer c.ImGui_EndCombo();
 
-            const res_def_union = @typeInfo(Material.Def.ResourceDef).Union;
-            inline for (res_def_union.fields, 0..) |field, i| {
-                const tag: res_def_union.tag_type.? = @enumFromInt(i);
-                const icon = switch (tag) {
-                    .uuid => "editor://icons/image-small.png",
-                    .color => "editor://icons/color-picker-small.png",
-                    .number => "editor://icons/numpad-small.png",
-                };
+            inline for (@typeInfo(Material.Def.ResourceDef).Union.fields, 0..) |field, i| {
+                const tag: std.meta.Tag(Material.Def.ResourceDef) = @enumFromInt(i);
+                const icon = resourceBindIcon(tag);
                 const display_name = switch (tag) {
                     .uuid => "Texture",
                     .color => "Color",
@@ -114,6 +109,7 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
                         .color => .{ .color = [_]u8{255} ** 4 },
                         .number => .{ .number = 1 },
                     };
+                    updated = true;
                 }
                 c.ImGui_SameLineEx(0, 0);
                 c.ImGui_Image(try Editor.getImGuiTexture(icon), .{ .x = text_height, .y = text_height });
@@ -123,12 +119,7 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
         }
         if (c.ImGui_BeginComboPreview()) {
             defer c.ImGui_EndComboPreview();
-            const icon_uri = if (res_def.* == .color)
-                "editor://icons/color-picker-small.png"
-            else if (res_def.* == .uuid)
-                "editor://icons/image-small.png"
-            else
-                "editor://icons/image-small.png";
+            const icon_uri = resourceBindIcon(std.meta.activeTag(res_def.*));
 
             c.ImGui_Image(try Editor.getImGuiTexture(icon_uri), .{ .x = text_height, .y = text_height });
         }
@@ -150,7 +141,9 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
             },
             .number => {
                 const n: *f32 = &res_def.number;
-                _ = c.ImGui_SliderFloat("##number", @ptrCast(n), 0, 0);
+                if (c.ImGui_SliderFloat("##number", @ptrCast(n), 0, 1)) {
+                    updated = true;
+                }
             },
             .color => |col01| {
                 var col = [4]f32{
@@ -176,4 +169,12 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
     if (updated) {
         try Assets.reload(mat.ref.handle, .{});
     }
+}
+
+fn resourceBindIcon(tag: std.meta.Tag(Material.Def.ResourceDef)) []const u8 {
+    return switch (tag) {
+        .uuid => "editor://icons/image-small.png",
+        .color => "editor://icons/color-picker-small.png",
+        .number => "editor://icons/numpad-small.png",
+    };
 }

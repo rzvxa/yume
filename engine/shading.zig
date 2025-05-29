@@ -82,7 +82,7 @@ pub const Material = struct {
                             return tex;
                         },
                         .color => |color| return try Assets.getColorTexture(color),
-                        else => return error.UnexpectedResourceBinding,
+                        .number => |n| return try Assets.getColorTexture([_]u8{@intFromFloat(n * 255)} ** 4),
                     },
                     .cube => unreachable,
                 }
