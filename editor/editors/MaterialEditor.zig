@@ -7,6 +7,7 @@ const GameApp = @import("yume").GameApp;
 const assets = @import("yume").assets;
 const Assets = assets.Assets;
 const Shader = @import("yume").shading.Shader;
+const Material = @import("yume").shading.Material;
 const Uuid = @import("yume").Uuid;
 const Vec4 = @import("yume").Vec4;
 const Mat4 = @import("yume").Mat4;
@@ -93,17 +94,32 @@ fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
         c.ImGui_SetNextItemWidth(text_height * 2 + c.ImGui_GetStyle().*.FramePadding.x * 2);
         if (c.ImGui_BeginCombo("##type", null, c.ImGuiComboFlags_CustomPreview)) {
             defer c.ImGui_EndCombo();
-            _ = c.ImGui_Selectable("##color");
-            c.ImGui_SameLineEx(0, 0);
-            c.ImGui_Image(try Editor.getImGuiTexture("editor://icons/color-picker-small.png"), .{ .x = text_height, .y = text_height });
-            c.ImGui_SameLine();
-            _ = c.ImGui_Text("Color");
 
-            _ = c.ImGui_Selectable("##image");
-            c.ImGui_SameLineEx(0, 0);
-            c.ImGui_Image(try Editor.getImGuiTexture("editor://icons/image-small.png"), .{ .x = text_height, .y = text_height });
-            c.ImGui_SameLine();
-            _ = c.ImGui_Text("Image");
+            const res_def_union = @typeInfo(Material.Def.ResourceDef).Union;
+            inline for (res_def_union.fields, 0..) |field, i| {
+                const tag: res_def_union.tag_type.? = @enumFromInt(i);
+                const icon = switch (tag) {
+                    .uuid => "editor://icons/image-small.png",
+                    .color => "editor://icons/color-picker-small.png",
+                    .number => "editor://icons/numpad-small.png",
+                };
+                const display_name = switch (tag) {
+                    .uuid => "Texture",
+                    .color => "Color",
+                    .number => "Number",
+                };
+                if (c.ImGui_Selectable("##" ++ field.name)) {
+                    res_def.* = switch (tag) {
+                        .uuid => .{ .uuid = try Resources.getResourceId("builtin://1x1b.png") },
+                        .color => .{ .color = [_]u8{255} ** 4 },
+                        .number => .{ .number = 1 },
+                    };
+                }
+                c.ImGui_SameLineEx(0, 0);
+                c.ImGui_Image(try Editor.getImGuiTexture(icon), .{ .x = text_height, .y = text_height });
+                c.ImGui_SameLine();
+                c.ImGui_Text(display_name);
+            }
         }
         if (c.ImGui_BeginComboPreview()) {
             defer c.ImGui_EndComboPreview();
