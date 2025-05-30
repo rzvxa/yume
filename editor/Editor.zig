@@ -182,9 +182,8 @@ pub fn init(ctx: *GameApp) *Self {
         .scene_window = undefined,
         .callbacks_arena = std.heap.ArenaAllocator.init(ctx.allocator),
     };
-    singleton.scene_window = SceneWindow.init(ctx, @ptrCast(&Editors.onDrawGizmos), &singleton.editors);
+    singleton.scene_window = SceneWindow.init(ctx, @ptrCast(&Editors.onDrawGizmos), &singleton.editors) catch @panic("Failed to initialize scene window");
     singleton.bootstrapEditorPipeline(ctx.world);
-    singleton.initDescriptors(&ctx.renderer);
 
     initImGui(&ctx.renderer) catch @panic("failed to init imgui");
 
@@ -456,68 +455,6 @@ pub fn draw(self: *Self) !void {
     self.ctx.renderer.beginPresentRenderPass(cmd);
 
     self.ctx.renderer.endFrame(cmd);
-}
-
-fn initDescriptors(self: *Self, renderer: *GAL.RenderApi) void {
-    const camera_and_scene_buffer_size =
-        GAL.frame_overlap * renderer.padUniformBufferSize(@sizeOf(GAL.GPUCameraData)) +
-        GAL.frame_overlap * renderer.padUniformBufferSize(@sizeOf(GAL.GPUSceneData));
-    self.scene_window.editor_camera_and_scene_buffer = renderer.createBuffer(
-        camera_and_scene_buffer_size,
-        c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        c.VMA_MEMORY_USAGE_CPU_TO_GPU,
-    );
-    renderer.buffer_deletion_queue.append(
-        GAL.RenderApi.VmaBufferDeleter{ .buffer = self.scene_window.editor_camera_and_scene_buffer },
-    ) catch @panic("Out of memory");
-
-    // Camera and scene descriptor set
-    const global_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool = renderer.descriptor_pool,
-        .descriptorSetCount = 1,
-        .pSetLayouts = &renderer.global_set_layout,
-    });
-
-    // Allocate a single set for multiple frame worth of camera and scene data
-    check_vk(c.vkAllocateDescriptorSets(renderer.device, &global_set_alloc_info, &self.scene_window.editor_camera_and_scene_set)) catch @panic("Failed to allocate global descriptor set");
-
-    // editor Camera
-    const editor_camera_buffer_info = std.mem.zeroInit(c.VkDescriptorBufferInfo, .{
-        .buffer = self.scene_window.editor_camera_and_scene_buffer.buffer,
-        .range = @sizeOf(GAL.GPUCameraData),
-    });
-
-    const editor_camera_write = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
-        .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = self.scene_window.editor_camera_and_scene_set,
-        .dstBinding = 0,
-        .descriptorCount = 1,
-        .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-        .pBufferInfo = &editor_camera_buffer_info,
-    });
-
-    // editor Scene parameters
-    const editor_scene_parameters_buffer_info = std.mem.zeroInit(c.VkDescriptorBufferInfo, .{
-        .buffer = self.scene_window.editor_camera_and_scene_buffer.buffer,
-        .range = @sizeOf(GAL.GPUSceneData),
-    });
-
-    const editor_scene_parameters_write = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
-        .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = self.scene_window.editor_camera_and_scene_set,
-        .dstBinding = 1,
-        .descriptorCount = 1,
-        .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-        .pBufferInfo = &editor_scene_parameters_buffer_info,
-    });
-
-    const editor_camera_and_scene_writes = [_]c.VkWriteDescriptorSet{
-        editor_camera_write,
-        editor_scene_parameters_write,
-    };
-
-    c.vkUpdateDescriptorSets(renderer.device, @as(u32, @intCast(editor_camera_and_scene_writes.len)), &editor_camera_and_scene_writes[0], 0, null);
 }
 
 fn initImGui(renderer: *GAL.RenderApi) !void {

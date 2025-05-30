@@ -12,6 +12,7 @@ const Quat = @import("yume").Quat;
 const Mat4 = @import("yume").Mat4;
 const Rect = @import("yume").Rect;
 const GAL = @import("yume").GAL;
+const check_vk = GAL.RenderApi.check_vk;
 const GameApp = @import("yume").GameApp;
 const components = @import("yume").ecs.components;
 const GPULightData = GAL.GPUSceneData.GPULightData;
@@ -72,7 +73,7 @@ render_system: ecs.Entity,
 on_draw_gizmos: *const fn (*anyopaque) void,
 on_draw_gizmos_ctx: *anyopaque,
 
-pub fn init(ctx: *GameApp, on_draw_gizmos: *const fn (*anyopaque) void, on_draw_gizmos_ctx: *anyopaque) Self {
+pub fn init(ctx: *GameApp, on_draw_gizmos: *const fn (*anyopaque) void, on_draw_gizmos_ctx: *anyopaque) !Self {
     var self = Self{
         .cast_query = ctx.world.query(&std.mem.zeroInit(
             c.ecs_query_desc_t,
@@ -113,6 +114,7 @@ pub fn init(ctx: *GameApp, on_draw_gizmos: *const fn (*anyopaque) void, on_draw_
         .on_draw_gizmos = on_draw_gizmos,
         .on_draw_gizmos_ctx = on_draw_gizmos_ctx,
     };
+    try self.initDescriptors(&ctx.renderer);
     self.focus(Vec3.scalar(0), default_cam_distance);
     return self;
 }
@@ -801,3 +803,67 @@ const State = enum {
         return s != .idle;
     }
 };
+
+fn initDescriptors(self: *Self, renderer: *GAL.RenderApi) !void {
+    const camera_and_scene_buffer_size =
+        GAL.frame_overlap * renderer.padUniformBufferSize(@sizeOf(GAL.GPUCameraData)) +
+        GAL.frame_overlap * renderer.padUniformBufferSize(@sizeOf(GAL.GPUSceneData));
+    self.editor_camera_and_scene_buffer = renderer.createBuffer(
+        camera_and_scene_buffer_size,
+        c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        c.VMA_MEMORY_USAGE_CPU_TO_GPU,
+    );
+    try renderer.buffer_deletion_queue.append(
+        GAL.RenderApi.VmaBufferDeleter{ .buffer = self.editor_camera_and_scene_buffer },
+    );
+
+    // Camera and scene descriptor set
+    const global_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
+        .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = renderer.descriptor_pool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &renderer.global_set_layout,
+    });
+
+    // Allocate a single set for multiple frame worth of camera and scene data
+    try check_vk(
+        c.vkAllocateDescriptorSets(renderer.device, &global_set_alloc_info, &self.editor_camera_and_scene_set),
+    );
+
+    // editor Camera
+    const editor_camera_buffer_info = std.mem.zeroInit(c.VkDescriptorBufferInfo, .{
+        .buffer = self.editor_camera_and_scene_buffer.buffer,
+        .range = @sizeOf(GAL.GPUCameraData),
+    });
+
+    const editor_camera_write = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
+        .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = self.editor_camera_and_scene_set,
+        .dstBinding = 0,
+        .descriptorCount = 1,
+        .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+        .pBufferInfo = &editor_camera_buffer_info,
+    });
+
+    // editor Scene parameters
+    const editor_scene_parameters_buffer_info = std.mem.zeroInit(c.VkDescriptorBufferInfo, .{
+        .buffer = self.editor_camera_and_scene_buffer.buffer,
+        .range = @sizeOf(GAL.GPUSceneData),
+    });
+
+    const editor_scene_parameters_write = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
+        .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = self.editor_camera_and_scene_set,
+        .dstBinding = 1,
+        .descriptorCount = 1,
+        .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+        .pBufferInfo = &editor_scene_parameters_buffer_info,
+    });
+
+    const editor_camera_and_scene_writes = [_]c.VkWriteDescriptorSet{
+        editor_camera_write,
+        editor_scene_parameters_write,
+    };
+
+    c.vkUpdateDescriptorSets(renderer.device, @as(u32, @intCast(editor_camera_and_scene_writes.len)), &editor_camera_and_scene_writes[0], 0, null);
+}
