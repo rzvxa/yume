@@ -50,30 +50,37 @@ fn deinit(ptr: *anyopaque) void {
 fn editAsComponent(ptr: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
     const me = @as(*@This(), @ptrCast(@alignCast(ptr)));
     const mat = ctx.world.getMut(entity, ecs.components.Material).?;
-    me.edit(mat, ctx) catch |err| {
+    me.edit(entity, mat, ctx) catch |err| {
         std.log.err("{}", .{err});
         @panic("Failed to edit the material");
     };
 }
 
-fn edit(self: *Self, mat: *ecs.components.Material, _: *GameApp) !void {
-    _ = imutils.assetHandleInput("Material", mat.ref.handle.toAssetHandle()) catch |err| blk: {
+fn edit(self: *Self, entity: ecs.Entity, mat: *ecs.components.Material, ctx: *GameApp) !void {
+    const new_material = imutils.assetHandleInput("Material", mat.ref.handle.toAssetHandle()) catch |err| blk: {
         std.log.err("Failed to display asset handle editor on the Material component, {}", .{err});
         break :blk null;
     };
+    if (new_material) |nm| {
+        ctx.world.remove(entity, ecs.components.Material);
+        ctx.world.set(entity, ecs.components.Material, .{ .ref = try Assets.get(nm.unbox(.material)) });
+    }
     const shaders = try Resources.findResourceNodeByUri(&self.shaders_root_uri) orelse unreachable;
     const active_shader = try Resources.getShaderDef(mat.ref.shader.uuid);
     if (c.ImGui_BeginCombo("Shader", active_shader.name, c.ImGuiComboFlags_None)) {
         defer c.ImGui_EndCombo();
         var dfs = try shaders.dfs(self.allocator, .pre);
         defer dfs.deinit();
+        c.ImGui_BeginDisabled(true);
+        defer c.ImGui_EndDisabled();
         while (try dfs.next()) |e| {
             switch (e.event) {
                 .enter => |res| {
                     if (res.node != .resource) continue;
                     if (try Resources.getResourceType(res.node.resource) != .shader) continue;
                     const shader = try Resources.getShaderDef(res.node.resource);
-                    _ = c.ImGui_Selectable(shader.name);
+                    var selected = res.node.resource.eql(mat.ref.shader.uuid);
+                    _ = c.ImGui_SelectableBoolPtr(shader.name, &selected, if (selected) c.ImGuiSelectableFlags_Highlight else 0);
                 },
                 .leave => {},
             }
