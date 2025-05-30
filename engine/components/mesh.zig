@@ -12,7 +12,6 @@ const Assets = assets.Assets;
 const Dynamic = @import("../serialization/dynamic.zig").Dynamic;
 
 const Uuid = @import("../uuid.zig").Uuid;
-const obj_loader = @import("../obj_loader.zig");
 
 const Vec2 = m3d.Vec2;
 const Vec3 = m3d.Vec3;
