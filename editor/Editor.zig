@@ -142,7 +142,7 @@ project_explorer_window: ProjectExplorerWindow,
 
 callbacks_arena: std.heap.ArenaAllocator,
 
-pub fn init(ctx: *GameApp) *Self {
+pub fn init(ctx: *GameApp) !*Self {
     ctx.world.tag(RunInEditor);
     ctx.world.tag(Playing);
     ctx.world.addSingleton(Playing);
@@ -160,34 +160,34 @@ pub fn init(ctx: *GameApp) *Self {
         );
     }
 
-    const home_dir = std.fs.selfExeDirPathAlloc(ctx.allocator) catch @panic("OOM");
+    const home_dir = try std.fs.selfExeDirPathAlloc(ctx.allocator);
     defer ctx.allocator.free(home_dir);
-    const db_path = std.fs.path.join(ctx.allocator, &[_][]const u8{ home_dir, ".user-data", "db.json" }) catch @panic("OOM");
+    const db_path = try std.fs.path.join(ctx.allocator, &[_][]const u8{ home_dir, ".user-data", "db.json" });
     defer ctx.allocator.free(db_path);
 
-    EditorDatabase.init(ctx.allocator, db_path) catch @panic("Faield to load editor database");
+    try EditorDatabase.init(ctx.allocator, db_path);
     inputs = InputsContext{ .window = ctx.window };
     singleton = Self{
         .ctx = ctx,
         .editors = Editors.init(ctx.allocator),
-        .hello_modal = HelloModal.init() catch @panic("Failed to initialize `HelloModal`"),
-        .new_project_modal = NewProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `NewProjectModal`"),
-        .open_project_modal = OpenProjectModal.init(ctx.allocator) catch @panic("Failed to initialize `OpenProjectModal`"),
+        .hello_modal = try HelloModal.init(),
+        .new_project_modal = try NewProjectModal.init(ctx.allocator),
+        .open_project_modal = try OpenProjectModal.init(ctx.allocator),
         .hierarchy_window = HierarchyWindow.init(ctx.allocator),
-        .resources_window = ResourcesWindow.init(ctx.allocator) catch @panic("Failed to initialize `ResourcesWindow`"),
+        .resources_window = try ResourcesWindow.init(ctx.allocator),
         .properties_window = PropertiesWindow.init(ctx.allocator),
         .game_window = GameWindow.init(ctx),
-        .logs_windows = LogsWindow.init(ctx.allocator),
-        .project_explorer_window = ProjectExplorerWindow.init(ctx.allocator) catch @panic("Failed to initialize `Project Explorer`"),
+        .logs_windows = try LogsWindow.init(ctx.allocator),
+        .project_explorer_window = try ProjectExplorerWindow.init(ctx.allocator),
         .scene_window = undefined,
         .callbacks_arena = std.heap.ArenaAllocator.init(ctx.allocator),
     };
-    singleton.scene_window = SceneWindow.init(ctx, @ptrCast(&Editors.onDrawGizmos), &singleton.editors) catch @panic("Failed to initialize scene window");
+    singleton.scene_window = try SceneWindow.init(ctx, @ptrCast(&Editors.onDrawGizmos), &singleton.editors);
     singleton.bootstrapEditorPipeline(ctx.world);
 
-    initImGui(&ctx.renderer) catch @panic("failed to init imgui");
+    try initImGui(&ctx.renderer);
 
-    singleton.project_explorer_window.setup() catch @panic("Failed to start project explorer indexing");
+    try singleton.project_explorer_window.setup();
 
     if (EditorDatabase.storage().project.last_open_project) |lop| {
         Project.load(ctx.allocator, lop) catch {
@@ -356,21 +356,21 @@ pub fn draw(self: *Self) !void {
             if (c.ImGui_MenuItem("Load*")) {}
             if (c.ImGui_MenuItemEx("Save", "CTRL+S", false, true)) {
                 if (self.ctx.scene.handle) |hndl| {
-                    const scene = self.ctx.snapshotLiveScene() catch @panic("Faield to serialize scene");
+                    const scene = try self.ctx.snapshotLiveScene();
                     defer scene.deinit();
                     var resource_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                    const path = Resources.bufResourceFullpath(
+                    const path = try Resources.bufResourceFullpath(
                         hndl.uuid,
                         &resource_path_buf,
-                    ) catch @panic("Scene not found!");
-                    const json = std.json.stringifyAlloc(self.ctx.allocator, scene, .{ .whitespace = .indent_4 }) catch @panic("Failed to serialize the scene");
+                    );
+                    const json = try std.json.stringifyAlloc(self.ctx.allocator, scene, .{ .whitespace = .indent_4 });
                     defer self.ctx.allocator.free(json);
                     log.info("saving scene \"{s}\" to save to \"{s}\"\n", .{ hndl.uuid.urn(), path });
-                    var file = std.fs.cwd().createFile(path, .{}) catch @panic("Failed to open scene file to save");
+                    var file = try std.fs.cwd().createFile(path, .{});
                     defer file.close();
-                    file.setEndPos(0) catch @panic("Failed to truncate the scene file");
-                    file.seekTo(0) catch @panic("Failed to seek the start of the scene file");
-                    file.writeAll(json) catch @panic("Failed to write scene data");
+                    try file.setEndPos(0);
+                    try file.seekTo(0);
+                    try file.writeAll(json);
                 } else {
                     log.warn("Saving new scene not implemented yet\n", .{}); // TODO
                 }
@@ -514,7 +514,7 @@ fn initImGui(renderer: *GAL.RenderApi) !void {
     });
 
     var imgui_pool: c.VkDescriptorPool = undefined;
-    check_vk(c.vkCreateDescriptorPool(renderer.device, &pool_ci, GAL.RenderApi.vk_alloc_cbs, &imgui_pool)) catch @panic("Failed to create imgui descriptor pool");
+    try check_vk(c.vkCreateDescriptorPool(renderer.device, &pool_ci, GAL.RenderApi.vk_alloc_cbs, &imgui_pool));
 
     imutils.createContext();
     _ = c.cImGui_ImplSDL3_InitForVulkan(renderer.window);
@@ -545,9 +545,9 @@ fn initImGui(renderer: *GAL.RenderApi) !void {
 
     yume_logo_ds = try getImGuiTexture("editor://icons/yume.png");
 
-    renderer.deletion_queue.append(
+    try renderer.deletion_queue.append(
         GAL.RenderApi.VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool),
-    ) catch @panic("Out of memory");
+    );
 
     io.*.ConfigFlags |= c.ImGuiConfigFlags_DockingEnable;
     io.*.ConfigWindowsMoveFromTitleBarOnly = true;

@@ -102,7 +102,7 @@ pub fn run(self: *Self, comptime Dispatcher: anytype) !void {
 
     var quit = false;
     var event: c.SDL_Event = undefined;
-    var d = Dispatcher.init(self);
+    var d = try Dispatcher.init(self);
     defer d.deinit();
     while (!quit) {
         self.newFrame();

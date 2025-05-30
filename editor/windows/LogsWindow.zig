@@ -21,14 +21,14 @@ scopes: collections.StringSentinelArrayHashMap(0, void),
 
 filter_str: imutils.ImString,
 
-pub fn init(allocator: std.mem.Allocator) Self {
+pub fn init(allocator: std.mem.Allocator) !Self {
     return .{
         .allocator = allocator,
 
         .logs = std.ArrayList(Log).init(allocator),
         .scopes = collections.StringSentinelArrayHashMap(0, void).init(allocator),
 
-        .filter_str = imutils.ImString.init(allocator) catch @panic("OOM"),
+        .filter_str = try imutils.ImString.init(allocator),
     };
 }
 
@@ -41,7 +41,7 @@ pub fn deinit(self: *Self) void {
 pub fn draw(self: *Self) !void {
     if (c.ImGui_Begin("Logs", null, c.ImGuiWindowFlags_NoCollapse)) {
         var edb = &EditorDatabase.storage().logs;
-        const new_logs = logs_harness.drainInto(&self.logs) catch @panic("OOM");
+        const new_logs = try logs_harness.drainInto(&self.logs);
         for (self.logs.items[self.logs.items.len - new_logs ..]) |log| {
             try self.scopes.put(log.scope, {});
         }
