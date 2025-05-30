@@ -95,7 +95,7 @@ pub fn defaultStyles() void {
     style.*.Colors[c.ImGuiCol_TabHovered] = c.ImVec4{ .x = 0.26, .y = 0.59, .z = 0.98, .w = 1.0 };
     style.*.Colors[c.ImGuiCol_TabActive] = c.ImVec4{ .x = 0.20, .y = 0.50, .z = 0.85, .w = 1.0 };
     style.*.Colors[c.ImGuiCol_TabUnfocused] = c.ImVec4{ .x = 0.10, .y = 0.10, .z = 0.10, .w = 1.0 };
-    style.*.Colors[c.ImGuiCol_TabUnfocusedActive] = c.ImVec4{ .x = 0.10, .y = 0.10, .z = 0.10, .w = 1.0 };
+    style.*.Colors[c.ImGuiCol_TabUnfocusedActive] = c.ImVec4{ .x = 0.2, .y = 0.2, .z = 0.2, .w = 1.0 };
 
     // --- Plots ---
     style.*.Colors[c.ImGuiCol_PlotLines] = c.ImVec4{ .x = 0.26, .y = 0.59, .z = 0.98, .w = 1.0 };
