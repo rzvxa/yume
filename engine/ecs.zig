@@ -140,6 +140,19 @@ pub const World = struct {
                         else => null,
                     },
 
+                    .move_ctor = switch (@typeInfo(T)) {
+                        .Struct => if (@hasDecl(T, "moveInit")) struct {
+                            pub fn f(dst: ?*anyopaque, src: ?*anyopaque, count: i32, _: [*c]const TypeInfo) callconv(.C) void {
+                                var c_ptr_dst = @as([*c]T, @ptrCast(@alignCast(dst)));
+                                var c_ptr_src = @as([*c]T, @ptrCast(@alignCast(src)));
+                                var span_dst = c_ptr_dst[0..@intCast(count)];
+                                var span_src = c_ptr_src[0..@intCast(count)];
+                                for (0..span_dst.len) |i| T.moveInit(&span_dst[i], &span_src[i]);
+                            }
+                        }.f else null,
+                        else => null,
+                    },
+
                     .on_add = switch (@typeInfo(T)) {
                         .Struct => if (@hasDecl(T, "onAdd")) struct {
                             pub fn f(iter: [*c]c.ecs_iter_t) callconv(.C) void {

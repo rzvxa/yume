@@ -16,6 +16,11 @@ pub const Meta = extern struct {
         return self;
     }
 
+    pub fn moveInit(dst: *@This(), src: *@This()) void {
+        dst.name = src.name;
+        src.name = null;
+    }
+
     pub fn setName(self: *@This(), new_name: [*:0]const u8) !void {
         const span = std.mem.span(new_name);
         if (self.name == null) {
@@ -27,6 +32,6 @@ pub const Meta = extern struct {
     }
 
     pub fn deinit(self: *@This()) void {
-        ecs.free(self.name);
+        if (self.name != null) ecs.free(self.name);
     }
 };
