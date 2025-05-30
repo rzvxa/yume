@@ -55,14 +55,14 @@ pub fn show(self: *Self) void {
         c.ImGui_SetCursorPosY(c.ImGui_GetCursorPosY() + box_height / 4);
         imutils.alignHorizontal(700, 0.5);
         c.ImGui_Image(Editor.yume_logo_ds, c.ImVec2{ .x = 246, .y = 326 });
-        c.ImGui_PushFont(Editor.roboto32);
+        c.ImGui_PushFont(Editor.ubuntu32);
         c.ImGui_NewLine();
         imutils.alignHorizontal(730, 0.5);
         const version = @import("yume").version;
         c.ImGui_Text("Welcome to Yume v%d.%d.%d", version.major, version.minor, version.patch);
         c.ImGui_PopFont();
         for (0..1) |_| c.ImGui_Spacing();
-        c.ImGui_PushFont(Editor.roboto24);
+        c.ImGui_PushFont(Editor.ubuntu24);
         imutils.alignHorizontal(875, 0.5);
         if (c.ImGui_Button("\t\tNew Project\t\t")) {
             Editor.instance().newProject();

@@ -99,13 +99,13 @@ pub fn show(self: *Self, ctx: *GameApp) !void {
         c.ImGui_SetCursorPosY(c.ImGui_GetCursorPosY() + box_height / 4);
         c.ImGui_IndentEx(padding_x);
 
-        c.ImGui_PushFont(Editor.roboto32);
+        c.ImGui_PushFont(Editor.ubuntu32);
         for (0..8) |_| c.ImGui_Spacing();
         c.ImGui_Text("Project Path:");
         for (0..1) |_| c.ImGui_Spacing();
         c.ImGui_PopFont();
         c.ImGui_PushItemWidth(-padding_x);
-        c.ImGui_PushFont(Editor.roboto24);
+        c.ImGui_PushFont(Editor.ubuntu24);
         _ = imutils.inputFilePath(
             "##open_project-project_path",
             ctx.window,
@@ -122,7 +122,7 @@ pub fn show(self: *Self, ctx: *GameApp) !void {
         c.ImGui_PopFont();
 
         c.ImGui_BeginDisabled(!self.haveValidParams());
-        c.ImGui_PushFont(Editor.roboto32);
+        c.ImGui_PushFont(Editor.ubuntu32);
         const open_label = "    Open    ";
         const open_label_size = c.ImGui_CalcTextSize(open_label);
         cursor = c.ImGui_GetCursorPos();

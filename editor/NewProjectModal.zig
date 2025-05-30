@@ -98,12 +98,12 @@ pub fn show(self: *Self, ctx: *GameApp) !void {
 
         c.ImGui_SetCursorPosY(c.ImGui_GetCursorPosY() + box_height / 4);
         c.ImGui_IndentEx(padding_x);
-        c.ImGui_PushFont(Editor.roboto32);
+        c.ImGui_PushFont(Editor.ubuntu32);
         c.ImGui_Text("Project Name:");
         for (0..1) |_| c.ImGui_Spacing();
         c.ImGui_PopFont();
         c.ImGui_PushItemWidth(-padding_x);
-        c.ImGui_PushFont(Editor.roboto24);
+        c.ImGui_PushFont(Editor.ubuntu24);
         _ = c.ImGui_InputTextEx(
             "##new_project-project_name",
             self.project_name.buf,
@@ -115,13 +115,13 @@ pub fn show(self: *Self, ctx: *GameApp) !void {
         c.ImGui_PopItemWidth();
         c.ImGui_PopFont();
 
-        c.ImGui_PushFont(Editor.roboto32);
+        c.ImGui_PushFont(Editor.ubuntu32);
         for (0..8) |_| c.ImGui_Spacing();
         c.ImGui_Text("Project Path:");
         for (0..1) |_| c.ImGui_Spacing();
         c.ImGui_PopFont();
         c.ImGui_PushItemWidth(-padding_x);
-        c.ImGui_PushFont(Editor.roboto24);
+        c.ImGui_PushFont(Editor.ubuntu24);
         _ = imutils.inputDirPath(
             "##new_project-project_path",
             ctx.window,
@@ -138,7 +138,7 @@ pub fn show(self: *Self, ctx: *GameApp) !void {
         c.ImGui_PopFont();
 
         c.ImGui_BeginDisabled(!self.haveValidParams());
-        c.ImGui_PushFont(Editor.roboto32);
+        c.ImGui_PushFont(Editor.ubuntu32);
         const create_label = "    Create    ";
         const create_label_size = c.ImGui_CalcTextSize(create_label);
         cursor = c.ImGui_GetCursorPos();

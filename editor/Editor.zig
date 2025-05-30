@@ -534,9 +534,9 @@ fn initImGui(renderer: *GAL.RenderApi) !void {
 
     const io = c.ImGui_GetIO();
     // TODO: load fonts as assets similar to imgui textures
-    roboto14 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "resources/editor/fonts/roboto.ttf", 14, null, null);
-    roboto24 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "resources/editor/fonts/roboto.ttf", 24, null, null);
-    roboto32 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "resources/editor/fonts/roboto.ttf", 32, null, null);
+    ubuntu14 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "resources/editor/fonts/UbuntuNerdFontPropo-Regular.ttf", 14, null, &nerd_font_glyphs);
+    ubuntu24 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "resources/editor/fonts/UbuntuNerdFontPropo-Regular.ttf", 24, null, &nerd_font_glyphs);
+    ubuntu32 = c.ImFontAtlas_AddFontFromFileTTF(io.*.Fonts, "resources/editor/fonts/UbuntuNerdFontPropo-Regular.ttf", 32, null, &nerd_font_glyphs);
 
     _ = c.cImGui_ImplVulkan_Init(&init_info);
     _ = c.cImGui_ImplVulkan_CreateFontsTexture();
@@ -816,9 +816,9 @@ pub var render_system: ecs.Entity = undefined;
 
 pub var inputs: InputsContext = undefined;
 
-pub var roboto14: *c.ImFont = undefined;
-pub var roboto24: *c.ImFont = undefined;
-pub var roboto32: *c.ImFont = undefined;
+pub var ubuntu14: *c.ImFont = undefined;
+pub var ubuntu24: *c.ImFont = undefined;
+pub var ubuntu32: *c.ImFont = undefined;
 
 const LoadedImGuiImage = struct {
     handle: assets.AssetHandle,
@@ -837,3 +837,50 @@ pub fn bufRootDir(buf: []u8) ![]const u8 {
     const exe_path = try std.fs.selfExeDirPath(buf);
     return std.fs.path.dirname(exe_path) orelse return error.InvalidPath;
 }
+
+const nerd_font_glyphs = [_]c.ImWchar{
+    0x0020, 0x00ff, // Basic Latin + Latin Supplement
+    //IEC Power Symbols
+    0x23fb, 0x23fe,
+    //IEC Power Symbols
+    0x2b58, 0x2b58,
+    //Pomicons
+    0xe000, 0xe00a,
+    //Powerline
+    0xe0a0, 0xe0a2,
+    //Powerline
+    0xe0b0, 0xe0b3,
+    //Powerline Extra
+    0xe0b4, 0xe0c8,
+    //Powerline Extra
+    0xe0a3, 0xe0a3,
+    //Powerline Extra
+    0xe0ca, 0xe0ca,
+    //Powerline Extra
+    0xe0cc, 0xe0d7,
+    //Weather Icons
+    0xe300, 0xe3e3,
+    //Seti-UI + Custom
+    0xe5fa, 0xe6b7,
+    //Devicons
+    0xe700, 0xe8ef,
+    //Codicons
+    0xea60, 0xec1e,
+    //Font Awesome
+    0xed00, 0xefce,
+    //Font Awesome
+    0xf000, 0xf2ff,
+    //Font Logos
+    0xf300, 0xf381,
+    //Font Awesome Extension
+    0xe200, 0xe2a9,
+    //Octicons
+    0xf400, 0xf533,
+    //Octicons
+    0x2665, 0x2665,
+    //Octicons
+    0x26a1, 0x26a1,
+    //Material Design
+    0xf500, 0xfd46,
+    0, // null termination
+};

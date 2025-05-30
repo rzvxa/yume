@@ -103,9 +103,10 @@ pub fn browse(
         callback: ModalEvent.Callback,
     },
 ) !void {
+    self.locked_filters.clearRetainingCapacity();
     self.filters.clearRetainingCapacity();
     for (opts.locked_filters) |filter| {
-        try self.filters.put(filter.tag_name.span(), filter);
+        try self.locked_filters.put(filter.tag_name.span(), filter);
     }
     for (opts.filters) |filter| {
         try self.filters.put(filter.tag_name.span(), filter);
@@ -222,7 +223,7 @@ pub fn draw(self: *Self, ctx: *GameApp) !void {
         }
 
         {
-            c.ImGui_PushFont(Editor.roboto24);
+            c.ImGui_PushFont(Editor.ubuntu24);
             defer c.ImGui_PopFont();
             if (self.request_focus) {
                 self.request_focus = false;
@@ -812,8 +813,8 @@ pub fn drawTagsGrid(locked_tags: [][:0]const u8, tags: [][:0]const u8, max_width
     if (locked_tags.len == 0 and tags.len == 0) return .{ .width = 0, .clicked_index = null };
 
     const style = c.ImGui_GetStyle().*;
-    const padh: f32 = 4;
-    const padv: f32 = 4;
+    const padh: f32 = style.FramePadding.x;
+    const padv: f32 = style.FramePadding.y;
     const spacing: f32 = style.ItemSpacing.x;
 
     // --- First Pass: Layout Simulation ---
@@ -824,40 +825,54 @@ pub fn drawTagsGrid(locked_tags: [][:0]const u8, tags: [][:0]const u8, max_width
     var max_x: f32 = 0;
     row_heights[0] = 0;
 
-    const calc = struct {
-        fn calc(
-            tt: [][:0]const u8,
-            spacing_: f32,
-            max_width_: f32,
-            row_heights_: *[64]f32,
-            row_count_: *usize,
-            current_row_: *usize,
-            current_x_: *f32,
-            max_x_: *f32,
-        ) void {
-            for (tt) |t| {
-                const text_size = c.ImGui_CalcTextSize(t);
-                const pill_width = text_size.x + 2 * padh;
-                const pill_height = text_size.y + 2 * padv;
+    const Calc = struct {
+        spacing: f32,
+        max_width: f32,
+        padh: f32,
+        padv: f32,
+        row_heights: *[64]f32,
+        row_count: *usize,
+        current_row: *usize,
+        current_x: *f32,
+        max_x: *f32,
+        fn calc(o: @This(), tt: [][:0]const u8, lock: bool) !void {
+            for (tt) |tag| {
+                var tag_buf: [128]u8 = undefined;
+                const display_label = if (lock) try std.fmt.bufPrintZ(&tag_buf, " {s}", .{tag}) else tag;
+                const text_size = c.ImGui_CalcTextSize(display_label);
+                const pill_width = text_size.x + 2 * o.padh;
+                const pill_height = text_size.y + 2 * o.padv;
 
-                if (pill_height > row_heights_[current_row_.*]) {
-                    row_heights_.*[current_row_.*] = pill_height;
+                if (pill_height > o.row_heights[o.current_row.*]) {
+                    o.row_heights.*[o.current_row.*] = pill_height;
                 }
-                if (current_x_.* + pill_width > max_width_ and current_x_.* > 0) {
-                    row_count_.* += 1;
-                    current_row_.* += 1;
-                    row_heights_[current_row_.*] = pill_height;
-                    current_x_.* = pill_width + spacing_;
+                if (o.current_x.* + pill_width > o.max_width and o.current_x.* > 0) {
+                    o.row_count.* += 1;
+                    o.current_row.* += 1;
+                    o.row_heights[o.current_row.*] = pill_height;
+                    o.current_x.* = pill_width + o.spacing;
                 } else {
-                    current_x_.* += pill_width + spacing_;
+                    o.current_x.* += pill_width + o.spacing;
                 }
 
-                max_x_.* = @max(max_x_.*, current_x_.*);
+                o.max_x.* = @max(o.max_x.*, o.current_x.*);
             }
         }
-    }.calc;
+    };
 
-    calc(tags, spacing, max_width, &row_heights, &row_count, &current_row, &current_x, &max_x);
+    const calculator = Calc{
+        .spacing = spacing,
+        .max_width = max_width,
+        .padh = padh,
+        .padv = padv,
+        .row_heights = &row_heights,
+        .row_count = &row_count,
+        .current_row = &current_row,
+        .current_x = &current_x,
+        .max_x = &max_x,
+    };
+    try calculator.calc(locked_tags, true);
+    try calculator.calc(tags, false);
 
     var vertical_offset: f32 = 0;
     if (row_count == 1) {
@@ -867,32 +882,65 @@ pub fn drawTagsGrid(locked_tags: [][:0]const u8, tags: [][:0]const u8, max_width
     // --- Second Pass: Render the Pills ---
     var clicked_index: ?usize = null;
     {
-        _ = c.ImGui_BeginChild("tags_region", .{ .x = max_x, .y = avail_height }, 0, 0);
+        _ = c.ImGui_BeginChild("tags_region", .{ .x = max_x, .y = avail_height }, 0, c.ImGuiWindowFlags_NoBackground);
         defer c.ImGui_EndChild();
 
         current_x = 0;
         current_row = 0;
         const start_pos = c.ImGui_GetCursorPos();
         var current_y: f32 = 0;
-        for (tags, 0..) |tag, i| {
-            const text_size = c.ImGui_CalcTextSize(tag);
-            const pill_width = text_size.x + 2 * padh;
 
-            if (current_x + pill_width > max_width and current_x > 0) {
-                current_y += row_heights[current_row] + spacing;
-                current_row += 1;
-                current_x = 0;
-            }
-            var pos: c.ImVec2 = start_pos;
-            pos.x += current_x;
-            pos.y += current_y + vertical_offset;
-            c.ImGui_SetCursorPos(pos);
-            if (c.ImGui_Button(tag)) {
-                clicked_index = i;
-            }
+        const Render = struct {
+            row_heights: []const f32,
+            max_width: f32,
+            padh: f32,
+            spacing: f32,
+            vertical_offset: f32,
+            start_pos: c.ImVec2,
+            current_x: *f32,
+            current_y: *f32,
+            current_row: *usize,
+            clicked_index: *?usize,
 
-            current_x += pill_width + spacing;
-        }
+            fn render(o: @This(), tt: [][:0]const u8, lock: bool) !void {
+                for (tt, 0..) |tag, i| {
+                    var tag_buf: [128]u8 = undefined;
+                    const display_label = if (lock) try std.fmt.bufPrintZ(&tag_buf, " {s}", .{tag}) else tag;
+                    const text_size = c.ImGui_CalcTextSize(display_label);
+                    const pill_width = text_size.x + 2 * o.padh;
+
+                    if (o.current_x.* + pill_width > o.max_width and o.current_x.* > 0) {
+                        o.current_y.* += o.row_heights[o.current_row.*] + o.spacing;
+                        o.current_row.* += 1;
+                        o.current_x.* = 0;
+                    }
+                    var pos: c.ImVec2 = o.start_pos;
+                    pos.x += o.current_x.*;
+                    pos.y += o.current_y.* + o.vertical_offset;
+                    c.ImGui_SetCursorPos(pos);
+                    if (c.ImGui_Button(display_label)) {
+                        o.clicked_index.* = i;
+                    }
+
+                    o.current_x.* += pill_width + o.spacing;
+                }
+            }
+        };
+
+        const renderer = Render{
+            .row_heights = &row_heights,
+            .max_width = max_width,
+            .padh = padh,
+            .spacing = spacing,
+            .vertical_offset = vertical_offset,
+            .start_pos = start_pos,
+            .current_x = &current_x,
+            .current_y = &current_y,
+            .current_row = &current_row,
+            .clicked_index = &clicked_index,
+        };
+        try renderer.render(locked_tags, true);
+        try renderer.render(tags, false);
         c.ImGui_SetCursorPos(.{ .x = start_pos.x + max_x, .y = start_pos.y });
     }
 
