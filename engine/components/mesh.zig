@@ -183,10 +183,10 @@ pub fn load_from_obj(
     log.debug("{any}", .{scene});
     std.debug.assert(scene.*.root_node.*.children.count == 1);
     for (scene.*.root_node.*.children.data[0..scene.*.root_node.*.children.count]) |*node| {
-        log.debug("Object: {s}\n", .{node.*.*.attrib.*.name.data});
+        log.debug("Object: {s}", .{node.*.*.attrib.*.name.data});
         const mesh = node.*.*.mesh;
         std.debug.assert(mesh != null);
-        log.debug("-> mesh with {} faces\n-> materials {}\n", .{ mesh.*.faces.count, mesh.*.face_groups.count });
+        log.debug("-> mesh with {} faces\n\t\t-> materials {}", .{ mesh.*.faces.count, mesh.*.face_groups.count });
 
         const num_tri_indices = mesh.*.max_face_triangles * 3;
         const tri_indices = allocator.alloc(u32, num_tri_indices) catch @panic("OOM");

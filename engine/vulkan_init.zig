@@ -675,7 +675,7 @@ fn default_debug_callback(severity: c.VkDebugUtilsMessageSeverityFlagBitsEXT, ms
     return c.VK_FALSE;
 }
 
-pub fn check_vk(result: c.VkResult) !void {
+pub fn check_vk(result: c.VkResult) VulkanError!void {
     return switch (result) {
         c.VK_SUCCESS => {},
         c.VK_NOT_READY => error.vk_not_ready,
@@ -726,3 +726,52 @@ pub fn check_vk(result: c.VkResult) !void {
         else => error.vk_errror_unknown,
     };
 }
+
+pub const VulkanError = error{
+    vk_not_ready,
+    vk_timeout,
+    vk_event_set,
+    vk_event_reset,
+    vk_incomplete,
+    vk_error_out_of_host_memory,
+    vk_error_out_of_device_memory,
+    vk_error_initialization_failed,
+    vk_error_device_lost,
+    vk_error_memory_map_failed,
+    vk_error_layer_not_present,
+    vk_error_extension_not_present,
+    vk_error_feature_not_present,
+    vk_error_incompatible_driver,
+    vk_error_too_many_objects,
+    vk_error_format_not_supported,
+    vk_error_fragmented_pool,
+    vk_error_unknown,
+    vk_error_out_of_pool_memory,
+    vk_error_invalid_external_handle,
+    vk_error_fragmentation,
+    vk_error_invalid_opaque_capture_address,
+    vk_pipeline_compile_required,
+    vk_error_surface_lost_khr,
+    vk_error_native_window_in_use_khr,
+    vk_suboptimal_khr,
+    vk_error_out_of_date_khr,
+    vk_error_incompatible_display_khr,
+    vk_error_validation_failed_ext,
+    vk_error_invalid_shader_nv,
+    vk_error_image_usage_not_supported_khr,
+    vk_error_video_picture_layout_not_supported_khr,
+    vk_error_video_profile_operation_not_supported_khr,
+    vk_error_video_profile_format_not_supported_khr,
+    vk_error_video_profile_codec_not_supported_khr,
+    vk_error_video_std_version_not_supported_khr,
+    vk_error_invalid_drm_format_modifier_plane_layout_ext,
+    vk_error_not_permitted_khr,
+    vk_error_full_screen_exclusive_mode_lost_ext,
+    vk_thread_idle_khr,
+    vk_thread_done_khr,
+    vk_operation_deferred_khr,
+    vk_operation_not_deferred_khr,
+    vk_error_compression_exhausted_ext,
+    vk_error_incompatible_shader_binary_ext,
+    vk_errror_unknown,
+};

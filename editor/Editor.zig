@@ -148,6 +148,8 @@ logs_windows: LogsWindow,
 
 project_explorer_window: ProjectExplorerWindow,
 
+callbacks_arena: std.heap.ArenaAllocator,
+
 pub fn init(ctx: *GameApp) *Self {
     ctx.world.tag(RunInEditor);
     ctx.world.tag(Playing);
@@ -186,6 +188,7 @@ pub fn init(ctx: *GameApp) *Self {
         .logs_windows = LogsWindow.init(ctx.allocator),
         .project_explorer_window = ProjectExplorerWindow.init(ctx.allocator) catch @panic("Failed to initialize `Project Explorer`"),
         .scene_window = undefined,
+        .callbacks_arena = std.heap.ArenaAllocator.init(ctx.allocator),
     };
     singleton.scene_window = SceneWindow.init(ctx, @ptrCast(&Editors.onDrawGizmos), &singleton.editors);
     singleton.bootstrapEditorPipeline(ctx.world);
@@ -253,6 +256,8 @@ pub fn deinit(self: *Self) void {
         }
         loaded_imgui_images.deinit();
     }
+
+    self.callbacks_arena.deinit();
 }
 
 pub fn windowTitle(self: *Self) ![]u8 {
@@ -781,7 +786,18 @@ pub fn messageBox(opts: struct {
 }
 
 pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
-    var engine = &instance().ctx.engine;
+    const CbType = struct {
+        uri: []const u8,
+        fn f(ptr: *@This(), handle: assets.AssetHandle) void {
+            _ = handle;
+            const entry = loaded_imgui_images.fetchRemove(ptr.uri).?;
+
+            c.cImGui_ImplVulkan_RemoveTexture(@ptrFromInt(entry.value.texture));
+            Assets.release(entry.value.handle) catch {};
+            instance().callbacks_arena.allocator().destroy(ptr);
+        }
+    };
+
     const entry = try loaded_imgui_images.getOrPut(uri);
     errdefer if (!entry.found_existing) {
         _ = loaded_imgui_images.remove(uri);
@@ -789,49 +805,25 @@ pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
     if (entry.found_existing) {
         return entry.value_ptr.texture;
     }
-    const image = try Assets.get(try Resources.getAssetHandle(uri, .{ .expect = .image }));
 
-    // Create the Image View
-    var image_view: c.VkImageView = undefined;
-    {
-        const info = c.VkImageViewCreateInfo{
-            .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = image.image,
-            .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
-            .format = c.VK_FORMAT_R8G8B8A8_UNORM,
-            .subresourceRange = .{
-                .aspectMask = c.VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-        };
-        check_vk(c.vkCreateImageView(engine.device, &info, Engine.vk_alloc_cbs, &image_view)) catch @panic("Failed to create image view");
-    }
-    engine.deletion_queue.append(VulkanDeleter.make(image_view, c.vkDestroyImageView)) catch @panic("OOM");
-    // Create Sampler
-    var sampler: c.VkSampler = undefined;
-    {
-        const sampler_info = c.VkSamplerCreateInfo{
-            .sType = c.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-            .magFilter = c.VK_FILTER_LINEAR,
-            .minFilter = c.VK_FILTER_LINEAR,
-            .mipmapMode = c.VK_SAMPLER_MIPMAP_MODE_LINEAR,
-            .addressModeU = c.VK_SAMPLER_ADDRESS_MODE_REPEAT, // outside image bounds just use border color
-            .addressModeV = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            .minLod = -1000,
-            .maxLod = 1000,
-            .maxAnisotropy = 1.0,
-        };
-        check_vk(c.vkCreateSampler(engine.device, &sampler_info, Engine.vk_alloc_cbs, &sampler)) catch @panic("Failed to create sampler");
-    }
-    engine.deletion_queue.append(VulkanDeleter.make(sampler, c.vkDestroySampler)) catch @panic("OOM");
-    const texture = @intFromPtr(c.cImGui_ImplVulkan_AddTexture(sampler, image_view, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+    const texture = try Assets.get((try Resources.getAssetHandle(uri, .{ .expect = .image })).toTexture());
+    const cb_instance = try instance().callbacks_arena.allocator().create(CbType);
+    errdefer instance().callbacks_arena.allocator().destroy(cb_instance);
+    cb_instance.* = .{ .uri = uri };
+
+    const hooks = try Assets.hooks(texture.handle.toAssetHandle());
+    try hooks.on_reload.append(.once, assets.AssetHooks.OnReload.callback(
+        CbType,
+        cb_instance,
+        &CbType.f,
+    ));
+
+    const texture_ptr = @intFromPtr(c.cImGui_ImplVulkan_AddTexture(texture.sampler, texture.image_view, c.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
     entry.value_ptr.* = .{
-        .handle = image.handle.toAssetHandle(),
-        .texture = texture,
+        .handle = texture.handle.toAssetHandle(),
+        .texture = texture_ptr,
     };
-    return texture;
+    return texture_ptr;
 }
 
 fn bootstrapEditorPipeline(self: *const Self, world: ecs.World) void {

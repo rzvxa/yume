@@ -26,9 +26,14 @@ pub fn main() !void {
 
     var app = GameApp.init(.{
         .allocator = allocator,
-        .loader = Resources.readAssetAlloc,
         .window_title = "Yume Editor",
         .window_extent = .{ .x = 1600, .y = 800 },
+
+        .loaders = .{
+            .resource = Resources.readAssetAlloc,
+            .shader_def = Resources.getShaderDef,
+            .material_def = Resources.getMaterialDef,
+        },
     });
     defer app.deinit();
 

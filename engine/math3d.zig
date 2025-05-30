@@ -318,6 +318,41 @@ pub const Vec4 = extern struct {
             try array.items[3].expect(.number),
         );
     }
+
+    pub fn jsonStringify(self: Self, jws: anytype) !void {
+        try jws.beginArray();
+
+        try jws.write(self.x);
+        try jws.write(self.y);
+        try jws.write(self.z);
+        try jws.write(self.w);
+
+        try jws.endArray();
+    }
+
+    pub fn jsonParse(a: std.mem.Allocator, jrs: anytype, _: anytype) !Self {
+        var tk = try jrs.next();
+        if (tk != .array_begin) return error.UnexpectedEndOfInput;
+
+        var xyzw = [4]f32{ 0, 0, 0, 0 };
+
+        for (0..4) |i| {
+            tk = try jrs.nextAlloc(a, .alloc_if_needed);
+            if (tk == .array_end) return error.UnexpectedEndOfInput;
+
+            xyzw[i] = switch (tk) {
+                inline .number, .allocated_number => |slice| std.fmt.parseFloat(f32, slice) catch return error.SyntaxError,
+                else => {
+                    return error.UnexpectedToken;
+                },
+            };
+        }
+
+        tk = try jrs.next();
+        std.debug.assert(tk == .array_end);
+
+        return fromArray(xyzw);
+    }
 };
 
 pub const Quat = extern struct {

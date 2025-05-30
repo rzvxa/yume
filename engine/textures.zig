@@ -10,36 +10,37 @@ const log = std.log.scoped(.textures);
 
 pub const Texture = struct {
     handle: assets.TextureHandle,
-    image: Engine.AllocatedImage,
-    image_view: c.VkImageView,
+    image: assets.ImageHandle,
+    image_view: Engine.ImageView,
+    sampler: Engine.Sampler,
 };
 
-pub fn loadImage(engine: *Engine, buffer: []const u8, urn: Urn) !Engine.AllocatedImage {
+pub fn loadImage(engine: *Engine, buffer: []const u8, handle: assets.ImageHandle) !Engine.AllocatedImage {
     var width: c_int = undefined;
     var height: c_int = undefined;
     var channels: c_int = undefined;
+    const format = c.VK_FORMAT_R8G8B8A8_UNORM;
 
-    const image_data = c.stbi_load_from_memory(buffer.ptr, @intCast(buffer.len), &width, &height, &channels, c.STBI_rgb_alpha);
-    if (image_data == null) {
+    const pixels = c.stbi_load_from_memory(buffer.ptr, @intCast(buffer.len), &width, &height, &channels, c.STBI_rgb_alpha);
+    if (pixels == null) {
         return error.failed_to_load_image;
     }
-    defer c.stbi_image_free(image_data);
+    defer c.stbi_image_free(pixels);
 
-    log.info("Loaded image from memory: {s}", .{urn});
+    return loadImageFromPixels(engine, pixels, @intCast(width), @intCast(height), format, handle);
+}
 
+pub fn loadImageFromPixels(engine: *Engine, pixels: [*]const u8, width: usize, height: usize, format: c.VkFormat, handle: assets.ImageHandle) !Engine.AllocatedImage {
     const image_size = @as(c.VkDeviceSize, @intCast(width * height * 4));
-    const format = c.VK_FORMAT_R8G8B8A8_UNORM;
 
     const staging_buffer = engine.createBuffer(image_size, c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, c.VMA_MEMORY_USAGE_CPU_ONLY);
     defer c.vmaDestroyBuffer(engine.vma_allocator, staging_buffer.buffer, staging_buffer.allocation);
 
-    var img_data_slice: []const u8 = undefined;
-    img_data_slice.ptr = @as([*]const u8, @ptrCast(image_data));
-    img_data_slice.len = @as(usize, image_size);
+    const pixels_slice = pixels[0..image_size];
 
     var data: ?*anyopaque = null;
     try check_vk(c.vmaMapMemory(engine.vma_allocator, staging_buffer.allocation, &data));
-    @memcpy(@as([*]u8, @ptrCast(data orelse unreachable)), img_data_slice);
+    @memcpy(@as([*]u8, @ptrCast(data orelse unreachable)), pixels_slice);
 
     c.vmaUnmapMemory(engine.vma_allocator, staging_buffer.allocation);
 
@@ -74,8 +75,6 @@ pub fn loadImage(engine: *Engine, buffer: []const u8, urn: Urn) !Engine.Allocate
     if (allocation == null) {
         return error.failed_to_create_image;
     }
-
-    log.info("Create vkimage and gpu memory for image: {s}", .{urn});
 
     // Tranfer CPU memory to GPU memory
     //
@@ -144,7 +143,7 @@ pub fn loadImage(engine: *Engine, buffer: []const u8, urn: Urn) !Engine.Allocate
     });
 
     return .{
-        .handle = undefined,
+        .handle = handle,
         .image = image,
         .allocation = allocation,
     };
