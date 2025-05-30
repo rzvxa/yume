@@ -3,7 +3,7 @@ const std = @import("std");
 
 const assets = @import("assets.zig");
 const Assets = @import("assets.zig").Assets;
-const Engine = @import("VulkanEngine.zig");
+const GAL = @import("GAL.zig");
 const Uuid = @import("uuid.zig").Uuid;
 const Vec4 = @import("math3d.zig").Vec4;
 
@@ -55,8 +55,8 @@ pub const Shader = struct {
     };
 
     pub const Modules = struct {
-        vertex: Engine.ShaderModule,
-        fragment: Engine.ShaderModule,
+        vertex: GAL.ShaderModule,
+        fragment: GAL.ShaderModule,
     };
 
     handle: assets.ShaderHandle,
@@ -183,10 +183,10 @@ pub const Material = struct {
     handle: assets.MaterialHandle,
     shader: assets.ShaderHandle,
 
-    pipeline: Engine.Pipeline,
-    pipeline_layout: Engine.PipelineLayout,
+    pipeline: GAL.Pipeline,
+    pipeline_layout: GAL.PipelineLayout,
 
     rsc_count: u8,
     rsc_handles: [*c]assets.AssetHandle,
-    rsc_descriptor_set: Engine.DescriptorSet,
+    rsc_descriptor_set: GAL.DescriptorSet,
 };

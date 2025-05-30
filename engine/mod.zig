@@ -10,8 +10,8 @@ pub const collections = @import("collections.zig");
 pub const StringSentinelArrayHashMap = collections.StringSentinelArrayHashMap;
 
 pub const GameApp = @import("GameApp.zig");
-pub const VulkanEngine = @import("VulkanEngine.zig");
-pub const vki = @import("vulkan_init.zig");
+pub const GAL = @import("GAL.zig");
+pub const RenderApi = GAL.RenderApi;
 pub const textures = @import("textures.zig");
 
 pub const shading = @import("shading.zig");
@@ -29,14 +29,6 @@ pub const Vec4 = math3d.Vec4;
 pub const Mat4 = math3d.Mat4;
 pub const Quat = math3d.Quat;
 pub const Rect = math3d.Rect;
-
-pub const AllocatedBuffer = VulkanEngine.AllocatedBuffer;
-pub const FRAME_OVERLAP = VulkanEngine.FRAME_OVERLAP;
-pub const GPUCameraData = VulkanEngine.GPUCameraData;
-pub const GPUSceneData = VulkanEngine.GPUSceneData;
-pub const VmaImageDeleter = VulkanEngine.VmaImageDeleter;
-pub const VmaBufferDeleter = VulkanEngine.VmaBufferDeleter;
-pub const VulkanDeleter = VulkanEngine.VulkanDeleter;
 
 pub const inputs = @import("inputs.zig");
 

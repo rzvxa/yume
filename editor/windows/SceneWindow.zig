@@ -11,11 +11,10 @@ const Vec4 = @import("yume").Vec4;
 const Quat = @import("yume").Quat;
 const Mat4 = @import("yume").Mat4;
 const Rect = @import("yume").Rect;
-const Engine = @import("yume").VulkanEngine;
+const GAL = @import("yume").GAL;
 const GameApp = @import("yume").GameApp;
 const components = @import("yume").ecs.components;
-const AllocatedBuffer = @import("yume").AllocatedBuffer;
-const GPULightData = Engine.GPUSceneData.GPULightData;
+const GPULightData = GAL.GPUSceneData.GPULightData;
 
 const MouseButton = @import("yume").inputs.MouseButton;
 
@@ -23,7 +22,7 @@ const Editor = @import("../Editor.zig");
 
 const FrameData = struct {
     app: *GameApp,
-    cmd: GameApp.RenderCommand,
+    cmd: GAL.CommandBuffer,
     state: *Self,
     lights: []GPULightData = undefined,
 };
@@ -60,7 +59,7 @@ is_hovered: bool = false,
 
 state: State = .idle,
 
-editor_camera_and_scene_buffer: AllocatedBuffer = undefined,
+editor_camera_and_scene_buffer: GAL.AllocatedBuffer = undefined,
 editor_camera_and_scene_set: c.VkDescriptorSet = null,
 
 frame_userdata: FrameData = undefined,
@@ -125,7 +124,7 @@ pub fn deinit(self: *Self) void {
     self.cast_query.deinit();
 }
 
-pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
+pub fn draw(self: *Self, cmd: GAL.CommandBuffer, ctx: *GameApp) !void {
     self.frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .state = self };
     if (c.ImGui_Begin("Scene", null, c.ImGuiWindowFlags_NoCollapse | c.ImGuiWindowFlags_NoNav | c.ImGuiWindowFlags_NoScrollbar | c.ImGuiWindowFlags_NoScrollWithMouse)) {
         self.is_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
@@ -152,7 +151,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                     .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
                     .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
                 };
-                me.app.engine.beginAdditiveRenderPass(me.cmd, .{ .render_area = render_area, .clear_color = me.state.camera.clear_color });
+                me.app.renderer.beginAdditiveRenderPass(me.cmd, .{ .render_area = render_area, .clear_color = me.state.camera.clear_color });
                 c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{render_area});
 
                 const vx = if (cr.x > 0) cr.x else cr.z - me.state.scene_view_size.x;
@@ -172,7 +171,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                     .offset = .{ .x = 0, .y = 0 },
                     .extent = .{ .width = @intCast(window_extent.x), .height = @intCast(window_extent.y) },
                 };
-                me.app.engine.beginAdditiveRenderPass(me.cmd, .{ .render_area = full_render_area });
+                me.app.renderer.beginAdditiveRenderPass(me.cmd, .{ .render_area = full_render_area });
                 c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{full_render_area});
             }
         }.f, &self.frame_userdata);
@@ -628,12 +627,12 @@ fn sys(it: *ecs.Iter, transforms: []components.WorldTransform, meshes: []compone
         }
     }.f);
 
-    var lights = std.mem.zeroes([4]Engine.GPUSceneData.GPULightData);
+    var lights = std.mem.zeroes([4]GAL.GPUSceneData.GPULightData);
     std.debug.assert(point_lights.items.len < 4);
     if (me.state.render_lights) {
         @memcpy(lights[0..point_lights.items.len], point_lights.items);
     }
-    me.app.engine.drawObjects(
+    me.app.renderer.drawObjects(
         me.cmd,
         .{
             .transforms = transforms,
@@ -643,7 +642,7 @@ fn sys(it: *ecs.Iter, transforms: []components.WorldTransform, meshes: []compone
             .ubo_set = me.state.editor_camera_and_scene_set,
             .cam = &me.state.camera,
             .cam_pos = me.state.camera_pos,
-            .directional_light = if (me.state.render_lights) directional_light else std.mem.zeroes(Engine.GPUSceneData.GPULightData),
+            .directional_light = if (me.state.render_lights) directional_light else std.mem.zeroes(GPULightData),
             .point_lights = lights,
         },
     );

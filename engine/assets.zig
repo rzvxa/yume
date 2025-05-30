@@ -18,15 +18,15 @@ const shading = @import("shading.zig");
 const Shader = shading.Shader;
 const Material = shading.Material;
 
-const Engine = @import("VulkanEngine.zig");
-const Scene = @import("scene.zig").Scene;
+const GAL = @import("GAL.zig");
+const check_vk = GAL.RenderApi.check_vk;
 
-const check_vk = @import("vulkan_init.zig").check_vk;
+const Scene = @import("scene.zig").Scene;
 
 const log = std.log.scoped(.assets);
 
 const default_max_bytes = 30_000_000;
-const Image = Engine.AllocatedImage;
+const Image = GAL.AllocatedImage;
 
 pub const RGBA8 = [4]u8;
 
@@ -53,25 +53,25 @@ pub const Assets = struct {
     var instance: Assets = undefined;
 
     allocator: std.mem.Allocator,
-    engine: *Engine,
+    renderer: *GAL.RenderApi,
     loaded_ids: std.AutoHashMap(Uuid, void),
     loaded_assets: std.AutoHashMap(AssetHandle, LoadedAsset),
 
     color_texture_map: std.AutoHashMap(RGBA8, TextureHandle),
     texture_color_map: std.AutoHashMap(TextureHandle, RGBA8),
 
-    unused_assets_maps: [Engine.FRAME_OVERLAP]std.AutoHashMap(AssetHandle, void),
+    unused_assets_maps: [GAL.frame_overlap]std.AutoHashMap(AssetHandle, void),
     unused_assets_active_idx: usize = 0,
 
-    orphan_assets_maps: [Engine.FRAME_OVERLAP]std.ArrayList(LoadedAsset),
+    orphan_assets_maps: [GAL.frame_overlap]std.ArrayList(LoadedAsset),
     orphan_assets_active_idx: usize = 0,
 
     loaders: Loaders,
 
-    pub fn init(allocator: std.mem.Allocator, engine: *Engine, loaders: Loaders) void {
+    pub fn init(allocator: std.mem.Allocator, renderer: *GAL.RenderApi, loaders: Loaders) void {
         instance = .{
             .allocator = allocator,
-            .engine = engine,
+            .renderer = renderer,
             .loaded_ids = std.AutoHashMap(Uuid, void).init(allocator),
             .loaded_assets = std.AutoHashMap(AssetHandle, LoadedAsset).init(allocator),
 
@@ -192,7 +192,7 @@ pub const Assets = struct {
     pub fn reload(asset: anytype, comptime opts: struct {
         recursive: bool = true,
     }) (std.mem.Allocator.Error ||
-        Engine.Error || Loaders.Error || error{
+        GAL.Error || Loaders.Error || error{
         AssetNotLoaded,
         DoubleRelease,
         failed_to_load_image,
@@ -442,7 +442,7 @@ pub const Assets = struct {
 
         const image = ptr orelse try instance.allocator.create(Image);
         errdefer if (ptr == null) instance.allocator.destroy(image);
-        image.* = try texs.loadImage(instance.engine, bytes, handle);
+        image.* = try texs.loadImage(instance.renderer, bytes, handle);
 
         const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .image = image });
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
@@ -481,7 +481,7 @@ pub const Assets = struct {
             .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
         });
         var sampler: c.VkSampler = undefined;
-        try check_vk(c.vkCreateSampler(instance.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler));
+        try check_vk(c.vkCreateSampler(instance.renderer.device, &sampler_ci, GAL.RenderApi.vk_alloc_cbs, &sampler));
 
         var texture = ptr orelse try instance.allocator.create(Texture);
         texture.* = Texture{
@@ -491,7 +491,7 @@ pub const Assets = struct {
             .image_view = null,
         };
 
-        check_vk(c.vkCreateImageView(instance.engine.device, &image_view_ci, Engine.vk_alloc_cbs, &texture.image_view)) catch @panic("Failed to create image view");
+        check_vk(c.vkCreateImageView(instance.renderer.device, &image_view_ci, GAL.RenderApi.vk_alloc_cbs, &texture.image_view)) catch @panic("Failed to create image view");
 
         const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .texture = texture });
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
@@ -508,7 +508,7 @@ pub const Assets = struct {
             const image_handle = handle.toImage();
             const image = try instance.allocator.create(Image);
             errdefer instance.allocator.destroy(image);
-            image.* = try texs.loadImageFromPixels(instance.engine, &color, 1, 1, c.VK_FORMAT_R8G8B8A8_UNORM, image_handle);
+            image.* = try texs.loadImageFromPixels(instance.renderer, &color, 1, 1, c.VK_FORMAT_R8G8B8A8_UNORM, image_handle);
             const loaded = LoadedAsset.init(instance.allocator, image.handle.toAssetHandle(), .{ .image = image });
             try instance.loaded_assets.put(image_handle.toAssetHandle(), loaded);
             try instance.loaded_ids.put(image_handle.uuid, {});
@@ -544,7 +544,7 @@ pub const Assets = struct {
             .addressModeW = c.VK_SAMPLER_ADDRESS_MODE_REPEAT,
         });
         var sampler: c.VkSampler = undefined;
-        try check_vk(c.vkCreateSampler(instance.engine.device, &sampler_ci, Engine.vk_alloc_cbs, &sampler));
+        try check_vk(c.vkCreateSampler(instance.renderer.device, &sampler_ci, GAL.RenderApi.vk_alloc_cbs, &sampler));
 
         var texture = try instance.allocator.create(Texture);
         texture.* = Texture{
@@ -554,7 +554,7 @@ pub const Assets = struct {
             .image_view = null,
         };
 
-        check_vk(c.vkCreateImageView(instance.engine.device, &image_view_ci, Engine.vk_alloc_cbs, &texture.image_view)) catch @panic("Failed to create image view");
+        check_vk(c.vkCreateImageView(instance.renderer.device, &image_view_ci, GAL.RenderApi.vk_alloc_cbs, &texture.image_view)) catch @panic("Failed to create image view");
 
         const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .texture = texture });
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
@@ -571,7 +571,7 @@ pub const Assets = struct {
 
         const mesh = ptr orelse try instance.allocator.create(Mesh);
         mesh.* = components.mesh.load_from_obj(instance.allocator, handle, bytes);
-        instance.engine.uploadMesh(mesh);
+        instance.renderer.uploadMesh(mesh);
 
         const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .mesh = mesh });
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
@@ -641,21 +641,21 @@ pub const Assets = struct {
             }),
         };
 
-        var pipeline_builder = Engine.PipelineBuilder{
+        var pipeline_builder = GAL.RenderApi.PipelineBuilder{
             .shader_stages = shader_stages[0..],
             .vertex_input_state = vertex_input_state_ci,
             .input_assembly_state = input_assembly_state_ci,
             .viewport = .{
                 .x = 0.0,
                 .y = 0.0,
-                .width = @as(f32, @floatFromInt(instance.engine.swapchain_extent.width)),
-                .height = @as(f32, @floatFromInt(instance.engine.swapchain_extent.height)),
+                .width = @as(f32, @floatFromInt(instance.renderer.swapchain_extent.width)),
+                .height = @as(f32, @floatFromInt(instance.renderer.swapchain_extent.height)),
                 .minDepth = 0.0,
                 .maxDepth = 1.0,
             },
             .scissor = .{
                 .offset = .{ .x = 0, .y = 0 },
-                .extent = instance.engine.swapchain_extent,
+                .extent = instance.renderer.swapchain_extent,
             },
             .rasterization_state = rasterization_state_ci,
             .color_blend_attachment_state = color_blend_attachment_state,
@@ -676,26 +676,26 @@ pub const Assets = struct {
         const push_constant_range = std.mem.zeroInit(c.VkPushConstantRange, .{
             .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT,
             .offset = 0,
-            .size = @sizeOf(Engine.MeshPushConstants),
+            .size = @sizeOf(GAL.MeshPushConstants),
         });
 
         var set_layouts = [3]c.VkDescriptorSetLayout{
-            instance.engine.global_set_layout,
-            instance.engine.object_set_layout,
-            instance.engine.getDescriptorSetLayout(shader_def.layout) catch @panic("Failed to create shader resouces descriptor set layout"),
+            instance.renderer.global_set_layout,
+            instance.renderer.object_set_layout,
+            instance.renderer.getDescriptorSetLayout(shader_def.layout) catch @panic("Failed to create shader resouces descriptor set layout"),
         };
         const resources_handles = try instance.allocator.alloc(AssetHandle, material_def.resources.len);
 
         // Allocate descriptor set for shader resources
         const descriptor_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-            .descriptorPool = instance.engine.descriptor_pool,
+            .descriptorPool = instance.renderer.descriptor_pool,
             .descriptorSetCount = 1,
             .pSetLayouts = &set_layouts[2],
         });
 
         var resource_set: c.VkDescriptorSet = undefined;
-        try check_vk(c.vkAllocateDescriptorSets(instance.engine.device, &descriptor_set_alloc_info, &resource_set));
+        try check_vk(c.vkAllocateDescriptorSets(instance.renderer.device, &descriptor_set_alloc_info, &resource_set));
 
         for (shader_def.layout, material_def.resources, 0..) |uniform, resource, i| {
             switch (uniform.kind) {
@@ -718,7 +718,7 @@ pub const Assets = struct {
                         .pImageInfo = &descriptor_image_info,
                     });
 
-                    c.vkUpdateDescriptorSets(instance.engine.device, 1, &write_descriptor_set, 0, null);
+                    c.vkUpdateDescriptorSets(instance.renderer.device, 1, &write_descriptor_set, 0, null);
                 },
                 .cube => @panic("TODO"),
             }
@@ -733,16 +733,16 @@ pub const Assets = struct {
 
         var pipeline_layout: c.VkPipelineLayout = undefined;
         check_vk(c.vkCreatePipelineLayout(
-            instance.engine.device,
+            instance.renderer.device,
             &pipeline_layout_ci,
-            Engine.vk_alloc_cbs,
+            GAL.RenderApi.vk_alloc_cbs,
             &pipeline_layout,
         )) catch @panic("Failed to create textured mesh pipeline layout");
 
         pipeline_builder.shader_stages[0].module = shader.modules.vertex;
         pipeline_builder.shader_stages[1].module = shader.modules.fragment;
         pipeline_builder.pipeline_layout = pipeline_layout;
-        const pipeline = pipeline_builder.build(instance.engine.device, instance.engine.render_pass);
+        const pipeline = pipeline_builder.build(instance.renderer.device, instance.renderer.render_pass);
 
         material.* = Material{
             .handle = handle,
@@ -775,8 +775,8 @@ pub const Assets = struct {
 
         const vert_code = try instance.loaders.resource(instance.allocator, shader_def.passes.vertex, 20_000);
         defer instance.allocator.free(vert_code);
-        const vert_module = instance.engine.createShaderModule(vert_code) orelse null;
-        errdefer c.vkDestroyShaderModule(instance.engine.device, vert_module, Engine.vk_alloc_cbs);
+        const vert_module = instance.renderer.createShaderModule(vert_code) orelse null;
+        errdefer c.vkDestroyShaderModule(instance.renderer.device, vert_module, GAL.RenderApi.vk_alloc_cbs);
 
         if (vert_module == null) return error.FailedToLoadVertModule;
 
@@ -784,8 +784,8 @@ pub const Assets = struct {
 
         const frag_code = try instance.loaders.resource(instance.allocator, shader_def.passes.fragment, 20_000);
         defer instance.allocator.free(frag_code);
-        const frag_module = instance.engine.createShaderModule(frag_code) orelse null;
-        errdefer c.vkDestroyShaderModule(instance.engine.device, frag_module, Engine.vk_alloc_cbs);
+        const frag_module = instance.renderer.createShaderModule(frag_code) orelse null;
+        errdefer c.vkDestroyShaderModule(instance.renderer.device, frag_module, GAL.RenderApi.vk_alloc_cbs);
 
         if (frag_module == null) return error.FailedToLoadFragModule;
 
@@ -1058,20 +1058,20 @@ const LoadedAsset = struct {
             },
             .image => {
                 const it = self.data.image;
-                var img_del = Engine.VmaImageDeleter{ .image = it.* };
-                img_del.delete(Assets.instance.engine);
+                var img_del = GAL.RenderApi.VmaImageDeleter{ .image = it.* };
+                img_del.delete(Assets.instance.renderer);
                 Assets.instance.allocator.destroy(it);
             },
             .texture => {
                 const it = self.data.texture;
-                var view_del = Engine.VulkanDeleter.make(
+                var view_del = GAL.RenderApi.VulkanDeleter.make(
                     it.image_view,
                     c.vkDestroyImageView,
                 );
-                view_del.delete(Assets.instance.engine);
+                view_del.delete(Assets.instance.renderer);
 
-                var sampler_del = Engine.VulkanDeleter.make(it.sampler, c.vkDestroySampler);
-                sampler_del.delete(Assets.instance.engine);
+                var sampler_del = GAL.RenderApi.VulkanDeleter.make(it.sampler, c.vkDestroySampler);
+                sampler_del.delete(Assets.instance.renderer);
 
                 Assets.instance.allocator.destroy(it);
             },
@@ -1082,15 +1082,15 @@ const LoadedAsset = struct {
             },
             .material => {
                 const it = self.data.material;
-                var layout_del = Engine.VulkanDeleter.make(it.pipeline_layout, c.vkDestroyPipelineLayout);
-                layout_del.delete(Assets.instance.engine);
-                var pipeline_del = Engine.VulkanDeleter.make(it.pipeline, c.vkDestroyPipeline);
-                pipeline_del.delete(Assets.instance.engine);
+                var layout_del = GAL.RenderApi.VulkanDeleter.make(it.pipeline_layout, c.vkDestroyPipelineLayout);
+                layout_del.delete(Assets.instance.renderer);
+                var pipeline_del = GAL.RenderApi.VulkanDeleter.make(it.pipeline, c.vkDestroyPipeline);
+                pipeline_del.delete(Assets.instance.renderer);
                 const slice = it.rsc_handles[0..@intCast(it.rsc_count)];
                 // TODO: this should only happen in the editor builds
                 check_vk(c.vkFreeDescriptorSets(
-                    Assets.instance.engine.device,
-                    Assets.instance.engine.descriptor_pool,
+                    Assets.instance.renderer.device,
+                    Assets.instance.renderer.descriptor_pool,
                     1,
                     &[_]c.VkDescriptorSet{it.rsc_descriptor_set},
                 )) catch @panic("failed to free descriptor set");
@@ -1099,8 +1099,8 @@ const LoadedAsset = struct {
             },
             .shader => {
                 const it = self.data.shader;
-                c.vkDestroyShaderModule(Assets.instance.engine.device, it.modules.vertex, Engine.vk_alloc_cbs);
-                c.vkDestroyShaderModule(Assets.instance.engine.device, it.modules.fragment, Engine.vk_alloc_cbs);
+                c.vkDestroyShaderModule(Assets.instance.renderer.device, it.modules.vertex, GAL.RenderApi.vk_alloc_cbs);
+                c.vkDestroyShaderModule(Assets.instance.renderer.device, it.modules.fragment, GAL.RenderApi.vk_alloc_cbs);
                 Assets.instance.allocator.destroy(it);
             },
             .scene => {
