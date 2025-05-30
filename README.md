@@ -2,7 +2,7 @@
 ###### This project is in the early stages of development (pre-v0.1), and at this point, it's not recommended for any real-world use case. The goal is to achieve a working version with feature parity with older versions of Unity3D (e.g. Unity 4.6 or Unity 5) before 1.0. However, no matter how close we get to a minimum viable feature set for being production-ready, while we're pre-v0.1, everything—including the fundamental components—is experimental and possibly subject to drastic changes. After that, changes become more migration-friendly, but remain common until we hit 1.0!
 
 <p align="center">
-    <img src="https://github.com/user-attachments/assets/a27fae57-b7ba-4422-be63-dae030d3cae7" />
+    <img src="https://github.com/user-attachments/assets/c5b8919b-9290-4fa6-93d4-67daeddfd294" />
 </p>
 
 # Yume
