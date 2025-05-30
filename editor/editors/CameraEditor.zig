@@ -64,6 +64,30 @@ fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
             _ = c.ImGui_DragFloat("Far", &cam.opts.data.orthographic.far);
         },
     }
+
+    {
+        if (c.ImGui_BeginCombo("Clear Mode", @tagName(cam.clear_mode), 0)) {
+            defer c.ImGui_EndCombo();
+
+            const clear_mode_fields = @typeInfo(ecs.components.Camera.ClearMode).Enum.fields;
+            inline for (clear_mode_fields) |field| {
+                var selected = @intFromEnum(cam.clear_mode) == field.value;
+                if (c.ImGui_SelectableBoolPtr(field.name, &selected, 0)) {
+                    cam.clear_mode = @enumFromInt(field.value);
+                    cam.clear_value = switch (cam.clear_mode) {
+                        .zero => .{ .zero = {} },
+                        .color => .{ .color = ecs.components.Camera.default_clear_color },
+                    };
+                }
+            }
+        }
+    }
+    switch (cam.clear_mode) {
+        .zero => {},
+        .color => {
+            _ = c.ImGui_ColorEdit4("Clear Color", &cam.clear_value.color, c.ImGuiColorEditFlags_NoInputs);
+        },
+    }
 }
 
 fn onGizmo(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {

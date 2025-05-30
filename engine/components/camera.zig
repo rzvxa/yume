@@ -52,10 +52,13 @@ pub const CameraOptions = extern struct {
 };
 
 pub const Camera = extern struct {
+    pub const ClearMode = enum(u8) { zero, color };
+    pub const default_clear_color = [_]f32{ 0.392, 0.584, 0.929, 1.0 };
     const Self = @This();
 
     opts: CameraOptions,
-    clear_color: [4]f32 = [_]f32{ 0.392, 0.584, 0.929, 1.0 },
+    clear_mode: ClearMode = .color,
+    clear_value: extern union { zero: void, color: [4]f32 } = .{ .color = default_clear_color },
 
     view: Mat4 = Mat4.IDENTITY,
     projection: Mat4 = Mat4.make(Vec4.scalar(0), Vec4.scalar(0), Vec4.scalar(0), Vec4.scalar(0)),
@@ -83,6 +86,13 @@ pub const Camera = extern struct {
             },
         };
         return true;
+    }
+
+    pub inline fn clearColor(self: *const @This()) ?[4]f32 {
+        return switch (self.clear_mode) {
+            .zero => null,
+            .color => self.clear_value.color,
+        };
     }
 
     pub fn serialize(self: *const @This(), allocator: std.mem.Allocator) !Dynamic {

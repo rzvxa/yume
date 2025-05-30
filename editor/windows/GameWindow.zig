@@ -98,6 +98,7 @@ pub fn draw(self: *Self, cmd: GAL.CommandBuffer, ctx: *GameApp) void {
                     .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
                     .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
                 };
+
                 me.app.renderer.beginAdditiveRenderPass(me.cmd, .{ .render_area = render_area, .clear_color = [_]f32{0} ** 4 });
                 c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{render_area});
 
@@ -171,7 +172,7 @@ pub fn draw(self: *Self, cmd: GAL.CommandBuffer, ctx: *GameApp) void {
                         new_me.directional_light = directional_light;
                         new_me.point_lights = point_lights.items;
 
-                        me.app.renderer.beginAdditiveRenderPass(me.cmd, .{ .render_area = render_area, .clear_color = camera.clear_color });
+                        me.app.renderer.beginAdditiveRenderPass(me.cmd, .{ .render_area = render_area, .clear_color = camera.clearColor() });
                         _ = c.ecs_run(iter.inner.real_world, me.d.render_system, me.app.delta, &new_me);
                     }
                 }

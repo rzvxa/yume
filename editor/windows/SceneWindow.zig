@@ -39,7 +39,8 @@ camera: components.Camera = .{
         .far = 200,
         .near = 0.1,
     } } },
-    .clear_color = [_]f32{ 0.16, 0.18, 0.22, 1.0 },
+    .clear_mode = .color,
+    .clear_value = .{ .color = [_]f32{ 0.16, 0.18, 0.22, 1.0 } },
 },
 
 camera_pos: Vec3 = Vec3.scalar(0),
@@ -153,7 +154,10 @@ pub fn draw(self: *Self, cmd: GAL.CommandBuffer, ctx: *GameApp) !void {
                     .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
                     .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
                 };
-                me.app.renderer.beginAdditiveRenderPass(me.cmd, .{ .render_area = render_area, .clear_color = me.state.camera.clear_color });
+                me.app.renderer.beginAdditiveRenderPass(me.cmd, .{
+                    .render_area = render_area,
+                    .clear_color = me.state.camera.clearColor(),
+                });
                 c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{render_area});
 
                 const vx = if (cr.x > 0) cr.x else cr.z - me.state.scene_view_size.x;
