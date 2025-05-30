@@ -94,12 +94,12 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                 const w = cr.z - cr.x;
                 const h = cr.w - cr.y;
 
-                me.app.engine.beginAdditiveRenderPass(me.cmd);
-
-                c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
+                const render_area = c.VkRect2D{
                     .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
                     .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
-                }});
+                };
+                me.app.engine.beginAdditiveRenderPass(me.cmd, .{ .render_area = render_area, .clear_color = [_]f32{0} ** 4 });
+                c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{render_area});
 
                 const vx = if (cr.x > 0) cr.x else cr.z - me.d.game_view_size.x;
                 c.vkCmdSetViewport(me.cmd, 0, 1, &[_]c.VkViewport{.{
@@ -170,15 +170,19 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                         new_me.camera_pos = transform.position();
                         new_me.directional_light = directional_light;
                         new_me.point_lights = point_lights.items;
+
+                        me.app.engine.beginAdditiveRenderPass(me.cmd, .{ .render_area = render_area, .clear_color = camera.clear_color });
                         _ = c.ecs_run(iter.inner.real_world, me.d.render_system, me.app.delta, &new_me);
                     }
                 }
 
                 const window_extent = me.app.windowExtent();
-                c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
+                const full_render_area = c.VkRect2D{
                     .offset = .{ .x = 0, .y = 0 },
                     .extent = .{ .width = @intCast(window_extent.x), .height = @intCast(window_extent.y) },
-                }});
+                };
+                me.app.engine.beginAdditiveRenderPass(me.cmd, .{ .render_area = full_render_area });
+                c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{full_render_area});
             }
         }.f, &self.frame_userdata);
         c.ImDrawList_AddCallback(game_image, c.ImDrawCallback_ResetRenderState, null);

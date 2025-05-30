@@ -55,6 +55,7 @@ pub const Camera = extern struct {
     const Self = @This();
 
     opts: CameraOptions,
+    clear_color: [4]f32 = [_]f32{ 0.392, 0.584, 0.929, 1.0 },
 
     view: Mat4 = Mat4.IDENTITY,
     projection: Mat4 = Mat4.make(Vec4.scalar(0), Vec4.scalar(0), Vec4.scalar(0), Vec4.scalar(0)),

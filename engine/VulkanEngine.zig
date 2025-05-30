@@ -1280,9 +1280,9 @@ pub fn endFrame(self: *Self, cmd: RenderCommand) void {
     self.object_buffer_offset = 0;
 }
 
-pub fn beginAdditiveRenderPass(self: *Self, cmd: RenderCommand) void {
+pub fn beginAdditiveRenderPass(self: *Self, cmd: RenderCommand, opts: struct { render_area: ?c.VkRect2D, clear_color: ?[4]f32 = null }) void {
     const color_clear: c.VkClearValue = .{
-        .color = .{ .float32 = [_]f32{ 0, 0, 0, 0 } },
+        .color = .{ .float32 = opts.clear_color orelse [_]f32{0} ** 4 },
     };
 
     const depth_clear = c.VkClearValue{
@@ -1298,9 +1298,9 @@ pub fn beginAdditiveRenderPass(self: *Self, cmd: RenderCommand) void {
     };
     const render_pass_begin_info = std.mem.zeroInit(c.VkRenderPassBeginInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-        .renderPass = self.no_clear_render_pass,
+        .renderPass = if (opts.clear_color == null) self.no_clear_render_pass else self.render_pass,
         .framebuffer = self.framebuffers[self.current_image_idx],
-        .renderArea = .{
+        .renderArea = opts.render_area orelse c.VkRect2D{
             .offset = .{ .x = 0, .y = 0 },
             .extent = self.swapchain_extent,
         },

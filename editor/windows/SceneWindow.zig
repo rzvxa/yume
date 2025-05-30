@@ -33,11 +33,14 @@ const default_cam_angle = Vec2.make(std.math.degreesToRadians(30), std.math.degr
 
 const Self = @This();
 
-camera: components.Camera = components.Camera.makePerspectiveCamera(.{
-    .fovy_rad = std.math.degreesToRadians(70.0),
-    .far = 200,
-    .near = 0.1,
-}),
+camera: components.Camera = .{
+    .opts = .{ .kind = .perspective, .data = .{ .perspective = .{
+        .fovy_rad = std.math.degreesToRadians(70.0),
+        .far = 200,
+        .near = 0.1,
+    } } },
+    .clear_color = [_]f32{ 0.16, 0.18, 0.22, 1.0 },
+},
 
 camera_pos: Vec3 = Vec3.scalar(0),
 target_pos: Vec3 = Vec3.scalar(0),
@@ -145,11 +148,12 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 const w = cr.z - cr.x;
                 const h = cr.w - cr.y;
 
-                me.app.engine.beginAdditiveRenderPass(me.cmd);
-                c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
+                const render_area = c.VkRect2D{
                     .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
                     .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
-                }});
+                };
+                me.app.engine.beginAdditiveRenderPass(me.cmd, .{ .render_area = render_area, .clear_color = me.state.camera.clear_color });
+                c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{render_area});
 
                 const vx = if (cr.x > 0) cr.x else cr.z - me.state.scene_view_size.x;
                 c.vkCmdSetViewport(me.cmd, 0, 1, &[_]c.VkViewport{.{
@@ -164,10 +168,12 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
                 _ = c.ecs_run(me.app.world.inner, me.state.render_system, me.app.delta, me);
 
                 const window_extent = me.app.windowExtent();
-                c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{.{
+                const full_render_area = c.VkRect2D{
                     .offset = .{ .x = 0, .y = 0 },
                     .extent = .{ .width = @intCast(window_extent.x), .height = @intCast(window_extent.y) },
-                }});
+                };
+                me.app.engine.beginAdditiveRenderPass(me.cmd, .{ .render_area = full_render_area });
+                c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{full_render_area});
             }
         }.f, &self.frame_userdata);
         c.ImDrawList_AddCallback(editor_image, c.ImDrawCallback_ResetRenderState, null);
@@ -288,9 +294,8 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) !void {
             if (clicked) {
                 self.active_mode = .local;
             }
-
-            c.ImGui_EndChildFrame();
         }
+        c.ImGui_EndChildFrame();
 
         gizmo.newFrame(editor_image, &self.camera.view, self.camera.projection, self.distance, .{
             .x = self.scene_window_rect.x,
