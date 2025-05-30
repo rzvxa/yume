@@ -9,16 +9,16 @@ const ecs = @import("yume").ecs;
 const components = ecs.components;
 
 const Vec3 = @import("yume").Vec3;
-const Engine = @import("yume").VulkanEngine;
+const GAL = @import("yume").GAL;
 const GameApp = @import("yume").GameApp;
 const AllocatedBuffer = @import("yume").AllocatedBuffer;
-const GPULightData = Engine.GPUSceneData.GPULightData;
+const GPULightData = GAL.GPUSceneData.GPULightData;
 
 const Editor = @import("../Editor.zig");
 
 const FrameData = struct {
     app: *GameApp,
-    cmd: GameApp.RenderCommand,
+    cmd: GAL.CommandBuffer,
     d: *Self,
     camera: ?*const components.Camera = null,
     camera_pos: Vec3 = Vec3.scalar(0),
@@ -79,7 +79,7 @@ pub fn deinit(self: *Self) void {
     self.camera_query.deinit();
 }
 
-pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
+pub fn draw(self: *Self, cmd: GAL.CommandBuffer, ctx: *GameApp) void {
     self.frame_userdata = FrameData{ .app = ctx, .cmd = cmd, .d = self };
     if (c.ImGui_Begin("Game", null, c.ImGuiWindowFlags_NoCollapse)) {
         self.is_game_window_focused = c.ImGui_IsWindowFocused(c.ImGuiFocusedFlags_None);
@@ -98,7 +98,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                     .offset = .{ .x = @intFromFloat(cr.x), .y = @intFromFloat(cr.y) },
                     .extent = .{ .width = @intFromFloat(w), .height = @intFromFloat(h) },
                 };
-                me.app.engine.beginAdditiveRenderPass(me.cmd, .{ .render_area = render_area, .clear_color = [_]f32{0} ** 4 });
+                me.app.renderer.beginAdditiveRenderPass(me.cmd, .{ .render_area = render_area, .clear_color = [_]f32{0} ** 4 });
                 c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{render_area});
 
                 const vx = if (cr.x > 0) cr.x else cr.z - me.d.game_view_size.x;
@@ -171,7 +171,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                         new_me.directional_light = directional_light;
                         new_me.point_lights = point_lights.items;
 
-                        me.app.engine.beginAdditiveRenderPass(me.cmd, .{ .render_area = render_area, .clear_color = camera.clear_color });
+                        me.app.renderer.beginAdditiveRenderPass(me.cmd, .{ .render_area = render_area, .clear_color = camera.clear_color });
                         _ = c.ecs_run(iter.inner.real_world, me.d.render_system, me.app.delta, &new_me);
                     }
                 }
@@ -181,7 +181,7 @@ pub fn draw(self: *Self, cmd: Engine.RenderCommand, ctx: *GameApp) void {
                     .offset = .{ .x = 0, .y = 0 },
                     .extent = .{ .width = @intCast(window_extent.x), .height = @intCast(window_extent.y) },
                 };
-                me.app.engine.beginAdditiveRenderPass(me.cmd, .{ .render_area = full_render_area });
+                me.app.renderer.beginAdditiveRenderPass(me.cmd, .{ .render_area = full_render_area });
                 c.vkCmdSetScissor(me.cmd, 0, 1, &[_]c.VkRect2D{full_render_area});
             }
         }.f, &self.frame_userdata);
@@ -208,17 +208,17 @@ fn renderSys(
     materials: []components.Material,
 ) void {
     const me: *FrameData = @ptrCast(@alignCast(it.param));
-    var point_lights = std.mem.zeroes([4]Engine.GPUSceneData.GPULightData);
+    var point_lights = std.mem.zeroes([4]GPULightData);
     std.debug.assert(me.point_lights.len < 4);
     @memcpy(point_lights[0..me.point_lights.len], me.point_lights);
-    me.app.engine.drawObjects(
+    me.app.renderer.drawObjects(
         me.cmd,
         .{
             .transforms = transforms,
             .meshes = meshes,
             .materials = materials,
-            .ubo_buf = me.app.engine.camera_and_scene_buffer,
-            .ubo_set = me.app.engine.camera_and_scene_set,
+            .ubo_buf = me.app.renderer.camera_and_scene_buffer,
+            .ubo_set = me.app.renderer.camera_and_scene_set,
             .cam = me.camera.?,
             .cam_pos = me.camera_pos,
             .directional_light = me.directional_light,

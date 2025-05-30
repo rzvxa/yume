@@ -2,8 +2,8 @@ const std = @import("std");
 const c = @import("clibs");
 
 const assets = @import("assets.zig");
-const Engine = @import("VulkanEngine.zig");
-const check_vk = @import("vulkan_init.zig").check_vk;
+const GAL = @import("GAL.zig");
+const check_vk = GAL.RenderApi.check_vk;
 const Urn = @import("Uuid.zig").Urn;
 
 const log = std.log.scoped(.textures);
@@ -11,11 +11,11 @@ const log = std.log.scoped(.textures);
 pub const Texture = struct {
     handle: assets.TextureHandle,
     image: assets.ImageHandle,
-    image_view: Engine.ImageView,
-    sampler: Engine.Sampler,
+    image_view: GAL.ImageView,
+    sampler: GAL.Sampler,
 };
 
-pub fn loadImage(engine: *Engine, buffer: []const u8, handle: assets.ImageHandle) !Engine.AllocatedImage {
+pub fn loadImage(renderer: *GAL.RenderApi, buffer: []const u8, handle: assets.ImageHandle) !GAL.AllocatedImage {
     var width: c_int = undefined;
     var height: c_int = undefined;
     var channels: c_int = undefined;
@@ -27,22 +27,29 @@ pub fn loadImage(engine: *Engine, buffer: []const u8, handle: assets.ImageHandle
     }
     defer c.stbi_image_free(pixels);
 
-    return loadImageFromPixels(engine, pixels, @intCast(width), @intCast(height), format, handle);
+    return loadImageFromPixels(renderer, pixels, @intCast(width), @intCast(height), format, handle);
 }
 
-pub fn loadImageFromPixels(engine: *Engine, pixels: [*]const u8, width: usize, height: usize, format: c.VkFormat, handle: assets.ImageHandle) !Engine.AllocatedImage {
+pub fn loadImageFromPixels(
+    renderer: *GAL.RenderApi,
+    pixels: [*]const u8,
+    width: usize,
+    height: usize,
+    format: c.VkFormat,
+    handle: assets.ImageHandle,
+) !GAL.AllocatedImage {
     const image_size = @as(c.VkDeviceSize, @intCast(width * height * 4));
 
-    const staging_buffer = engine.createBuffer(image_size, c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, c.VMA_MEMORY_USAGE_CPU_ONLY);
-    defer c.vmaDestroyBuffer(engine.vma_allocator, staging_buffer.buffer, staging_buffer.allocation);
+    const staging_buffer = renderer.createBuffer(image_size, c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, c.VMA_MEMORY_USAGE_CPU_ONLY);
+    defer c.vmaDestroyBuffer(renderer.vma_allocator, staging_buffer.buffer, staging_buffer.allocation);
 
     const pixels_slice = pixels[0..image_size];
 
     var data: ?*anyopaque = null;
-    try check_vk(c.vmaMapMemory(engine.vma_allocator, staging_buffer.allocation, &data));
+    try check_vk(c.vmaMapMemory(renderer.vma_allocator, staging_buffer.allocation, &data));
     @memcpy(@as([*]u8, @ptrCast(data orelse unreachable)), pixels_slice);
 
-    c.vmaUnmapMemory(engine.vma_allocator, staging_buffer.allocation);
+    c.vmaUnmapMemory(renderer.vma_allocator, staging_buffer.allocation);
 
     const extent = c.VkExtent3D{
         .width = @as(c_uint, @intCast(width)),
@@ -71,17 +78,17 @@ pub fn loadImageFromPixels(engine: *Engine, pixels: [*]const u8, width: usize, h
 
     var image: c.VkImage = undefined;
     var allocation: c.VmaAllocation = undefined;
-    try check_vk(c.vmaCreateImage(engine.vma_allocator, &img_info, &alloc_ci, &image, &allocation, null));
+    try check_vk(c.vmaCreateImage(renderer.vma_allocator, &img_info, &alloc_ci, &image, &allocation, null));
     if (allocation == null) {
         return error.failed_to_create_image;
     }
 
     // Tranfer CPU memory to GPU memory
     //
-    engine.immediateSubmit(struct {
+    renderer.immediateSubmit(struct {
         image: c.VkImage,
         extent: c.VkExtent3D,
-        staging_buffer: Engine.AllocatedBuffer,
+        staging_buffer: GAL.AllocatedBuffer,
 
         pub fn submit(self: @This(), cmd: c.VkCommandBuffer) void {
             const range = std.mem.zeroInit(c.VkImageSubresourceRange, .{

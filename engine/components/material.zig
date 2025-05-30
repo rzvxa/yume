@@ -4,7 +4,6 @@ const log = std.log.scoped(.material);
 
 const ecs = @import("../ecs.zig");
 const shading = @import("../shading.zig");
-const Engine = @import("../VulkanEngine.zig");
 const GameApp = @import("../GameApp.zig");
 const assets = @import("../assets.zig");
 const Assets = assets.Assets;

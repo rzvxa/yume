@@ -3,8 +3,7 @@ const c = @import("clibs");
 const std = @import("std");
 const log = std.log.scoped(.GameApp);
 
-const VulkanEngine = @import("VulkanEngine.zig");
-pub const RenderCommand = VulkanEngine.RenderCommand;
+const GAL = @import("GAL.zig");
 
 const utils = @import("utils.zig");
 const Uuid = @import("uuid.zig").Uuid;
@@ -32,7 +31,7 @@ window_title: []const u8,
 window: *c.SDL_Window = undefined,
 
 inputs: *inputs.InputContext,
-engine: VulkanEngine,
+renderer: GAL.RenderApi,
 
 components: std.StringHashMap(ecs.ComponentDef),
 
@@ -59,7 +58,7 @@ pub fn init(opts: struct {
 
     _ = c.SDL_ShowWindow(window);
 
-    const engine = VulkanEngine.init(opts.allocator, window);
+    const renderer = GAL.RenderApi.init(opts.allocator, window);
 
     const self = opts.allocator.create(Self) catch @panic("OOM");
 
@@ -71,13 +70,13 @@ pub fn init(opts: struct {
         .allocator = opts.allocator,
         .window = window,
         .inputs = inputs.init(window) catch @panic("Failed to initialize input manager"),
-        .engine = engine,
+        .renderer = renderer,
         .components = std.StringHashMap(ecs.ComponentDef).init(opts.allocator),
     };
 
     self.scene_root = self.world.create("root");
 
-    Assets.init(opts.allocator, &self.engine, opts.loaders);
+    Assets.init(opts.allocator, &self.renderer, opts.loaders);
 
     self.registerComponent(ecs.components.Uuid);
     self.registerComponent(ecs.components.Meta);
@@ -174,7 +173,7 @@ pub fn deinit(self: *Self) void {
     self.world.deinit();
     self.components.deinit();
     Assets.deinit();
-    self.engine.deinit();
+    self.renderer.deinit();
     self.allocator.destroy(self);
 }
 
@@ -267,8 +266,8 @@ pub fn isFocused(self: *const Self) bool {
 
 pub fn windowExtent(self: *const Self) Vec2U {
     return Vec2U.make(
-        self.engine.swapchain_extent.width,
-        self.engine.swapchain_extent.height,
+        self.renderer.swapchain_extent.width,
+        self.renderer.swapchain_extent.height,
     );
 }
 

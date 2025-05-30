@@ -5,8 +5,6 @@ const log = std.log.scoped(.Editor);
 
 const gizmo = @import("gizmo.zig");
 
-const check_vk = @import("yume").vki.check_vk;
-
 const Uuid = @import("yume").Uuid;
 const EditorDatabase = @import("EditorDatabase.zig");
 const Editors = @import("editors/editors.zig");
@@ -40,15 +38,9 @@ const Vec3 = @import("yume").math3d.Vec3;
 const Vec4 = @import("yume").math3d.Vec4;
 const Quat = @import("yume").math3d.Quat;
 const Mat4 = @import("yume").math3d.Mat4;
-const AllocatedBuffer = @import("yume").AllocatedBuffer;
-const FRAME_OVERLAP = @import("yume").FRAME_OVERLAP;
-const GPUCameraData = @import("yume").GPUCameraData;
-const GPUSceneData = @import("yume").GPUSceneData;
-const VmaImageDeleter = @import("yume").VmaImageDeleter;
-const VmaBufferDeleter = @import("yume").VmaBufferDeleter;
-const VulkanDeleter = @import("yume").VulkanDeleter;
 
-const Engine = @import("yume").VulkanEngine;
+const GAL = @import("yume").GAL;
+const check_vk = GAL.RenderApi.check_vk;
 
 const NewProjectModal = @import("NewProjectModal.zig");
 const OpenProjectModal = @import("OpenProjectModal.zig");
@@ -190,11 +182,10 @@ pub fn init(ctx: *GameApp) *Self {
         .scene_window = undefined,
         .callbacks_arena = std.heap.ArenaAllocator.init(ctx.allocator),
     };
-    singleton.scene_window = SceneWindow.init(ctx, @ptrCast(&Editors.onDrawGizmos), &singleton.editors);
+    singleton.scene_window = SceneWindow.init(ctx, @ptrCast(&Editors.onDrawGizmos), &singleton.editors) catch @panic("Failed to initialize scene window");
     singleton.bootstrapEditorPipeline(ctx.world);
-    singleton.initDescriptors(&ctx.engine);
 
-    initImGui(&ctx.engine) catch @panic("failed to init imgui");
+    initImGui(&ctx.renderer) catch @panic("failed to init imgui");
 
     singleton.project_explorer_window.setup() catch @panic("Failed to start project explorer indexing");
 
@@ -247,7 +238,7 @@ pub fn deinit(self: *Self) void {
     EditorDatabase.flush() catch log.err("Failed to flush the editor database\n", .{});
     EditorDatabase.deinit();
 
-    check_vk(c.vkDeviceWaitIdle(self.ctx.engine.device)) catch @panic("Failed to wait for device idle");
+    check_vk(c.vkDeviceWaitIdle(self.ctx.renderer.device)) catch @panic("Failed to wait for device idle");
     c.cImGui_ImplVulkan_Shutdown();
     {
         var iter = loaded_imgui_images.iterator();
@@ -337,7 +328,7 @@ pub fn sanitizeSelection(self: *Self, sel: *Selection) void {
 }
 
 pub fn draw(self: *Self) !void {
-    const cmd = self.ctx.engine.beginFrame();
+    const cmd = self.ctx.renderer.beginFrame();
 
     imutils.newFrame();
 
@@ -461,72 +452,12 @@ pub fn draw(self: *Self) !void {
     // UI
     c.cImGui_ImplVulkan_RenderDrawData(c.ImGui_GetDrawData(), cmd);
 
-    self.ctx.engine.beginPresentRenderPass(cmd);
+    self.ctx.renderer.beginPresentRenderPass(cmd);
 
-    self.ctx.engine.endFrame(cmd);
+    self.ctx.renderer.endFrame(cmd);
 }
 
-fn initDescriptors(self: *Self, engine: *Engine) void {
-    const camera_and_scene_buffer_size =
-        FRAME_OVERLAP * engine.padUniformBufferSize(@sizeOf(GPUCameraData)) +
-        FRAME_OVERLAP * engine.padUniformBufferSize(@sizeOf(GPUSceneData));
-    self.scene_window.editor_camera_and_scene_buffer = engine.createBuffer(
-        camera_and_scene_buffer_size,
-        c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        c.VMA_MEMORY_USAGE_CPU_TO_GPU,
-    );
-    engine.buffer_deletion_queue.append(VmaBufferDeleter{ .buffer = self.scene_window.editor_camera_and_scene_buffer }) catch @panic("Out of memory");
-
-    // Camera and scene descriptor set
-    const global_set_alloc_info = std.mem.zeroInit(c.VkDescriptorSetAllocateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool = engine.descriptor_pool,
-        .descriptorSetCount = 1,
-        .pSetLayouts = &engine.global_set_layout,
-    });
-
-    // Allocate a single set for multiple frame worth of camera and scene data
-    check_vk(c.vkAllocateDescriptorSets(engine.device, &global_set_alloc_info, &self.scene_window.editor_camera_and_scene_set)) catch @panic("Failed to allocate global descriptor set");
-
-    // editor Camera
-    const editor_camera_buffer_info = std.mem.zeroInit(c.VkDescriptorBufferInfo, .{
-        .buffer = self.scene_window.editor_camera_and_scene_buffer.buffer,
-        .range = @sizeOf(GPUCameraData),
-    });
-
-    const editor_camera_write = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
-        .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = self.scene_window.editor_camera_and_scene_set,
-        .dstBinding = 0,
-        .descriptorCount = 1,
-        .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-        .pBufferInfo = &editor_camera_buffer_info,
-    });
-
-    // editor Scene parameters
-    const editor_scene_parameters_buffer_info = std.mem.zeroInit(c.VkDescriptorBufferInfo, .{
-        .buffer = self.scene_window.editor_camera_and_scene_buffer.buffer,
-        .range = @sizeOf(GPUSceneData),
-    });
-
-    const editor_scene_parameters_write = std.mem.zeroInit(c.VkWriteDescriptorSet, .{
-        .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = self.scene_window.editor_camera_and_scene_set,
-        .dstBinding = 1,
-        .descriptorCount = 1,
-        .descriptorType = c.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-        .pBufferInfo = &editor_scene_parameters_buffer_info,
-    });
-
-    const editor_camera_and_scene_writes = [_]c.VkWriteDescriptorSet{
-        editor_camera_write,
-        editor_scene_parameters_write,
-    };
-
-    c.vkUpdateDescriptorSets(engine.device, @as(u32, @intCast(editor_camera_and_scene_writes.len)), &editor_camera_and_scene_writes[0], 0, null);
-}
-
-fn initImGui(engine: *Engine) !void {
+fn initImGui(renderer: *GAL.RenderApi) !void {
     const pool_sizes = [_]c.VkDescriptorPoolSize{
         .{
             .type = c.VK_DESCRIPTOR_TYPE_SAMPLER,
@@ -583,21 +514,21 @@ fn initImGui(engine: *Engine) !void {
     });
 
     var imgui_pool: c.VkDescriptorPool = undefined;
-    check_vk(c.vkCreateDescriptorPool(engine.device, &pool_ci, Engine.vk_alloc_cbs, &imgui_pool)) catch @panic("Failed to create imgui descriptor pool");
+    check_vk(c.vkCreateDescriptorPool(renderer.device, &pool_ci, GAL.RenderApi.vk_alloc_cbs, &imgui_pool)) catch @panic("Failed to create imgui descriptor pool");
 
     imutils.createContext();
-    _ = c.cImGui_ImplSDL3_InitForVulkan(engine.window);
+    _ = c.cImGui_ImplSDL3_InitForVulkan(renderer.window);
 
     var init_info = std.mem.zeroInit(c.ImGui_ImplVulkan_InitInfo, .{
-        .Instance = engine.instance,
-        .PhysicalDevice = engine.physical_device,
-        .Device = engine.device,
-        .RenderPass = engine.render_pass,
-        .QueueFamily = engine.graphics_queue_family,
-        .Queue = engine.graphics_queue,
+        .Instance = renderer.instance,
+        .PhysicalDevice = renderer.physical_device,
+        .Device = renderer.device,
+        .RenderPass = renderer.render_pass,
+        .QueueFamily = renderer.graphics_queue_family,
+        .Queue = renderer.graphics_queue,
         .DescriptorPool = imgui_pool,
-        .MinImageCount = FRAME_OVERLAP,
-        .ImageCount = FRAME_OVERLAP,
+        .MinImageCount = GAL.frame_overlap,
+        .ImageCount = GAL.frame_overlap,
         .MSAASamples = c.VK_SAMPLE_COUNT_1_BIT,
     });
 
@@ -610,18 +541,20 @@ fn initImGui(engine: *Engine) !void {
     _ = c.cImGui_ImplVulkan_Init(&init_info);
     _ = c.cImGui_ImplVulkan_CreateFontsTexture();
 
-    loaded_imgui_images = std.StringHashMap(LoadedImGuiImage).init(engine.allocator);
+    loaded_imgui_images = std.StringHashMap(LoadedImGuiImage).init(renderer.allocator);
 
     yume_logo_ds = try getImGuiTexture("editor://icons/yume.png");
 
-    engine.deletion_queue.append(VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool)) catch @panic("Out of memory");
+    renderer.deletion_queue.append(
+        GAL.RenderApi.VulkanDeleter.make(imgui_pool, c.vkDestroyDescriptorPool),
+    ) catch @panic("Out of memory");
 
     io.*.ConfigFlags |= c.ImGuiConfigFlags_DockingEnable;
     io.*.ConfigWindowsMoveFromTitleBarOnly = true;
 
-    const root_dir = try rootDir(engine.allocator);
-    defer engine.allocator.free(root_dir);
-    io.*.IniFilename = try std.fs.path.joinZ(engine.allocator, &[_][]const u8{ root_dir, "imgui.ini" });
+    const root_dir = try rootDir(renderer.allocator);
+    defer renderer.allocator.free(root_dir);
+    io.*.IniFilename = try std.fs.path.joinZ(renderer.allocator, &[_][]const u8{ root_dir, "imgui.ini" });
 
     styles.defaultStyles();
 }

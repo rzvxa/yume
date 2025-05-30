@@ -2,7 +2,7 @@ const c = @import("clibs");
 const std = @import("std");
 const log = std.log.scoped(.mesh);
 
-const AllocatedBuffer = @import("../VulkanEngine.zig").AllocatedBuffer;
+const AllocatedBuffer = @import("../GAL.zig").AllocatedBuffer;
 const m3d = @import("../math3d.zig");
 
 const ecs = @import("../ecs.zig");

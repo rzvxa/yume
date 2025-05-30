@@ -2,28 +2,29 @@ const c = @import("clibs");
 
 const std = @import("std");
 
-const utils = @import("utils.zig");
-const Uuid = @import("uuid.zig").Uuid;
+const utils = @import("../../utils.zig");
+const Uuid = @import("../../uuid.zig").Uuid;
 
-const vki = @import("vulkan_init.zig");
-const check_vk = vki.check_vk;
+const ecs = @import("../../ecs.zig");
+const assets = @import("../../assets.zig");
 
-const assets = @import("assets.zig");
-
-const math3d = @import("math3d.zig");
+const math3d = @import("../../math3d.zig");
 const Vec2 = math3d.Vec2;
 const Vec3 = math3d.Vec3;
 const Vec4 = math3d.Vec4;
 const Mat4 = math3d.Mat4;
 
-const components = @import("ecs.zig").components;
+const Shader = @import("../../shading.zig").Shader;
+
+const components = ecs.components;
 const Camera = components.Camera;
 const Mesh = components.Mesh;
 const Vertex = components.mesh.Vertex;
 const BoundingBox = components.mesh.BoundingBox;
 const Material = components.Material;
 
-const Shader = @import("shading.zig").Shader;
+const vki = @import("vulkan_init.zig");
+pub const check_vk = vki.check_vk;
 
 const log = std.log.scoped(.vulkan_engine);
 
@@ -34,7 +35,7 @@ pub const vk_alloc_cbs: ?*c.VkAllocationCallbacks = null;
 
 pub const Error = vki.VulkanError;
 
-pub const RenderCommand = c.VkCommandBuffer;
+pub const CommandBuffer = c.VkCommandBuffer;
 pub const ShaderModule = c.VkShaderModule;
 pub const Pipeline = c.VkPipeline;
 pub const PipelineLayout = c.VkPipelineLayout;
@@ -104,7 +105,7 @@ const UploadContext = struct {
     command_buffer: c.VkCommandBuffer = null,
 };
 
-pub const FRAME_OVERLAP = 2;
+pub const frame_overlap = 2;
 
 // Data
 //
@@ -148,7 +149,7 @@ depth_format: c.VkFormat = undefined,
 
 upload_context: UploadContext = .{},
 
-frames: [FRAME_OVERLAP]FrameData = .{FrameData{}} ** FRAME_OVERLAP,
+frames: [frame_overlap]FrameData = .{FrameData{}} ** frame_overlap,
 
 camera_and_scene_set: c.VkDescriptorSet = null,
 camera_and_scene_buffer: AllocatedBuffer = undefined,
@@ -908,8 +909,8 @@ fn initDescriptors(self: *Self) void {
     // Scene and camera (per-frame) in a single buffer
     // Only one buffer and we get multiple offset of of it
     const camera_and_scene_buffer_size =
-        FRAME_OVERLAP * self.padUniformBufferSize(@sizeOf(GPUCameraData)) +
-        FRAME_OVERLAP * self.padUniformBufferSize(@sizeOf(GPUSceneData));
+        frame_overlap * self.padUniformBufferSize(@sizeOf(GPUCameraData)) +
+        frame_overlap * self.padUniformBufferSize(@sizeOf(GPUSceneData));
 
     self.camera_and_scene_buffer = self.createBuffer(camera_and_scene_buffer_size, c.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, c.VMA_MEMORY_USAGE_CPU_TO_GPU);
     self.buffer_deletion_queue.append(VmaBufferDeleter{ .buffer = self.camera_and_scene_buffer }) catch @panic("Out of memory");
@@ -982,7 +983,7 @@ fn initDescriptors(self: *Self) void {
 
     self.deletion_queue.append(VulkanDeleter.make(self.texture_set_layout, c.vkDestroyDescriptorSetLayout)) catch @panic("Out of memory");
 
-    for (0..FRAME_OVERLAP) |i| {
+    for (0..frame_overlap) |i| {
         // ======================================================================
         // Allocate descriptor sets
         // ======================================================================
@@ -1165,10 +1166,10 @@ pub fn uploadMesh(self: *Self, mesh: *Mesh) void {
 }
 
 fn getCurrentFrame(self: *Self) FrameData {
-    return self.frames[@intCast(@mod(self.frame_number, FRAME_OVERLAP))];
+    return self.frames[@intCast(@mod(self.frame_number, frame_overlap))];
 }
 
-pub fn beginFrame(self: *Self) RenderCommand {
+pub fn beginFrame(self: *Self) CommandBuffer {
     // Wait until the GPU has finished rendering the last frame
     const timeout: u64 = 1_000_000_000; // 1 second in nanonesconds
     const frame = self.getCurrentFrame();
@@ -1245,7 +1246,7 @@ pub fn beginFrame(self: *Self) RenderCommand {
     return cmd;
 }
 
-pub fn endFrame(self: *Self, cmd: RenderCommand) void {
+pub fn endFrame(self: *Self, cmd: CommandBuffer) void {
     const frame = self.getCurrentFrame();
     c.vkCmdEndRenderPass(cmd);
     check_vk(c.vkEndCommandBuffer(cmd)) catch @panic("Failed to end command buffer");
@@ -1280,7 +1281,7 @@ pub fn endFrame(self: *Self, cmd: RenderCommand) void {
     self.object_buffer_offset = 0;
 }
 
-pub fn beginAdditiveRenderPass(self: *Self, cmd: RenderCommand, opts: struct { render_area: ?c.VkRect2D, clear_color: ?[4]f32 = null }) void {
+pub fn beginAdditiveRenderPass(self: *Self, cmd: CommandBuffer, opts: struct { render_area: ?c.VkRect2D, clear_color: ?[4]f32 = null }) void {
     const color_clear: c.VkClearValue = .{
         .color = .{ .float32 = opts.clear_color orelse [_]f32{0} ** 4 },
     };
@@ -1311,7 +1312,7 @@ pub fn beginAdditiveRenderPass(self: *Self, cmd: RenderCommand, opts: struct { r
     c.vkCmdBeginRenderPass(cmd, &render_pass_begin_info, c.VK_SUBPASS_CONTENTS_INLINE);
 }
 
-pub fn beginPresentRenderPass(self: *Self, cmd: RenderCommand) void {
+pub fn beginPresentRenderPass(self: *Self, cmd: CommandBuffer) void {
     const color_clear: c.VkClearValue = .{
         .color = .{ .float32 = [_]f32{ 0, 0, 0, 0 } },
     };
@@ -1359,10 +1360,10 @@ pub fn drawObjects(
 ) void {
     // ----- Camera & Scene Data Setup -----
     const curr_camera_data = GPUCameraData.fromCamera(opts.cam, opts.cam_pos);
-    const frame_index: usize = @intCast(@mod(self.frame_number, FRAME_OVERLAP));
+    const frame_index: usize = @intCast(@mod(self.frame_number, frame_overlap));
 
     const padded_camera_data_size = self.padUniformBufferSize(@sizeOf(GPUCameraData));
-    const scene_data_base_offset = padded_camera_data_size * FRAME_OVERLAP;
+    const scene_data_base_offset = padded_camera_data_size * frame_overlap;
     const padded_scene_data_size = self.padUniformBufferSize(@sizeOf(GPUSceneData));
 
     const camera_data_offset = padded_camera_data_size * frame_index;
