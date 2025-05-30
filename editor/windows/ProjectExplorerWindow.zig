@@ -940,6 +940,7 @@ pub fn drawTagsGrid(locked_tags: [][:0]const u8, tags: [][:0]const u8, max_width
             .clicked_index = &clicked_index,
         };
         try renderer.render(locked_tags, true);
+        clicked_index = null; // ignore any clicks on the locked tags
         try renderer.render(tags, false);
         c.ImGui_SetCursorPos(.{ .x = start_pos.x + max_x, .y = start_pos.y });
     }
