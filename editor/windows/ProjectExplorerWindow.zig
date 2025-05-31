@@ -1065,8 +1065,7 @@ pub fn filterByAssetType(ty: assets.AssetType) Filter {
             fn pred(f: *const Filter, it: *const Entry) bool {
                 const t: assets.AssetType = @enumFromInt(f.user_data.int);
                 return switch (it.kind) {
-                    .resource => |r| r.type.toAssetType() == t or
-                        (t == .texture and r.type.toAssetType() == .image),
+                    .resource => |r| r.type.toAssetType() == t,
                     else => false,
                 };
             }

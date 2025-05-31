@@ -746,7 +746,7 @@ pub fn getImGuiTexture(uri: []const u8) !c.ImTextureID {
         return entry.value_ptr.texture;
     }
 
-    const texture = try Assets.get((try Resources.getAssetHandle(uri, .{ .expect = .image })).toTexture());
+    const texture = try Assets.get((try Resources.getAssetHandle(uri, .{ .expect = .texture })));
     const cb_instance = try instance().callbacks_arena.allocator().create(CbType);
     errdefer instance().callbacks_arena.allocator().destroy(cb_instance);
     cb_instance.* = .{ .uri = uri };

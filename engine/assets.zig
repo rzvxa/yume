@@ -142,7 +142,7 @@ pub const Assets = struct {
                 error.AssetNotLoaded => {
                     _ = try switch (tag) {
                         .binary => @panic("TODO"),
-                        .image => loadImage(handle, null),
+                        // .image => loadImage(handle, null),
                         .texture => loadTexture(handle, null),
                         .mesh => loadMesh(handle, null),
                         .material => loadMaterial(handle, null),
@@ -158,7 +158,6 @@ pub const Assets = struct {
         loaded.ref_count += 1;
         return switch (tag) {
             .binary => loaded.data.binary,
-            .image => loaded.data.image,
             .texture => loaded.data.texture,
             .mesh => loaded.data.mesh,
             .material => loaded.data.material,
@@ -217,7 +216,6 @@ pub const Assets = struct {
         if (@TypeOf(handle) == AssetHandle) {
             return switch (handle.type) {
                 // .binary => reload(handle.unbox(.binary), opts),
-                .image => reload(handle.unbox(.image), opts),
                 .texture => reload(handle.unbox(.texture), opts),
                 .mesh => reload(handle.unbox(.mesh), opts),
                 .material => reload(handle.unbox(.material), opts),
@@ -269,7 +267,7 @@ pub const Assets = struct {
 
         try switch (Tag) {
             .binary => @compileError("TODO"),
-            .image => loadImage(handle, kv.value.data.image),
+            // .image => loadImage(handle, kv.value.data.image),
             .texture => loadTexture(handle, kv.value.data.texture),
             .mesh => loadMesh(handle, kv.value.data.mesh),
             .material => loadMaterial(handle, kv.value.data.material),
@@ -440,21 +438,11 @@ pub const Assets = struct {
         return &instance.orphan_assets_maps[(if (instance.orphan_assets_active_idx == 0) instance.orphan_assets_maps.len else instance.orphan_assets_active_idx) - 1];
     }
 
-    fn loadImage(handle: ImageHandle, ptr: ?*ImageHandle.BackingType) !void {
+    fn loadTexture(handle: TextureHandle, ptr: ?*TextureHandle.BackingType) !void {
         const bytes = try instance.loaders.resource(instance.allocator, handle.uuid, default_max_bytes);
         defer instance.allocator.free(bytes);
 
-        const image = ptr orelse try instance.allocator.create(Image);
-        errdefer if (ptr == null) instance.allocator.destroy(image);
-        image.* = try texs.loadImage(instance.renderer, bytes, handle);
-
-        const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .image = image });
-        try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
-        try instance.loaded_ids.put(handle.uuid, {});
-    }
-
-    fn loadTexture(handle: TextureHandle, ptr: ?*TextureHandle.BackingType) !void {
-        const image = try get(handle.toImage());
+        const image = try texs.loadImage(instance.renderer, bytes);
 
         const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -490,34 +478,26 @@ pub const Assets = struct {
         var texture = ptr orelse try instance.allocator.create(Texture);
         texture.* = Texture{
             .handle = handle,
-            .image = image.handle,
+            .image = image,
             .sampler = sampler,
             .image_view = null,
         };
 
-        check_vk(c.vkCreateImageView(instance.renderer.device, &image_view_ci, GAL.RenderApi.vk_alloc_cbs, &texture.image_view)) catch @panic("Failed to create image view");
+        check_vk(c.vkCreateImageView(
+            instance.renderer.device,
+            &image_view_ci,
+            GAL.RenderApi.vk_alloc_cbs,
+            &texture.image_view,
+        )) catch @panic("Failed to create image view");
 
         const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .texture = texture });
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
         try instance.loaded_ids.put(handle.uuid, {});
-
-        try dependency(
-            image.handle.toAssetHandle(),
-            texture.handle.toAssetHandle(),
-        );
     }
 
     fn loadColorTexture(color: RGBA8, handle: TextureHandle) !void {
-        const image = img: { // create the 1x1 image
-            const image_handle = handle.toImage();
-            const image = try instance.allocator.create(Image);
-            errdefer instance.allocator.destroy(image);
-            image.* = try texs.loadImageFromPixels(instance.renderer, &color, 1, 1, c.VK_FORMAT_R8G8B8A8_UNORM, image_handle);
-            const loaded = LoadedAsset.init(instance.allocator, image.handle.toAssetHandle(), .{ .image = image });
-            try instance.loaded_assets.put(image_handle.toAssetHandle(), loaded);
-            try instance.loaded_ids.put(image_handle.uuid, {});
-            break :img try get(image_handle);
-        };
+        // create the 1x1 image
+        const image = try texs.loadImageFromPixels(instance.renderer, &color, 1, 1, c.VK_FORMAT_R8G8B8A8_UNORM);
 
         const image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -553,7 +533,7 @@ pub const Assets = struct {
         var texture = try instance.allocator.create(Texture);
         texture.* = Texture{
             .handle = handle,
-            .image = image.handle,
+            .image = image,
             .sampler = sampler,
             .image_view = null,
         };
@@ -563,10 +543,6 @@ pub const Assets = struct {
         const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .texture = texture });
         try instance.loaded_assets.put(handle.toAssetHandle(), loaded);
         try instance.loaded_ids.put(handle.uuid, {});
-        try dependency(
-            image.handle.toAssetHandle(),
-            texture.handle.toAssetHandle(),
-        );
     }
 
     fn loadMesh(handle: MeshHandle, ptr: ?*MeshHandle.BackingType) !void {
@@ -825,7 +801,6 @@ pub const Assets = struct {
 
 pub const AssetType = enum(u8) {
     binary,
-    image,
     texture,
     mesh,
     material,
@@ -835,7 +810,6 @@ pub const AssetType = enum(u8) {
     pub fn BackingType(ty: AssetType) type {
         return switch (ty) {
             .binary => []u8,
-            .image => Image,
             .texture => Texture,
             .mesh => Mesh,
             .material => Material,
@@ -847,7 +821,6 @@ pub const AssetType = enum(u8) {
     pub fn HandleType(ty: AssetType) type {
         return switch (ty) {
             .binary => BinaryHandle,
-            .image => ImageHandle,
             .texture => TextureHandle,
             .mesh => MeshHandle,
             .material => MaterialHandle,
@@ -929,31 +902,7 @@ pub fn AssetHandleOf(comptime tag: AssetType, comptime opts: struct {
 }
 
 pub const BinaryHandle = AssetHandleOf(.binary, .{});
-pub const ImageHandle = AssetHandleOf(.image, .{
-    .extensions = struct {
-        pub inline fn fromTexture(tex: TextureHandle) ImageHandle {
-            return TextureHandle.toImage(tex);
-        }
-
-        pub inline fn toTexture(img: ImageHandle) TextureHandle {
-            return TextureHandle.fromImage(img);
-        }
-    },
-});
-pub const TextureHandle = AssetHandleOf(.texture, .{
-    .extensions = struct {
-        // perhaps use a mask over this? given the randomness of UUID this should work at least for now
-        pub const offset_with_image = 1;
-
-        pub inline fn fromImage(img: ImageHandle) TextureHandle {
-            return .{ .uuid = .{ .raw = img.uuid.raw + offset_with_image } };
-        }
-
-        pub inline fn toImage(tex: TextureHandle) ImageHandle {
-            return .{ .uuid = .{ .raw = tex.uuid.raw - offset_with_image } };
-        }
-    },
-});
+pub const TextureHandle = AssetHandleOf(.texture, .{});
 pub const MeshHandle = AssetHandleOf(.mesh, .{});
 pub const MaterialHandle = AssetHandleOf(.material, .{});
 pub const ShaderHandle = AssetHandleOf(.shader, .{});
@@ -978,7 +927,6 @@ const LoadedAsset = struct {
     const Self = @This();
     pub const Data = union(AssetType) {
         binary: *[]u8,
-        image: *Image,
         texture: *Texture,
         mesh: *Mesh,
         material: *Material,
@@ -988,11 +936,6 @@ const LoadedAsset = struct {
         pub fn clone(data: *const Data, allocator: std.mem.Allocator) !Data {
             switch (data.*) {
                 .binary => @panic("TODO"),
-                .image => |it| {
-                    const orphan_data = try allocator.create(Image);
-                    orphan_data.* = it.*;
-                    return .{ .image = orphan_data };
-                },
                 .texture => |it| {
                     const orphan_data = try allocator.create(Texture);
                     orphan_data.* = it.*;
@@ -1060,12 +1003,6 @@ const LoadedAsset = struct {
                 Assets.instance.allocator.free(it.*);
                 Assets.instance.allocator.destroy(it);
             },
-            .image => {
-                const it = self.data.image;
-                var img_del = GAL.RenderApi.VmaImageDeleter{ .image = it.* };
-                img_del.delete(Assets.instance.renderer);
-                Assets.instance.allocator.destroy(it);
-            },
             .texture => {
                 const it = self.data.texture;
                 var view_del = GAL.RenderApi.VulkanDeleter.make(
@@ -1076,6 +1013,9 @@ const LoadedAsset = struct {
 
                 var sampler_del = GAL.RenderApi.VulkanDeleter.make(it.sampler, c.vkDestroySampler);
                 sampler_del.delete(Assets.instance.renderer);
+
+                var img_del = GAL.RenderApi.VmaImageDeleter{ .image = it.image };
+                img_del.delete(Assets.instance.renderer);
 
                 Assets.instance.allocator.destroy(it);
             },

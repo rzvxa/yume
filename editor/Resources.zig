@@ -66,7 +66,7 @@ pub const Resource = struct {
                 .mat => .material,
                 .shader => .shader,
                 .obj, .fbx => .mesh,
-                .png => .image,
+                .png => .texture,
             };
         }
     };
