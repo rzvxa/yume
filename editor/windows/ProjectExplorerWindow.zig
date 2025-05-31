@@ -1030,8 +1030,22 @@ pub const Filter = struct {
 };
 
 pub fn filterByResourceType(ty: Resources.Resource.Type) Filter {
+    const tag_name: [:0]const u8 = switch (ty) {
+        .unknown => "Unknown File Type",
+        .project => "Project File",
+        .scene => ".scene",
+        .shader_stage => ".frag/.vert",
+        .shader => ".shader",
+        .mat => ".mat",
+        .obj => ".obj",
+        .fbx => ".fbx",
+        .png => ".png",
+    };
+
     return .{
-        .tag_name = .{ .constant = @tagName(ty) },
+        .tag_name = .{
+            .constant = tag_name,
+        },
         .predicate = &struct {
             fn pred(f: *const Filter, it: *const Entry) bool {
                 return switch (it.kind) {

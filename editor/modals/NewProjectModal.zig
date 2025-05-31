@@ -18,11 +18,11 @@ const Vec3 = @import("yume").Vec3;
 const Mat4 = @import("yume").Mat4;
 const utils = @import("yume").utils;
 
-const imutils = @import("imutils.zig");
-const Editor = @import("Editor.zig");
-const Project = @import("Project.zig");
-const Resources = @import("Resources.zig");
-const EditorDatabase = @import("EditorDatabase.zig");
+const imutils = @import("../imutils.zig");
+const Editor = @import("../Editor.zig");
+const Project = @import("../Project.zig");
+const Resources = @import("../Resources.zig");
+const EditorDatabase = @import("../EditorDatabase.zig");
 
 const Self = @This();
 
@@ -67,7 +67,7 @@ pub fn close(self: *Self) void {
     self.is_open = false;
 }
 
-pub fn show(self: *Self, ctx: *GameApp) !void {
+pub fn draw(self: *Self, ctx: *GameApp) !void {
     if (!self.is_open) return;
     c.ImGui_PushID("new-project-modal");
     defer c.ImGui_PopID();

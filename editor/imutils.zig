@@ -172,6 +172,17 @@ pub fn buttonCenteredOnLine(label: [*c]const u8, alignment: f32) bool {
     return c.ImGui_Button(label);
 }
 
+pub fn textAlignedHorizontal(text: [*c]const u8, alignment: f32) void {
+    const text_width = c.ImGui_CalcTextSize(text).x;
+    alignHorizontal(text_width, alignment);
+    c.ImGui_Text(text);
+}
+pub fn textLinkAlignedHorizontal(text: [*c]const u8, alignment: f32) bool {
+    const text_width = c.ImGui_CalcTextSize(text).x;
+    alignHorizontal(text_width, alignment);
+    return c.ImGui_TextLink(text);
+}
+
 pub fn collapsingHeaderWithCheckBox(label: [*c]const u8, checked: [*c]bool, flags: c.ImGuiTreeNodeFlags) bool {
     c.ImGui_PushID(label);
     defer c.ImGui_PopID();
