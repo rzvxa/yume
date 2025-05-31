@@ -117,6 +117,10 @@ pub fn build(b: *std.Build) !void {
     editor.linkLibCpp();
     editor.root_module.addImport("yume", yume);
 
+    editor.root_module.addAnonymousImport("THIRD-PARTY-LICENSE", .{
+        .root_source_file = b.path("THIRD-PARTY-LICENSE"),
+    });
+
     b.installArtifact(editor);
     if (target.result.os.tag == .windows) {
         b.installBinFile("vendor/sdl3/lib/SDL3.dll", "SDL3.dll");

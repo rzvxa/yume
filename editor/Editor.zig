@@ -42,9 +42,10 @@ const Mat4 = @import("yume").math3d.Mat4;
 const GAL = @import("yume").GAL;
 const check_vk = GAL.RenderApi.check_vk;
 
-const NewProjectModal = @import("NewProjectModal.zig");
-const OpenProjectModal = @import("OpenProjectModal.zig");
-const HelloModal = @import("HelloModal.zig");
+const NewProjectModal = @import("modals/NewProjectModal.zig");
+const OpenProjectModal = @import("modals/OpenProjectModal.zig");
+const HelloModal = @import("modals/HelloModal.zig");
+const AboutModal = @import("modals/AboutModal.zig");
 
 const styles = @import("styles.zig");
 
@@ -128,6 +129,7 @@ dockspace_flags: c.ImGuiDockNodeFlags = 0,
 editors: Editors,
 
 hello_modal: HelloModal,
+about_modal: AboutModal,
 new_project_modal: NewProjectModal,
 open_project_modal: OpenProjectModal,
 
@@ -171,6 +173,7 @@ pub fn init(ctx: *GameApp) !*Self {
         .ctx = ctx,
         .editors = Editors.init(ctx.allocator),
         .hello_modal = try HelloModal.init(),
+        .about_modal = try AboutModal.init(ctx.allocator),
         .new_project_modal = try NewProjectModal.init(ctx.allocator),
         .open_project_modal = try OpenProjectModal.init(ctx.allocator),
         .hierarchy_window = HierarchyWindow.init(ctx.allocator),
@@ -223,6 +226,7 @@ pub fn init(ctx: *GameApp) !*Self {
 pub fn deinit(self: *Self) void {
     self.editors.deinit();
     self.hello_modal.deinit();
+    self.about_modal.deinit();
     self.new_project_modal.deinit();
     self.open_project_modal.deinit();
     self.game_window.deinit();
@@ -389,7 +393,9 @@ pub fn draw(self: *Self) !void {
         if (c.ImGui_BeginMenu("Help")) {
             _ = c.ImGui_MenuItemBoolPtr("ImGui Demo Window", null, &self.imgui_demo_open, true);
             c.ImGui_Separator();
-            if (c.ImGui_MenuItem("About*")) {}
+            if (c.ImGui_MenuItem("About")) {
+                self.about_modal.open();
+            }
             c.ImGui_EndMenu();
         }
         c.ImGui_SetCursorPosX(
@@ -443,9 +449,10 @@ pub fn draw(self: *Self) !void {
     self.game_window.draw(cmd, self.ctx);
     try self.logs_windows.draw();
 
-    self.hello_modal.show();
-    try self.new_project_modal.show(self.ctx);
-    try self.open_project_modal.show(self.ctx);
+    self.hello_modal.draw();
+    try self.about_modal.draw();
+    try self.new_project_modal.draw(self.ctx);
+    try self.open_project_modal.draw(self.ctx);
 
     imutils.render();
 

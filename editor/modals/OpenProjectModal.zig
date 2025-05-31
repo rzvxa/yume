@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.OpenProjectModal);
 
+const utils = @import("yume").utils;
 const Uuid = @import("yume").Uuid;
 const Scene = @import("yume").scene_graph.Scene;
 
@@ -16,11 +17,10 @@ const MeshRenderer = @import("yume").MeshRenderer;
 const Vec3 = @import("yume").Vec3;
 const Mat4 = @import("yume").Mat4;
 
-const imutils = @import("imutils.zig");
-const Editor = @import("Editor.zig");
-const EditorDatabase = @import("EditorDatabase.zig");
-const Project = @import("Project.zig");
-const utils = @import("yume").utils;
+const imutils = @import("../imutils.zig");
+const Editor = @import("../Editor.zig");
+const EditorDatabase = @import("../EditorDatabase.zig");
+const Project = @import("../Project.zig");
 
 const Self = @This();
 
@@ -67,7 +67,7 @@ pub fn close(self: *Self) void {
     self.is_open = false;
 }
 
-pub fn show(self: *Self, ctx: *GameApp) !void {
+pub fn draw(self: *Self, ctx: *GameApp) !void {
     if (!self.is_open) return;
     c.ImGui_PushID("open-project-modal");
     defer c.ImGui_PopID();
