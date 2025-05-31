@@ -338,7 +338,7 @@ pub fn draw(self: *Self, cmd: GAL.CommandBuffer, ctx: *GameApp) !void {
                 }
 
                 if (ctx.world.get(selection, components.Mesh)) |mesh| {
-                    try gizmo.drawBoundingBoxCorners(mesh.bounds, world_transform.matrix);
+                    try gizmo.drawBoundingBoxCorners(mesh.ref.bounds, world_transform.matrix);
                 }
                 var selection_id_buf = std.mem.zeroes([19:0]u8);
                 c.ImGuizmo_PushID_Str((try std.fmt.bufPrintZ(&selection_id_buf, "{d}", .{selection})).ptr);
@@ -672,7 +672,7 @@ fn raycast(self: *Self, ray: Raycast, distance: f32, allocator: std.mem.Allocato
         const transforms_ptr = ecs.field(&iter, components.WorldTransform, 0).?;
         const meshes_ptr = ecs.field(&iter, components.Mesh, 1).?;
         for (iter.inner.entities, meshes_ptr, transforms_ptr) |entity, *mesh, transform| {
-            const bb = mesh.bounds;
+            const bb = mesh.ref.bounds;
 
             // transform the ray into the mesh's local space.
             const inv = transform.matrix.inverse() catch Mat4.IDENTITY;
