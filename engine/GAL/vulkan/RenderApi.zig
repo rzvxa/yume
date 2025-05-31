@@ -18,8 +18,9 @@ const Shader = @import("../../shading.zig").Shader;
 
 const components = ecs.components;
 const Camera = components.Camera;
-const Mesh = components.Mesh;
-const Vertex = components.mesh.Vertex;
+const meshes = @import("../../meshes.zig");
+const Mesh = meshes.Mesh;
+const Vertex = meshes.Vertex;
 const BoundingBox = components.mesh.BoundingBox;
 const Material = components.Material;
 
@@ -1434,11 +1435,11 @@ pub fn drawObjects(
 
         if (index == 0 or mesh != &opts.meshes[index - 1]) {
             const offset: c.VkDeviceSize = 0;
-            c.vkCmdBindVertexBuffers(cmd, 0, 1, &mesh.vertex_buffer.buffer, &offset);
+            c.vkCmdBindVertexBuffers(cmd, 0, 1, &mesh.ref.vertex_buffer.buffer, &offset);
         }
 
         // we add batch_offset to the instance index.
-        c.vkCmdDraw(cmd, @as(u32, @intCast(mesh.vertices_count)), 1, 0, @intCast(batch_offset + index));
+        c.vkCmdDraw(cmd, @as(u32, @intCast(mesh.ref.vertices_count)), 1, 0, @intCast(batch_offset + index));
     }
 }
 

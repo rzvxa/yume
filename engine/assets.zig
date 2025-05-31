@@ -11,12 +11,13 @@ const Texture = texs.Texture;
 
 const components = @import("ecs.zig").components;
 
-const Mesh = components.Mesh;
-const Vertex = components.mesh.Vertex;
-
 const shading = @import("shading.zig");
 const Shader = shading.Shader;
 const Material = shading.Material;
+
+const meshes = @import("meshes.zig");
+const Mesh = meshes.Mesh;
+const Vertex = meshes.Vertex;
 
 const GAL = @import("GAL.zig");
 const check_vk = GAL.RenderApi.check_vk;
@@ -222,7 +223,10 @@ pub const Assets = struct {
                 .material => reload(handle.unbox(.material), opts),
                 .shader => reload(handle.unbox(.shader), opts),
                 // .scene => reload(handle.unbox(.scene), opts),
-                else => @panic("TODO"),
+                else => {
+                    // TODO
+                    log.err("TODO: Unimplemented skip reloading binary handle {}", .{handle});
+                },
             };
         }
 
@@ -570,7 +574,7 @@ pub const Assets = struct {
         defer instance.allocator.free(bytes);
 
         const mesh = ptr orelse try instance.allocator.create(Mesh);
-        mesh.* = components.mesh.load_from_obj(instance.allocator, handle, bytes);
+        mesh.* = meshes.load_from_obj(instance.allocator, handle, bytes);
         instance.renderer.uploadMesh(mesh);
 
         const loaded = LoadedAsset.init(instance.allocator, handle.toAssetHandle(), .{ .mesh = mesh });

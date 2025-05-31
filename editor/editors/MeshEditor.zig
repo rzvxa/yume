@@ -40,18 +40,18 @@ fn deinit(ptr: *anyopaque) void {
 
 fn edit(_: *anyopaque, entity: ecs.Entity, _: ecs.Entity, ctx: *GameApp) void {
     var mesh = ctx.world.getMut(entity, ecs.components.Mesh).?;
-    const result = imutils.assetHandleInput("Mesh", mesh.handle.toAssetHandle()) catch |err| blk: {
+    const result = imutils.assetHandleInput("Mesh", mesh.ref.handle.toAssetHandle()) catch |err| blk: {
         std.log.err("Failed to display asset handle editor on the Mesh component, {}", .{err});
         break :blk null;
     };
     if (result) |new_handle| {
         new_handle_op: {
             const new_mesh = Assets.get(new_handle.unbox(.mesh)) catch break :new_handle_op;
-            Assets.release(mesh.handle) catch {
+            Assets.release(mesh.ref) catch {
                 Assets.release(new_mesh) catch {};
                 break :new_handle_op;
             };
-            mesh.* = new_mesh.*;
+            mesh.ref = new_mesh;
         }
     }
 }

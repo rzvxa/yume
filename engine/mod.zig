@@ -15,6 +15,7 @@ pub const RenderApi = GAL.RenderApi;
 pub const textures = @import("textures.zig");
 
 pub const shading = @import("shading.zig");
+pub const meshes = @import("meshes.zig");
 
 pub const assets = @import("assets.zig");
 pub const Assets = assets.Assets;

@@ -10,7 +10,7 @@ const Vec4 = yume.Vec4;
 const Mat4 = yume.Mat4;
 const Rect = yume.Rect;
 
-const BoundingBox = @import("yume").ecs.components.mesh.BoundingBox;
+const BoundingBox = @import("yume").meshes.BoundingBox;
 
 pub const ManipulationMode = enum(c_uint) {
     local = c.IMGUIZMO_LOCAL,

@@ -1155,7 +1155,12 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                 res_entry.value.deinit(true);
                 self.allocator.free(res_entry.key);
             },
-            .modify => {},
+            .modify => {
+                const res = (try findResourceNodeByUri(&uri)) orelse break :dir_ev;
+                if (res.node != .directory) {
+                    break :dir_ev;
+                }
+            },
         }
 
         return;
@@ -1225,7 +1230,34 @@ fn onWatchEvent(self: *Self, event: Watch.Event) !void {
                 }
             }
         },
-        .modify => |s| log.debug("tag: {s} {s}", .{ @tagName(event), s }),
+        .modify => |p| {
+            const path = utils.normalizePathSep(p);
+            const baseext = utils.baseExtensionSplit(path);
+            if (std.mem.eql(u8, baseext.ext, yume_meta_extension_name)) { // modifying a meta file
+                const uri = try std.fmt.allocPrint(self.allocator, "project://{s}", .{baseext.base});
+                defer self.allocator.free(uri);
+                if (resourceExistsByUri(uri)) {
+                    const res_id = try getResourceId(uri);
+                    try syncMeta(res_id, .disk);
+                } else if (try utils.pathExists(baseext.base)) {
+                    // if resource path exists we attempt to register it
+                    _ = try registerFromMeta(.{ .path = baseext.base, .update_uuid_if_exists = true });
+                } else {
+                    // orphan meta files aren't allowed
+                    log.err("Seen a meta file \"{s}\" without the actual resource, removing the meta file.", .{path});
+                    try std.fs.cwd().deleteFile(path);
+                }
+            } else { // modifying a resource
+                const uri = try std.fmt.allocPrint(self.allocator, "project://{s}", .{path});
+                defer self.allocator.free(uri);
+                if (resourceExistsByUri(uri)) {
+                    const res_id = try getResourceId(uri);
+                    const ty = try getResourceType(res_id);
+                    const handle = assets.AssetHandle{ .uuid = res_id, .type = ty.toAssetType() };
+                    try assets.Assets.reload(handle, .{});
+                }
+            }
+        },
     }
 }
 
