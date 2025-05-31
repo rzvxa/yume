@@ -6,7 +6,6 @@ const utils = @import("../../utils.zig");
 const Uuid = @import("../../uuid.zig").Uuid;
 
 const ecs = @import("../../ecs.zig");
-const assets = @import("../../assets.zig");
 
 const math3d = @import("../../math3d.zig");
 const Vec2 = math3d.Vec2;
@@ -54,7 +53,6 @@ pub const AllocatedBuffer = extern struct {
 };
 
 pub const AllocatedImage = extern struct {
-    handle: assets.ImageHandle,
     image: Image,
     allocation: GPUAllocation,
 };

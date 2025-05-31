@@ -10,12 +10,12 @@ const log = std.log.scoped(.textures);
 
 pub const Texture = struct {
     handle: assets.TextureHandle,
-    image: assets.ImageHandle,
+    image: GAL.AllocatedImage,
     image_view: GAL.ImageView,
     sampler: GAL.Sampler,
 };
 
-pub fn loadImage(renderer: *GAL.RenderApi, buffer: []const u8, handle: assets.ImageHandle) !GAL.AllocatedImage {
+pub fn loadImage(renderer: *GAL.RenderApi, buffer: []const u8) !GAL.AllocatedImage {
     var width: c_int = undefined;
     var height: c_int = undefined;
     var channels: c_int = undefined;
@@ -27,7 +27,7 @@ pub fn loadImage(renderer: *GAL.RenderApi, buffer: []const u8, handle: assets.Im
     }
     defer c.stbi_image_free(pixels);
 
-    return loadImageFromPixels(renderer, pixels, @intCast(width), @intCast(height), format, handle);
+    return loadImageFromPixels(renderer, pixels, @intCast(width), @intCast(height), format);
 }
 
 pub fn loadImageFromPixels(
@@ -36,7 +36,6 @@ pub fn loadImageFromPixels(
     width: usize,
     height: usize,
     format: c.VkFormat,
-    handle: assets.ImageHandle,
 ) !GAL.AllocatedImage {
     const image_size = @as(c.VkDeviceSize, @intCast(width * height * 4));
 
@@ -149,9 +148,5 @@ pub fn loadImageFromPixels(
         .staging_buffer = staging_buffer,
     });
 
-    return .{
-        .handle = handle,
-        .image = image,
-        .allocation = allocation,
-    };
+    return .{ .image = image, .allocation = allocation };
 }

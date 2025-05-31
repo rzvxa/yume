@@ -77,7 +77,7 @@ pub const Material = struct {
                 switch (kind) {
                     .texture => switch (rd) {
                         .uuid => |uuid| {
-                            const texture_handle = (assets.ImageHandle{ .uuid = uuid }).toTexture();
+                            const texture_handle = (assets.TextureHandle{ .uuid = uuid });
                             const tex = try Assets.get(texture_handle);
                             return tex;
                         },
