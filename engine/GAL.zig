@@ -10,13 +10,21 @@ pub const Pipeline = RenderApi.Pipeline;
 pub const PipelineLayout = RenderApi.PipelineLayout;
 pub const DescriptorSet = RenderApi.DescriptorSet;
 
+pub const AllocationOptions = RenderApi.AllocationOptions;
+
 pub const Image = RenderApi.Image;
 pub const ImageView = RenderApi.ImageView;
+pub const ImageTiling = RenderApi.ImageTiling;
+pub const ImageUsageFlags = RenderApi.ImageUsageFlags;
+pub const MemoryUsage = RenderApi.MemoryUsage;
+pub const ImageCreateFlags = RenderApi.ImageUsageFlags;
+pub const SampleCount = RenderApi.SampleCount;
 pub const Sampler = RenderApi.Sampler;
+pub const Format = RenderApi.Format;
 
 pub const GPUAllocation = RenderApi.GPUAllocation;
 pub const AllocatedBuffer = RenderApi.AllocatedBuffer;
-pub const AllocatedImage = RenderApi.AllocatedImage;
+pub const AllocatedImage_ = RenderApi.AllocatedImage_;
 
 pub const GPUSceneData = RenderApi.GPUSceneData;
 pub const GPUCameraData = RenderApi.GPUCameraData;

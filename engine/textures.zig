@@ -10,12 +10,64 @@ const log = std.log.scoped(.textures);
 
 pub const Texture = struct {
     handle: assets.TextureHandle,
-    image: GAL.AllocatedImage,
+    image: GAL.AllocatedImage_,
     image_view: GAL.ImageView,
     sampler: GAL.Sampler,
 };
 
-pub fn loadImage(renderer: *GAL.RenderApi, buffer: []const u8) !GAL.AllocatedImage {
+pub fn createImage(renderer: *GAL.RenderApi, opts: struct {
+    width: u32,
+    height: u32,
+    format: GAL.Format,
+    mip_count: u32,
+    layer_count: u32,
+    tiling: GAL.ImageTiling,
+    image_usage: GAL.ImageUsageFlags,
+    flags: GAL.ImageCreateFlags = 0,
+    sample_count: GAL.SampleCount,
+    allocation_options: GAL.AllocationOptions = .{},
+}) !GAL.AllocatedImage_ {
+    const extent = c.VkExtent3D{
+        .width = @as(c_uint, @intCast(opts.width)),
+        .height = @as(c_uint, @intCast(opts.height)),
+        .depth = 1,
+    };
+
+    const img_info = std.mem.zeroInit(
+        c.VkImageCreateInfo,
+        .{
+            .sType = c.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .imageType = c.VK_IMAGE_TYPE_2D,
+            .flags = opts.flags,
+            .format = opts.format,
+            .extent = extent,
+            .mipLevels = opts.mip_count,
+            .arrayLayers = opts.layer_count,
+            .samples = opts.sample_count,
+            .tiling = opts.tiling,
+            .usage = opts.image_usage,
+        },
+    );
+
+    var image: c.VkImage = undefined;
+    var allocation: c.VmaAllocation = undefined;
+    try check_vk(c.vmaCreateImage(renderer.vma_allocator, &img_info, &opts.allocation_options, &image, &allocation, null));
+    if (allocation == null) {
+        return error.failed_to_create_image;
+    }
+
+    return .{
+        .image = image,
+        .allocation = allocation,
+        .format = opts.format,
+        .width = opts.width,
+        .height = opts.height,
+        .mip_count = opts.mip_count,
+        .layer_count = opts.layer_count,
+    };
+}
+
+pub fn loadImage(renderer: *GAL.RenderApi, buffer: []const u8) !GAL.AllocatedImage_ {
     var width: c_int = undefined;
     var height: c_int = undefined;
     var channels: c_int = undefined;
@@ -33,11 +85,16 @@ pub fn loadImage(renderer: *GAL.RenderApi, buffer: []const u8) !GAL.AllocatedIma
 pub fn loadImageFromPixels(
     renderer: *GAL.RenderApi,
     pixels: [*]const u8,
-    width: usize,
-    height: usize,
+    width: u32,
+    height: u32,
     format: c.VkFormat,
-) !GAL.AllocatedImage {
+) !GAL.AllocatedImage_ {
     const image_size = @as(c.VkDeviceSize, @intCast(width * height * 4));
+    const extent = c.VkExtent3D{
+        .width = @as(c_uint, @intCast(width)),
+        .height = @as(c_uint, @intCast(height)),
+        .depth = 1,
+    };
 
     const staging_buffer = renderer.createBuffer(image_size, c.VK_BUFFER_USAGE_TRANSFER_SRC_BIT, c.VMA_MEMORY_USAGE_CPU_ONLY);
     defer c.vmaDestroyBuffer(renderer.vma_allocator, staging_buffer.buffer, staging_buffer.allocation);
@@ -50,37 +107,17 @@ pub fn loadImageFromPixels(
 
     c.vmaUnmapMemory(renderer.vma_allocator, staging_buffer.allocation);
 
-    const extent = c.VkExtent3D{
-        .width = @as(c_uint, @intCast(width)),
-        .height = @as(c_uint, @intCast(height)),
-        .depth = 1,
-    };
-
-    const img_info = std.mem.zeroInit(
-        c.VkImageCreateInfo,
-        .{
-            .sType = c.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-            .imageType = c.VK_IMAGE_TYPE_2D,
-            .format = format,
-            .extent = extent,
-            .mipLevels = 1,
-            .arrayLayers = 1,
-            .samples = c.VK_SAMPLE_COUNT_1_BIT,
-            .tiling = c.VK_IMAGE_TILING_OPTIMAL,
-            .usage = c.VK_IMAGE_USAGE_TRANSFER_DST_BIT | c.VK_IMAGE_USAGE_SAMPLED_BIT,
-        },
-    );
-
-    const alloc_ci = std.mem.zeroInit(c.VmaAllocationCreateInfo, .{
-        .usage = c.VMA_MEMORY_USAGE_GPU_ONLY,
+    const image = try createImage(renderer, .{
+        .width = width,
+        .height = height,
+        .format = format,
+        .mip_count = 1,
+        .layer_count = 1,
+        .tiling = c.VK_IMAGE_TILING_OPTIMAL,
+        .image_usage = c.VK_IMAGE_USAGE_TRANSFER_DST_BIT | c.VK_IMAGE_USAGE_SAMPLED_BIT,
+        .sample_count = c.VK_SAMPLE_COUNT_1_BIT,
+        .allocation_options = .{ .usage = c.VMA_MEMORY_USAGE_GPU_ONLY },
     });
-
-    var image: c.VkImage = undefined;
-    var allocation: c.VmaAllocation = undefined;
-    try check_vk(c.vmaCreateImage(renderer.vma_allocator, &img_info, &alloc_ci, &image, &allocation, null));
-    if (allocation == null) {
-        return error.failed_to_create_image;
-    }
 
     // Tranfer CPU memory to GPU memory
     //
@@ -143,10 +180,10 @@ pub fn loadImageFromPixels(
             c.vkCmdPipelineBarrier(cmd, c.VK_PIPELINE_STAGE_TRANSFER_BIT, c.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, null, 0, null, 1, &barrier_to_shader_read);
         }
     }{
-        .image = image,
+        .image = image.image,
         .extent = extent,
         .staging_buffer = staging_buffer,
     });
 
-    return .{ .image = image, .allocation = allocation };
+    return image;
 }

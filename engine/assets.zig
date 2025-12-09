@@ -27,7 +27,6 @@ const Scene = @import("scene.zig").Scene;
 const log = std.log.scoped(.assets);
 
 const default_max_bytes = 30_000_000;
-const Image = GAL.AllocatedImage;
 
 pub const RGBA8 = [4]u8;
 
@@ -142,7 +141,6 @@ pub const Assets = struct {
                 error.AssetNotLoaded => {
                     _ = try switch (tag) {
                         .binary => @panic("TODO"),
-                        // .image => loadImage(handle, null),
                         .texture => loadTexture(handle, null),
                         .mesh => loadMesh(handle, null),
                         .material => loadMaterial(handle, null),

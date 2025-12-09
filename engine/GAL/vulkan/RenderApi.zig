@@ -16,12 +16,12 @@ const Mat4 = math3d.Mat4;
 const Shader = @import("../../shading.zig").Shader;
 
 const components = ecs.components;
-const Camera = components.Camera;
+
 const meshes = @import("../../meshes.zig");
 const Mesh = meshes.Mesh;
 const Vertex = meshes.Vertex;
-const BoundingBox = components.mesh.BoundingBox;
-const Material = components.Material;
+
+const texs = @import("../../textures.zig");
 
 const vki = @import("vulkan_init.zig");
 pub const check_vk = vki.check_vk;
@@ -35,6 +35,8 @@ pub const vk_alloc_cbs: ?*c.VkAllocationCallbacks = null;
 
 pub const Error = vki.VulkanError;
 
+pub const AllocationOptions = c.VmaAllocationCreateInfo;
+
 pub const CommandBuffer = c.VkCommandBuffer;
 pub const ShaderModule = c.VkShaderModule;
 pub const Pipeline = c.VkPipeline;
@@ -43,7 +45,13 @@ pub const DescriptorSet = c.VkDescriptorSet;
 
 pub const Image = c.VkImage;
 pub const ImageView = c.VkImageView;
+pub const ImageTiling = c.VkImageTiling;
+pub const ImageCreateFlags = c.VkImageUsageFlags;
+pub const ImageUsageFlags = c.VkImageUsageFlags;
+pub const MemoryUsage = c.VmaMemoryUsage;
+pub const SampleCount = c.VkSampleCountFlagBits;
 pub const Sampler = c.VkSampler;
+pub const Format = c.VkFormat;
 
 pub const GPUAllocation = c.VmaAllocation;
 
@@ -52,9 +60,16 @@ pub const AllocatedBuffer = extern struct {
     allocation: GPUAllocation,
 };
 
-pub const AllocatedImage = extern struct {
+pub const AllocatedImage_ = extern struct {
     image: Image,
     allocation: GPUAllocation,
+
+    format: Format,
+
+    width: u32,
+    height: u32,
+    mip_count: u32,
+    layer_count: u32,
 };
 
 const FrameData = extern struct {
@@ -72,7 +87,7 @@ pub const GPUCameraData = extern struct {
     view_proj: Mat4,
     pos: Vec3,
 
-    fn fromCamera(cam: *const Camera, pos: Vec3) GPUCameraData {
+    fn fromCamera(cam: *const components.Camera, pos: Vec3) GPUCameraData {
         return GPUCameraData{
             .view_proj = cam.view_projection,
             .pos = pos,
@@ -143,8 +158,7 @@ present_render_pass: c.VkRenderPass = null,
 framebuffers: []c.VkFramebuffer = undefined,
 
 depth_image_view: c.VkImageView = null,
-depth_image: AllocatedImage = undefined,
-depth_format: c.VkFormat = undefined,
+depth_image: AllocatedImage_ = undefined,
 
 upload_context: UploadContext = .{},
 
@@ -212,7 +226,7 @@ pub const VmaBufferDeleter = struct {
 };
 
 pub const VmaImageDeleter = struct {
-    image: AllocatedImage,
+    image: AllocatedImage_,
 
     pub fn delete(self: *VmaImageDeleter, engine: *Self) void {
         c.vmaDestroyImage(engine.vma_allocator, self.image.image, self.image.allocation);
@@ -359,41 +373,35 @@ fn deinitSwapchain(self: *Self) void {
 
 fn initDepthImage(self: *Self) void {
     // Create depth image to associate with the swapchain
-    const extent = c.VkExtent3D{
+    const extent_ = c.VkExtent3D{
         .width = self.swapchain_extent.width,
         .height = self.swapchain_extent.height,
         .depth = 1,
     };
 
-    // Hard-coded 32-bit float depth format
-    self.depth_format = c.VK_FORMAT_D32_SFLOAT;
+    self.depth_image = texs.createImage(self, .{
+        .width = extent_.width,
+        .height = extent_.height,
 
-    const depth_image_ci = std.mem.zeroInit(c.VkImageCreateInfo, .{
-        .sType = c.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = c.VK_IMAGE_TYPE_2D,
-        .format = self.depth_format,
-        .extent = extent,
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = c.VK_SAMPLE_COUNT_1_BIT,
+        // Hard-coded 32-bit float depth format
+        .format = c.VK_FORMAT_D32_SFLOAT,
+        .mip_count = 1,
+        .layer_count = 1,
         .tiling = c.VK_IMAGE_TILING_OPTIMAL,
-        .usage = c.VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-        .sharingMode = c.VK_SHARING_MODE_EXCLUSIVE,
-        .initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED,
-    });
+        .image_usage = c.VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        .allocation_options = .{
+            .usage = c.VMA_MEMORY_USAGE_GPU_ONLY,
+            .requiredFlags = c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        },
 
-    const depth_image_ai = std.mem.zeroInit(c.VmaAllocationCreateInfo, .{
-        .usage = c.VMA_MEMORY_USAGE_GPU_ONLY,
-        .requiredFlags = c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-    });
-
-    check_vk(c.vmaCreateImage(self.vma_allocator, &depth_image_ci, &depth_image_ai, &self.depth_image.image, &self.depth_image.allocation, null)) catch @panic("Failed to create depth image");
+        .sample_count = c.VK_SAMPLE_COUNT_1_BIT,
+    }) catch @panic("Failed to create depth image");
 
     const depth_image_view_ci = std.mem.zeroInit(c.VkImageViewCreateInfo, .{
         .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = self.depth_image.image,
         .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
-        .format = self.depth_format,
+        .format = self.depth_image.format,
         .subresourceRange = .{
             .aspectMask = c.VK_IMAGE_ASPECT_DEPTH_BIT,
             .baseMipLevel = 0,
@@ -493,7 +501,7 @@ fn initDefaultRenderpass(self: *Self) void {
 
     // Depth attachment
     const depth_attachment = std.mem.zeroInit(c.VkAttachmentDescription, .{
-        .format = self.depth_format,
+        .format = self.depth_image.format,
         .samples = c.VK_SAMPLE_COUNT_1_BIT,
         .loadOp = c.VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
@@ -577,7 +585,7 @@ fn initDefaultRenderpass(self: *Self) void {
 
     // Depth attachment
     const no_clear_depth_attachment = std.mem.zeroInit(c.VkAttachmentDescription, .{
-        .format = self.depth_format,
+        .format = self.depth_image.format,
         .samples = c.VK_SAMPLE_COUNT_1_BIT,
         .loadOp = c.VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
@@ -637,7 +645,7 @@ fn initDefaultRenderpass(self: *Self) void {
 
     // Depth attachment
     const present_depth_attachment = std.mem.zeroInit(c.VkAttachmentDescription, .{
-        .format = self.depth_format,
+        .format = self.depth_image.format,
         .samples = c.VK_SAMPLE_COUNT_1_BIT,
         .loadOp = c.VK_ATTACHMENT_LOAD_OP_LOAD,
         .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
@@ -1351,7 +1359,7 @@ pub fn drawObjects(
         materials: []components.Material,
         ubo_buf: AllocatedBuffer,
         ubo_set: c.VkDescriptorSet,
-        cam: *const Camera,
+        cam: *const components.Camera,
         cam_pos: Vec3,
         point_lights: [4]GPUSceneData.GPULightData,
         directional_light: GPUSceneData.GPULightData = std.mem.zeroes(GPUSceneData.GPULightData),
